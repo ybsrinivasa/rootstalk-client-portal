@@ -9,6 +9,7 @@ const NAV = [
   { href: '/advisory', label: 'CCA — Advisory', icon: '🌿' },
   { href: '/cha', label: 'CHA — Crop Health', icon: '🔬' },
   { href: '/field-manager', label: 'Field Manager', icon: '🌾' },
+  { href: '/farm-pundits', label: 'FarmPundits', icon: '🎓' },
   { href: '/alerts', label: 'Alerts', icon: '🔔' },
   { href: '/setup', label: 'Setup', icon: '⚙' },
   { href: '/users', label: 'Users', icon: '👥' },
