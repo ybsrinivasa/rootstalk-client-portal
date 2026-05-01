@@ -8,7 +8,11 @@ interface Package {
   id: string; name: string; crop_cosh_id: string
   package_type: 'ANNUAL' | 'PERENNIAL'
   status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
-  duration_days: number; version: number; description: string | null; created_at: string
+  duration_days: number; version: number; description: string | null
+  parent_global_id: string | null; created_at: string
+}
+interface GlobalPackage {
+  id: string; name: string; crop_cosh_id: string; package_type: string; duration_days: number; status: string
 }
 
 const STATUS_COLOUR = {
@@ -28,6 +32,13 @@ export default function AdvisoryPage() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
+  // Global library import
+  const [showImport, setShowImport] = useState(false)
+  const [globalPackages, setGlobalPackages] = useState<GlobalPackage[]>([])
+  const [loadingGlobal, setLoadingGlobal] = useState(false)
+  const [forking, setForking] = useState<string | null>(null)
+  const [forkError, setForkError] = useState('')
+
   const [form, setForm] = useState({
     name: '', crop_cosh_id: '', package_type: 'ANNUAL',
     duration_days: '120', description: '',
@@ -41,6 +52,27 @@ export default function AdvisoryPage() {
   }
 
   useEffect(() => { load() }, [clientId])
+
+  const openImport = async () => {
+    setShowImport(true); setLoadingGlobal(true); setForkError('')
+    try {
+      const { data } = await api.get<GlobalPackage[]>('/advisory/global/packages')
+      setGlobalPackages(data.filter(g => g.status === 'ACTIVE'))
+    } catch { setGlobalPackages([]) }
+    finally { setLoadingGlobal(false) }
+  }
+
+  const doFork = async (globalId: string) => {
+    setForking(globalId); setForkError('')
+    try {
+      await api.post(`/client/${clientId}/packages/${globalId}/fork`)
+      setShowImport(false)
+      load()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setForkError(msg || 'Failed to import.')
+    } finally { setForking(null) }
+  }
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
@@ -65,11 +97,18 @@ export default function AdvisoryPage() {
           <h1 className="text-2xl font-bold text-slate-900">Advisory Packages</h1>
           <p className="text-slate-500 text-sm mt-0.5">Build Package of Practices for each crop</p>
         </div>
-        <button onClick={() => setShowCreate(true)}
-          className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-          style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-          + New Package
-        </button>
+        <div className="flex gap-2">
+          <button onClick={openImport}
+            className="border text-sm font-medium px-4 py-2.5 rounded-xl"
+            style={{ borderColor: colour, color: colour }}>
+            ↓ Import from Library
+          </button>
+          <button onClick={() => setShowCreate(true)}
+            className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
+            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+            + New Package
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -177,6 +216,56 @@ export default function AdvisoryPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Import from Global Library Modal */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Import from Global CCA Library</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Get a copy of RootsTalk's standard Package of Practices templates. You'll own an independent copy to customise for your territory.
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {loadingGlobal ? (
+                <p className="text-center text-slate-400 text-sm py-8">Loading global library…</p>
+              ) : globalPackages.length === 0 ? (
+                <p className="text-center text-slate-400 text-sm py-8">No active global packages yet. Ask your RootsTalk admin to publish some templates.</p>
+              ) : (
+                globalPackages.map(g => {
+                  const alreadyForked = packages.some(p => p.parent_global_id === g.id)
+                  return (
+                    <div key={g.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm text-slate-800">{g.name}</p>
+                        <p className="text-xs text-slate-400 font-mono">{g.crop_cosh_id} · {g.package_type.toLowerCase()} · {g.duration_days}d</p>
+                      </div>
+                      {alreadyForked ? (
+                        <span className="text-xs text-green-600 font-medium">✓ Imported</span>
+                      ) : (
+                        <button onClick={() => doFork(g.id)}
+                          disabled={forking === g.id}
+                          className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+                          style={{ background: colour }}>
+                          {forking === g.id ? 'Importing…' : 'Import'}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+              {forkError && <p className="text-sm text-red-600 px-2">{forkError}</p>}
+            </div>
+            <div className="p-4 border-t border-slate-100">
+              <button onClick={() => setShowImport(false)}
+                className="w-full border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
