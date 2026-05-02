@@ -12,6 +12,7 @@ const NAV = [
   { href: '/farm-pundits', label: 'FarmPundits', icon: '🎓' },
   { href: '/alerts', label: 'Alerts', icon: '🔔' },
   { href: '/seed', label: 'Seed Varieties', icon: '🌱' },
+  { href: '/custom-parameters', label: 'Custom Parameters', icon: '❓' },
   { href: '/qr', label: 'QR Codes', icon: '🔳' },
   { href: '/setup', label: 'Setup', icon: '⚙' },
   { href: '/users', label: 'Users', icon: '👥' },
