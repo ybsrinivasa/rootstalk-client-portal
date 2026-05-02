@@ -4,12 +4,12 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { getToken, getUser, getClient, logout, CPClient, CPUser } from '@/lib/auth'
 
-const NAV = [
+const ALL_NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: '⬡' },
   { href: '/advisory', label: 'CCA — Advisory', icon: '🌿' },
   { href: '/cha', label: 'CHA — Crop Health', icon: '🔬' },
   { href: '/field-manager', label: 'Field Manager', icon: '🌾' },
-  { href: '/farm-pundits', label: 'FarmPundits', icon: '🎓' },
+  { href: '/farm-pundits', label: 'FarmPundits', icon: '🎓', caOnly: true },
   { href: '/alerts', label: 'Alerts', icon: '🔔' },
   { href: '/seed', label: 'Seed Varieties', icon: '🌱' },
   { href: '/custom-parameters', label: 'Custom Parameters', icon: '❓' },
@@ -18,6 +18,24 @@ const NAV = [
   { href: '/users', label: 'Users', icon: '👥' },
   { href: '/subscription', label: 'Subscription', icon: '💳' },
 ]
+
+type NavItem = typeof ALL_NAV[number]
+
+const ROLE_NAV: Record<string, string[]> = {
+  SUBJECT_EXPERT: ['/dashboard', '/advisory', '/cha', '/custom-parameters', '/alerts'],
+  FIELD_MANAGER: ['/dashboard', '/field-manager', '/alerts'],
+  CLIENT_RM: ['/dashboard', '/alerts', '/field-manager'],
+  SEED_DATA_MANAGER: ['/dashboard', '/seed'],
+  PRODUCT_MANAGER: ['/dashboard', '/qr'],
+  REPORT_USER: ['/dashboard'],
+}
+
+function getNavForRole(role: string | null): NavItem[] {
+  if (!role || role === 'CA') return ALL_NAV
+  const allowed = ROLE_NAV[role]
+  if (!allowed) return ALL_NAV
+  return ALL_NAV.filter(item => allowed.includes(item.href))
+}
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -33,6 +51,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
   }, [router])
 
   const colour = client?.primary_colour || '#1A5C2A'
+  const nav = getNavForRole(user?.portal_role ?? null)
 
   return (
     <div className="flex h-full">
@@ -57,7 +76,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {NAV.map(item => {
+          {nav.map(item => {
             const active = pathname.startsWith(item.href)
             return (
               <Link key={item.href} href={item.href}

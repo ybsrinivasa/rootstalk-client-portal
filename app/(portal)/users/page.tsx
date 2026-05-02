@@ -14,6 +14,7 @@ const ROLES = [
   { value: 'SEED_DATA_MANAGER', label: 'Seed Data Manager' },
   { value: 'REPORT_USER', label: 'Report User' },
   { value: 'PRODUCT_MANAGER', label: 'Product Manager' },
+  { value: 'CLIENT_RM', label: 'Relationship Manager' },
 ]
 
 const ROLE_COLOUR: Record<string, string> = {
@@ -35,6 +36,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
   const [inviting, setInviting] = useState(false)
+  const [toggling, setToggling] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -65,6 +67,19 @@ export default function UsersPage() {
     } finally { setInviting(false) }
   }
 
+  async function toggleStatus(userId: string, currentStatus: string) {
+    if (!clientId) return
+    const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
+    setToggling(userId)
+    try {
+      await api.put(`/client/${clientId}/users/${userId}/status`, { status: newStatus })
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, status: newStatus } : u))
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Failed to update user status.')
+    } finally { setToggling(null) }
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -82,6 +97,9 @@ export default function UsersPage() {
       {success && (
         <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">{success}</div>
       )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{error}</div>
+      )}
 
       {loading ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
@@ -98,6 +116,7 @@ export default function UsersPage() {
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Role</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden sm:table-cell">Added</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -119,6 +138,20 @@ export default function UsersPage() {
                   </td>
                   <td className="px-5 py-3.5 text-slate-400 text-xs hidden sm:table-cell">
                     {new Date(user.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    {user.role !== 'CA' && (
+                      <button
+                        onClick={() => toggleStatus(user.id, user.status)}
+                        disabled={toggling === user.id}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 transition-colors ${
+                          user.status === 'ACTIVE'
+                            ? 'border border-red-100 text-red-500 hover:bg-red-50'
+                            : 'border border-green-200 text-green-600 hover:bg-green-50'
+                        }`}>
+                        {toggling === user.id ? '…' : user.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -20,6 +20,7 @@ export default function SetupPage() {
   const [crops, setCrops] = useState<ClientCrop[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   const [locForm, setLocForm] = useState({ state_cosh_id: '', district_cosh_id: '' })
@@ -49,6 +50,18 @@ export default function SetupPage() {
     } finally { setSaving(false) }
   }
 
+  async function deleteLocation(id: string) {
+    if (!clientId || !confirm('Remove this location?')) return
+    setDeleting(id)
+    try {
+      await api.delete(`/client/${clientId}/locations/${id}`)
+      setLocations(prev => prev.filter(l => l.id !== id))
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Failed to remove location.')
+    } finally { setDeleting(null) }
+  }
+
   async function addCrop(e: FormEvent) {
     e.preventDefault()
     setSaving(true); setError('')
@@ -60,6 +73,18 @@ export default function SetupPage() {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setError(msg || 'Failed to add crop.')
     } finally { setSaving(false) }
+  }
+
+  async function deleteCrop(id: string) {
+    if (!clientId || !confirm('Remove this crop?')) return
+    setDeleting(id)
+    try {
+      await api.delete(`/client/${clientId}/crops/${id}`)
+      setCrops(prev => prev.filter(c => c.id !== id))
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Failed to remove crop.')
+    } finally { setDeleting(null) }
   }
 
   return (
@@ -115,6 +140,7 @@ export default function SetupPage() {
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">State ID</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">District ID</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                    <th className="px-5 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -126,6 +152,14 @@ export default function SetupPage() {
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${loc.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                           {loc.status}
                         </span>
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          onClick={() => deleteLocation(loc.id)}
+                          disabled={deleting === loc.id}
+                          className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40">
+                          {deleting === loc.id ? '…' : 'Remove'}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -165,6 +199,7 @@ export default function SetupPage() {
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Crop Cosh ID</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Added</th>
+                    <th className="px-5 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -177,6 +212,14 @@ export default function SetupPage() {
                         </span>
                       </td>
                       <td className="px-5 py-3 text-slate-400 text-xs">{new Date(crop.added_at).toLocaleDateString()}</td>
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          onClick={() => deleteCrop(crop.id)}
+                          disabled={deleting === crop.id}
+                          className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40">
+                          {deleting === crop.id ? '…' : 'Remove'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -3,6 +3,7 @@ import api from './api'
 export interface CPUser {
   id: string; email: string; name: string | null
   roles: { role_type: string; status: string }[]
+  portal_role: string | null
 }
 
 export interface CPClient {

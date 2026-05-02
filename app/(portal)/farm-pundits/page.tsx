@@ -44,6 +44,7 @@ export default function FarmPunditsPage() {
     expertise_domain: '',
     language_code: '',
     education: '',
+    phone: '',
   })
 
   const [inviteRole, setInviteRole] = useState<Record<string, string>>({})
@@ -192,7 +193,7 @@ export default function FarmPunditsPage() {
           {/* Search filters */}
           <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
             <h3 className="font-semibold text-slate-800 mb-4">Search FarmPundits</h3>
-            <form onSubmit={handleSearch} className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleSearch} className="grid grid-cols-2 gap-3 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1.5">State (Cosh ID)</label>
                 <input value={searchForm.state_cosh_id}
@@ -235,6 +236,13 @@ export default function FarmPunditsPage() {
                   <option value="MASTERS">Masters</option>
                   <option value="BACCALAUREATE">Baccalaureate</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1.5">Phone Number</label>
+                <input value={searchForm.phone}
+                  onChange={e => setSearchForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="Search by phone"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none font-mono" />
               </div>
               <div className="col-span-2">
                 <button type="submit" disabled={searching}

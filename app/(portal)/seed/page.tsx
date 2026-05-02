@@ -1,17 +1,36 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { getClient } from '@/lib/auth'
+import { useState, useEffect, useRef } from 'react'
+import { getClient, getToken } from '@/lib/auth'
 import api from '@/lib/api'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+
+interface DusCharacter {
+  part: string
+  sub_part: string
+  character: string
+  descriptor: string
+}
 
 interface Variety {
   id: string; name: string; crop_cosh_id: string; variety_type: string
   description_points: string[]; photos: string[]; status: string
+  dus_characters: DusCharacter[]
   pop_assignments: { package_id: string; status: string }[]
 }
 
 interface Package { id: string; name: string; crop_cosh_id?: string }
 
 const VARIETY_TYPES = ['SEED', 'SEEDLING', 'CUTTING', 'SAPLING']
+
+const emptyForm = () => ({
+  name: '',
+  crop_cosh_id: '',
+  variety_type: 'SEED',
+  description_points: [''],
+  photos: [] as string[],
+  dus_characters: [] as DusCharacter[],
+})
 
 export default function SeedManagementPage() {
   const client = getClient()
@@ -21,12 +40,11 @@ export default function SeedManagementPage() {
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [selected, setSelected] = useState<Variety | null>(null)
-  const [form, setForm] = useState({
-    name: '', crop_cosh_id: '', variety_type: 'SEED',
-    description_points: [''], photos: [] as string[],
-  })
+  const [form, setForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [cropFilter, setCropFilter] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = async () => {
     if (!clientId) return
@@ -49,6 +67,50 @@ export default function SeedManagementPage() {
     setForm(f => ({ ...f, description_points: f.description_points.filter((_, idx) => idx !== i) }))
   }
 
+  function addDusRow() {
+    setForm(f => ({ ...f, dus_characters: [...f.dus_characters, { part: '', sub_part: '', character: '', descriptor: '' }] }))
+  }
+  function setDusField(i: number, field: keyof DusCharacter, v: string) {
+    setForm(f => {
+      const chars = [...f.dus_characters]
+      chars[i] = { ...chars[i], [field]: v }
+      return { ...f, dus_characters: chars }
+    })
+  }
+  function removeDusRow(i: number) {
+    setForm(f => ({ ...f, dus_characters: f.dus_characters.filter((_, idx) => idx !== i) }))
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !clientId) return
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('folder', 'varieties')
+      const token = getToken()
+      const res = await fetch(`${API_URL}/media/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      })
+      if (!res.ok) throw new Error('Upload failed')
+      const data = await res.json()
+      const url: string = data.url || data.file_url || data.path
+      setForm(f => ({ ...f, photos: [...f.photos, url] }))
+    } catch {
+      alert('Image upload failed. Please try again.')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  function removePhoto(i: number) {
+    setForm(f => ({ ...f, photos: f.photos.filter((_, idx) => idx !== i) }))
+  }
+
   async function save() {
     if (!clientId || !form.name.trim() || !form.crop_cosh_id.trim()) return
     setSaving(true)
@@ -56,6 +118,7 @@ export default function SeedManagementPage() {
       const payload = {
         ...form,
         description_points: form.description_points.filter(p => p.trim()),
+        dus_characters: form.dus_characters.filter(d => d.part.trim() && d.character.trim()),
       }
       if (selected) {
         await api.put(`/client/${clientId}/varieties/${selected.id}`, payload)
@@ -64,7 +127,7 @@ export default function SeedManagementPage() {
       }
       setShowCreate(false)
       setSelected(null)
-      setForm({ name: '', crop_cosh_id: '', variety_type: 'SEED', description_points: [''], photos: [] })
+      setForm(emptyForm())
       load()
     } finally { setSaving(false) }
   }
@@ -94,6 +157,7 @@ export default function SeedManagementPage() {
       variety_type: v.variety_type,
       description_points: v.description_points.length > 0 ? v.description_points : [''],
       photos: v.photos,
+      dus_characters: v.dus_characters || [],
     })
     setShowCreate(true)
   }
@@ -112,7 +176,7 @@ export default function SeedManagementPage() {
             <h1 className="text-2xl font-bold text-gray-900">Seed Varieties</h1>
             <p className="text-sm text-gray-500 mt-1">Manage seed and seedling varieties available to farmers</p>
           </div>
-          <button onClick={() => { setShowCreate(true); setSelected(null); setForm({ name: '', crop_cosh_id: '', variety_type: 'SEED', description_points: [''], photos: [] }) }}
+          <button onClick={() => { setShowCreate(true); setSelected(null); setForm(emptyForm()) }}
             className="px-4 py-2 bg-green-700 text-white text-sm font-semibold rounded-lg hover:bg-green-800">
             + Add Variety
           </button>
@@ -149,11 +213,10 @@ export default function SeedManagementPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filtered.map(v => (
               <div key={v.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                {v.photos.length > 0 && (
+                {v.photos.length > 0 ? (
                   <img src={v.photos[0]} alt={v.name}
                     className="w-full h-36 object-cover" />
-                )}
-                {v.photos.length === 0 && (
+                ) : (
                   <div className="w-full h-24 bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center">
                     <span className="text-4xl">🌾</span>
                   </div>
@@ -180,6 +243,10 @@ export default function SeedManagementPage() {
                         <li className="text-xs text-gray-400">+{v.description_points.length - 2} more</li>
                       )}
                     </ul>
+                  )}
+
+                  {v.dus_characters && v.dus_characters.length > 0 && (
+                    <p className="text-xs text-blue-500 mt-1.5">{v.dus_characters.length} DUS character{v.dus_characters.length !== 1 ? 's' : ''}</p>
                   )}
 
                   {/* PoP assignments */}
@@ -223,12 +290,13 @@ export default function SeedManagementPage() {
       {/* Create/Edit modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="p-6">
               <h2 className="text-lg font-bold text-gray-900 mb-4">
                 {selected ? 'Edit Variety' : 'Add New Variety'}
               </h2>
-              <div className="space-y-4">
+              <div className="space-y-5">
+                {/* Basic info */}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Variety Name *</label>
                   <input value={form.name}
@@ -253,6 +321,7 @@ export default function SeedManagementPage() {
                   </div>
                 </div>
 
+                {/* Description Points */}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Description Points</label>
                   <div className="space-y-2">
@@ -273,6 +342,98 @@ export default function SeedManagementPage() {
                       + Add point
                     </button>
                   </div>
+                </div>
+
+                {/* DUS Characters */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-medium text-gray-600">DUS Characters</label>
+                    <button onClick={addDusRow}
+                      className="text-xs text-blue-600 font-medium hover:underline">
+                      + Add Row
+                    </button>
+                  </div>
+                  {form.dus_characters.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">No DUS characters added. Click "+ Add Row" to begin.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs border border-gray-100 rounded-lg overflow-hidden">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="text-left px-2 py-2 font-medium text-gray-500">Part *</th>
+                            <th className="text-left px-2 py-2 font-medium text-gray-500">Sub-Part</th>
+                            <th className="text-left px-2 py-2 font-medium text-gray-500">Character *</th>
+                            <th className="text-left px-2 py-2 font-medium text-gray-500">Descriptor</th>
+                            <th className="px-2 py-2"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {form.dus_characters.map((d, i) => (
+                            <tr key={i}>
+                              <td className="px-1 py-1">
+                                <input value={d.part} onChange={e => setDusField(i, 'part', e.target.value)}
+                                  placeholder="e.g. Leaf"
+                                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+                              </td>
+                              <td className="px-1 py-1">
+                                <input value={d.sub_part} onChange={e => setDusField(i, 'sub_part', e.target.value)}
+                                  placeholder="Optional"
+                                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+                              </td>
+                              <td className="px-1 py-1">
+                                <input value={d.character} onChange={e => setDusField(i, 'character', e.target.value)}
+                                  placeholder="e.g. Colour"
+                                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+                              </td>
+                              <td className="px-1 py-1">
+                                <input value={d.descriptor} onChange={e => setDusField(i, 'descriptor', e.target.value)}
+                                  placeholder="e.g. Green"
+                                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+                              </td>
+                              <td className="px-1 py-1">
+                                <button onClick={() => removeDusRow(i)}
+                                  className="text-gray-300 hover:text-red-400 px-1">✕</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Image Upload */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">Photos</label>
+                  {form.photos.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {form.photos.map((url, i) => (
+                        <div key={i} className="relative group">
+                          <img src={url} alt={`Photo ${i + 1}`}
+                            className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+                          <button
+                            onClick={() => removePhoto(i)}
+                            className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="hidden"
+                    id="photo-upload"
+                  />
+                  <label
+                    htmlFor="photo-upload"
+                    className={`inline-flex items-center gap-2 text-xs font-medium text-gray-600 border border-dashed border-gray-300 rounded-lg px-4 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                    {uploading ? 'Uploading…' : '+ Upload Photo'}
+                  </label>
+                  <p className="text-xs text-gray-400 mt-1">First photo will appear as thumbnail in the variety list.</p>
                 </div>
 
                 <div className="flex gap-3 pt-2">
