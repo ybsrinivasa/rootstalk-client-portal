@@ -107,6 +107,9 @@ export default function LoginPage() {
 
   const colour = branding?.primary_colour || '#1A5C2A'
 
+  const inputCls = 'w-full border border-stone-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 bg-white text-stone-900 placeholder-stone-400'
+  const inputFocus = `focus:ring-[${colour}]`
+
   return (
     <div className="min-h-screen flex">
       {/* Left brand panel */}
@@ -129,26 +132,44 @@ export default function LoginPage() {
       </div>
 
       {/* Right form */}
-      <div className="flex-1 flex items-center justify-center bg-white px-8 py-12">
+      <div className="flex-1 flex items-center justify-center bg-[#F7F5F0] px-8 py-12">
         <div className="w-full max-w-sm">
+
+          {/* RootsTalk wordmark (company step only) */}
+          {step === 'company' && (
+            <div className="mb-8 flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-stone-200">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="3" fill="#57534e"/>
+                  <circle cx="4" cy="6" r="2" fill="#57534e" opacity="0.6"/>
+                  <circle cx="20" cy="18" r="2" fill="#57534e" opacity="0.6"/>
+                  <line x1="12" y1="12" x2="4" y2="6" stroke="#57534e" strokeWidth="1.5"/>
+                  <line x1="12" y1="12" x2="20" y2="18" stroke="#57534e" strokeWidth="1.5"/>
+                </svg>
+              </div>
+              <span className="text-stone-400 text-xs font-medium tracking-widest uppercase">RootsTalk</span>
+            </div>
+          )}
 
           {step === 'company' && (
             <>
               <div className="mb-8">
-                <h2 className="text-2xl font-bold text-slate-900">Sign in</h2>
-                <p className="text-slate-500 text-sm mt-1">Enter your company short name to continue</p>
+                <h2 className="text-2xl font-bold text-stone-900">Sign in</h2>
+                <p className="text-stone-500 text-sm mt-1">Enter your company identifier to continue</p>
               </div>
               <form onSubmit={lookupCompany} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Company short name</label>
+                  <label className="block text-sm font-medium text-stone-700 mb-1.5">Company short name</label>
                   <input value={shortName} onChange={e => setShortName(e.target.value)}
                     required autoFocus placeholder="e.g. acmeagri"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                  <p className="text-xs text-slate-400 mt-1">This is the unique name assigned by RootsTalk admin</p>
+                    className={inputCls} />
+                  <p className="text-xs text-stone-400 mt-1.5">Your unique name as assigned by RootsTalk</p>
                 </div>
-                {error && <p className="text-sm text-red-600">{error}</p>}
+                {error && (
+                  <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>
+                )}
                 <button type="submit" disabled={loading || !shortName}
-                  className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
+                  className="w-full text-white font-semibold py-3 rounded-lg text-sm tracking-wide disabled:opacity-50"
                   style={{ background: 'linear-gradient(135deg, #065f46, #059669)' }}>
                   {loading ? 'Looking up…' : 'Continue'}
                 </button>
@@ -160,63 +181,66 @@ export default function LoginPage() {
             <>
               <div className="mb-6">
                 <button onClick={() => { setStep('company'); setBranding(null); setError('') }}
-                  className="text-slate-400 text-sm hover:text-slate-600 mb-3">← Change company</button>
-                <h2 className="text-2xl font-bold text-slate-900">Welcome back</h2>
-                <p className="text-slate-500 text-sm mt-1">{branding?.display_name} · Client Portal</p>
+                  className="text-stone-400 text-sm hover:text-stone-600 mb-3">← Change company</button>
+                <h2 className="text-2xl font-bold text-stone-900">Welcome back</h2>
+                <p className="text-stone-500 text-sm mt-1">{branding?.display_name} · Client Portal</p>
               </div>
               {/* Method toggle */}
-              <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
+              <div className="flex bg-stone-200 rounded-lg p-1 mb-5">
                 <button onClick={() => { setLoginMethod('password'); setError('') }}
-                  className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${loginMethod === 'password' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${loginMethod === 'password' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}>
                   Password
                 </button>
                 <button onClick={() => { setLoginMethod('otp'); setError(''); setOtpSent(false) }}
-                  className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${loginMethod === 'otp' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${loginMethod === 'otp' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}>
                   Email OTP
                 </button>
               </div>
+
               {loginMethod === 'password' && (
                 <form onSubmit={handleLogin} className="space-y-4">
                   <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                     required autoFocus placeholder="you@company.com"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    className={inputCls} />
                   <input type="password" value={password} onChange={e => setPassword(e.target.value)}
                     required placeholder="Password"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                  {error && <p className="text-sm text-red-600">{error}</p>}
+                    className={inputCls} />
+                  {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
-                    className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
+                    className="w-full text-white font-semibold py-3 rounded-lg text-sm tracking-wide disabled:opacity-50"
                     style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                     {loading ? 'Signing in…' : 'Sign in'}
                   </button>
                   <button type="button" onClick={() => { setForgotMode(true); setForgotStage('email') }}
-                    className="w-full text-sm text-green-700 hover:underline text-center">
+                    className="w-full text-sm text-stone-500 hover:text-stone-700 text-center">
                     Forgot password?
                   </button>
                 </form>
               )}
+
               {loginMethod === 'otp' && !otpSent && (
                 <form onSubmit={sendOtp} className="space-y-4">
                   <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                     required autoFocus placeholder="your registered email"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                  {error && <p className="text-sm text-red-600">{error}</p>}
+                    className={inputCls} />
+                  {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
-                    className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
+                    className="w-full text-white font-semibold py-3 rounded-lg text-sm tracking-wide disabled:opacity-50"
                     style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                     {loading ? 'Sending…' : 'Send OTP to my email'}
                   </button>
                 </form>
               )}
+
               {loginMethod === 'otp' && otpSent && (
                 <form onSubmit={verifyOtp} className="space-y-4">
-                  {info && <p className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2">{info}</p>}
+                  {info && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2">{info}</div>}
                   <input value={otpCode} onChange={e => setOtpCode(e.target.value)}
                     required autoFocus maxLength={6} placeholder="6-digit code"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-green-500" />
-                  {error && <p className="text-sm text-red-600">{error}</p>}
+                    className={`${inputCls} font-mono text-center tracking-widest`} />
+                  {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
-                    className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
+                    className="w-full text-white font-semibold py-3 rounded-lg text-sm tracking-wide disabled:opacity-50"
                     style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                     {loading ? 'Verifying…' : 'Verify & Sign in'}
                   </button>
@@ -228,50 +252,57 @@ export default function LoginPage() {
           {step === 'credentials' && forgotMode && (
             <div>
               <button onClick={() => { setForgotMode(false); setForgotStage('email'); setError(''); setInfo('') }}
-                className="text-slate-400 text-sm hover:text-slate-600 mb-5 block">← Back to sign in</button>
-              <h2 className="text-xl font-bold text-slate-900 mb-1">Reset password</h2>
+                className="text-stone-400 text-sm hover:text-stone-600 mb-5 block">← Back to sign in</button>
+              <h2 className="text-xl font-bold text-stone-900 mb-1">Reset password</h2>
+
               {forgotStage === 'email' && (
                 <form onSubmit={sendForgotOtp} className="space-y-4 mt-4">
                   <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                     required autoFocus placeholder="your registered email"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                  {error && <p className="text-sm text-red-600">{error}</p>}
+                    className={inputCls} />
+                  {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
-                    className="w-full text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+                    className="w-full text-white py-3 rounded-lg text-sm font-semibold tracking-wide disabled:opacity-50"
                     style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                     {loading ? 'Sending…' : 'Send reset code'}
                   </button>
                 </form>
               )}
+
               {forgotStage === 'otp' && (
                 <form onSubmit={resetPassword} className="space-y-4 mt-4">
-                  {info && <p className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2">{info}</p>}
+                  {info && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2">{info}</div>}
                   <input value={forgotOtp} onChange={e => setForgotOtp(e.target.value)}
                     required autoFocus maxLength={6} placeholder="6-digit reset code"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-center tracking-widest focus:outline-none" />
+                    className={`${inputCls} font-mono text-center tracking-widest`} />
                   <input type="password" value={forgotNew} onChange={e => setForgotNew(e.target.value)}
                     required placeholder="New password (min 8 chars)"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none" />
-                  {error && <p className="text-sm text-red-600">{error}</p>}
+                    className={inputCls} />
+                  {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
-                    className="w-full text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+                    className="w-full text-white py-3 rounded-lg text-sm font-semibold tracking-wide disabled:opacity-50"
                     style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                     {loading ? 'Resetting…' : 'Set new password'}
                   </button>
                 </form>
               )}
+
               {forgotStage === 'done' && (
                 <div className="mt-4 text-center">
-                  <p className="text-3xl mb-3">✓</p>
+                  <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
                   <p className="text-green-700 font-semibold">{info}</p>
                   <button onClick={() => { setForgotMode(false); setForgotStage('email') }}
-                    className="mt-4 text-sm text-green-700 underline">Sign in now</button>
+                    className="mt-4 text-sm text-stone-600 hover:underline">Sign in now</button>
                 </div>
               )}
             </div>
           )}
 
-          <p className="text-center text-xs text-slate-400 mt-10">Neytiri Eywafarm Agritech Pvt Ltd</p>
+          <p className="text-center text-xs text-stone-400 mt-10">Neytiri Eywafarm Agritech Pvt Ltd</p>
         </div>
       </div>
     </div>

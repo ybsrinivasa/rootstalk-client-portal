@@ -9,6 +9,7 @@ export interface CPUser {
 export interface CPClient {
   id: string; short_name: string; display_name: string
   primary_colour: string; logo_url: string | null; tagline: string | null
+  org_type_cosh_ids: string[]
 }
 
 export async function login(email: string, password: string, clientShortName?: string): Promise<void> {
