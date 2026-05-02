@@ -50,6 +50,16 @@ export default function PackageDetailPage() {
   const [tlError, setTlError] = useState('')
   const [tlForm, setTlForm] = useState({ name: '', from_type: 'DAS', from_value: '0', to_value: '30', display_order: '0' })
 
+  // Timeline import
+  const [showImport, setShowImport] = useState(false)
+  const [importPackages, setImportPackages] = useState<Package[]>([])
+  const [importSourcePkgId, setImportSourcePkgId] = useState('')
+  const [importTimelines, setImportTimelines] = useState<Timeline[]>([])
+  const [importSourceTlId, setImportSourceTlId] = useState('')
+  const [importNewName, setImportNewName] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState('')
+
   // Practice form
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
   const [addingPractice, setAddingPractice] = useState(false)
@@ -93,6 +103,38 @@ export default function PackageDetailPage() {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setPubError(msg || 'Failed to publish.')
     } finally { setPublishing(false) }
+  }
+
+  async function openImport() {
+    setShowImport(true)
+    setImportError('')
+    const { data } = await api.get<Package[]>(`/client/${clientId}/packages`)
+    setImportPackages(data.filter(p => p.id !== packageId))
+  }
+
+  async function loadImportTimelines(pkgId: string) {
+    setImportSourcePkgId(pkgId)
+    setImportSourceTlId('')
+    if (!pkgId) { setImportTimelines([]); return }
+    const { data } = await api.get<Timeline[]>(`/client/${clientId}/packages/${pkgId}/timelines`)
+    setImportTimelines(data)
+  }
+
+  async function handleImport() {
+    if (!importSourceTlId || !importNewName.trim()) return
+    setImporting(true); setImportError('')
+    try {
+      await api.post(`/client/${clientId}/packages/${packageId}/timelines/import`, {
+        source_timeline_id: importSourceTlId,
+        new_name: importNewName.trim(),
+      })
+      setShowImport(false)
+      setImportSourcePkgId(''); setImportSourceTlId(''); setImportNewName('')
+      await loadTimelines()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setImportError(msg || 'Import failed.')
+    } finally { setImporting(false) }
   }
 
   async function handleAddTimeline(e: FormEvent) {
@@ -191,11 +233,17 @@ export default function PackageDetailPage() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-slate-800">Timelines <span className="text-slate-400 font-normal text-sm">({timelines.length})</span></h2>
-          <button onClick={() => setShowAddTL(true)}
-            className="text-sm font-medium px-3 py-1.5 rounded-xl border"
-            style={{ borderColor: colour, color: colour }}>
-            + Add Timeline
-          </button>
+          <div className="flex gap-2">
+            <button onClick={openImport}
+              className="text-sm font-medium px-3 py-1.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50">
+              ↓ Import
+            </button>
+            <button onClick={() => setShowAddTL(true)}
+              className="text-sm font-medium px-3 py-1.5 rounded-xl border"
+              style={{ borderColor: colour, color: colour }}>
+              + Add
+            </button>
+          </div>
         </div>
 
         {timelines.length === 0 ? (
@@ -395,6 +443,77 @@ export default function PackageDetailPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Import Timeline Modal */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 space-y-4">
+            <h2 className="font-bold text-slate-900 text-lg">Import Timeline from Another PoP</h2>
+            <p className="text-xs text-slate-400">
+              The imported timeline is fully independent — changes here won't affect the source, and vice versa.
+              You must give it a new name.
+            </p>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Source Package</label>
+              <select value={importSourcePkgId}
+                onChange={e => loadImportTimelines(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none">
+                <option value="">Select a package…</option>
+                {importPackages.map(p => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.crop_cosh_id})</option>
+                ))}
+              </select>
+            </div>
+
+            {importTimelines.length > 0 && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Source Timeline</label>
+                <select value={importSourceTlId}
+                  onChange={e => {
+                    setImportSourceTlId(e.target.value)
+                    const tl = importTimelines.find(t => t.id === e.target.value)
+                    if (tl) setImportNewName(`${tl.name} (copy)`)
+                  }}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none">
+                  <option value="">Select a timeline…</option>
+                  {importTimelines.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} — {FROM_TYPE_LABEL[t.from_type]} {t.from_value}→{t.to_value}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {importSourceTlId && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">New Name for this PoP *</label>
+                <input value={importNewName}
+                  onChange={e => setImportNewName(e.target.value)}
+                  placeholder="Give it a distinct name"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+                <p className="text-xs text-slate-400 mt-1">The timeline will be copied with all its practices. Rename to avoid confusion.</p>
+              </div>
+            )}
+
+            {importError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{importError}</p>}
+
+            <div className="flex gap-3 pt-1">
+              <button onClick={handleImport}
+                disabled={importing || !importSourceTlId || !importNewName.trim()}
+                className="flex-1 py-3 text-white font-semibold rounded-xl text-sm disabled:opacity-40"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {importing ? 'Importing…' : 'Import Timeline'}
+              </button>
+              <button onClick={() => { setShowImport(false); setImportError('') }}
+                className="px-5 rounded-xl border border-slate-200 text-slate-600 text-sm hover:bg-slate-50">
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
