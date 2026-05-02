@@ -1,7 +1,34 @@
 'use client'
-import { useEffect, useState, FormEvent } from 'react'
+import { useEffect, useState, useRef, FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
+
+// Role colours — warn if chosen colour is too close to any of these
+const ROLE_COLOURS = ['#1A5C2A', '#085041', '#7D4E00', '#3C3489']
+const ROLE_LABELS = ['Farmer (green)', 'Dealer (teal)', 'Facilitator (ochre)', 'FarmPundit (indigo)']
+
+function hexToRgb(hex: string) {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return { r, g, b }
+}
+
+function colourDistance(a: string, b: string): number {
+  const c1 = hexToRgb(a), c2 = hexToRgb(b)
+  return Math.sqrt((c1.r - c2.r) ** 2 + (c1.g - c2.g) ** 2 + (c1.b - c2.b) ** 2)
+}
+
+function nearestRoleWarning(colour: string): string | null {
+  for (let i = 0; i < ROLE_COLOURS.length; i++) {
+    if (colourDistance(colour, ROLE_COLOURS[i]) < 60) {
+      return `This colour is very close to the ${ROLE_LABELS[i]} role colour. Farmers may confuse your brand with a system role.`
+    }
+  }
+  return null
+}
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
 interface OnboardingContext {
   full_name: string; short_name: string; ca_name: string; ca_email: string; is_manufacturer: boolean
@@ -32,6 +59,7 @@ export default function OnboardingPage() {
   const [form, setForm] = useState({
     display_name: '',
     tagline: '',
+    logo_url: '',
     primary_colour: '#1A5C2A',
     secondary_colour: '#854F0B',
     hq_address: '',
@@ -40,8 +68,14 @@ export default function OnboardingPage() {
     website: '',
     support_phone: '',
     office_phone: '',
+    social_links: { twitter: '', instagram: '', linkedin: '', facebook: '' } as Record<string, string>,
     org_type_cosh_ids: [] as string[],
   })
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const logoRef = useRef<HTMLInputElement>(null)
+
+  const primaryWarning = form.primary_colour ? nearestRoleWarning(form.primary_colour) : null
+  const secondaryWarning = form.secondary_colour ? nearestRoleWarning(form.secondary_colour) : null
 
   useEffect(() => {
     api.get<OnboardingContext>(`/onboarding/${token}`)
@@ -52,6 +86,23 @@ export default function OnboardingPage() {
       .catch(() => setInvalid(true))
       .finally(() => setLoading(false))
   }, [token])
+
+  async function uploadLogo(file: File) {
+    setUploadingLogo(true)
+    try {
+      const data = new FormData()
+      data.append('file', file)
+      data.append('folder', 'logos')
+      const token_header = typeof window !== 'undefined' ? localStorage.getItem('rootstalk_token') : null
+      const res = await fetch(`${API_URL}/media/upload`, {
+        method: 'POST',
+        headers: token_header ? { Authorization: `Bearer ${token_header}` } : {},
+        body: data,
+      })
+      const json = await res.json()
+      setForm(f => ({ ...f, logo_url: json.url }))
+    } catch { /* silent */ } finally { setUploadingLogo(false) }
+  }
 
   function toggleOrgType(id: string) {
     setForm(f => ({
@@ -125,6 +176,30 @@ export default function OnboardingPage() {
           {/* Display & Branding */}
           <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-4">
             <h2 className="font-semibold text-slate-800">Display & Branding</h2>
+
+            {/* Logo upload — item #3 */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Company Logo</label>
+              <input ref={logoRef} type="file" accept="image/*" className="hidden"
+                onChange={e => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
+              <div className="flex items-center gap-4">
+                {form.logo_url ? (
+                  <img src={form.logo_url} alt="Logo preview" className="h-14 object-contain border border-slate-200 rounded-xl p-1 bg-white" />
+                ) : (
+                  <div className="h-14 w-24 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center">
+                    <span className="text-2xl">🏢</span>
+                  </div>
+                )}
+                <div>
+                  <button type="button" onClick={() => logoRef.current?.click()} disabled={uploadingLogo}
+                    className="px-4 py-2 text-sm border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                    {uploadingLogo ? 'Uploading…' : form.logo_url ? 'Change Logo' : 'Upload Logo'}
+                  </button>
+                  <p className="text-xs text-slate-400 mt-1">PNG or JPG, max 5 MB</p>
+                </div>
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Display Name <span className="text-red-500">*</span></label>
               <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
@@ -138,6 +213,8 @@ export default function OnboardingPage() {
                 placeholder="e.g. Growing trust, field by field"
                 className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
             </div>
+
+            {/* Colours with safety warning — item #5 */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Primary Colour</label>
@@ -147,6 +224,9 @@ export default function OnboardingPage() {
                     className="h-10 w-16 rounded-lg border border-slate-200 cursor-pointer" />
                   <span className="text-sm font-mono text-slate-600">{form.primary_colour}</span>
                 </div>
+                {primaryWarning && (
+                  <p className="text-xs text-amber-600 mt-1 bg-amber-50 rounded-lg px-2 py-1">⚠ {primaryWarning}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Secondary Colour</label>
@@ -156,6 +236,9 @@ export default function OnboardingPage() {
                     className="h-10 w-16 rounded-lg border border-slate-200 cursor-pointer" />
                   <span className="text-sm font-mono text-slate-600">{form.secondary_colour}</span>
                 </div>
+                {secondaryWarning && (
+                  <p className="text-xs text-amber-600 mt-1 bg-amber-50 rounded-lg px-2 py-1">⚠ {secondaryWarning}</p>
+                )}
               </div>
             </div>
           </div>
@@ -205,6 +288,27 @@ export default function OnboardingPage() {
               <input type="url" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
                 placeholder="https://yourcompany.in"
                 className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+          </div>
+
+          {/* Social Media — item #4 */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-3">
+            <h2 className="font-semibold text-slate-800">Social Media <span className="text-slate-400 font-normal text-sm">(optional)</span></h2>
+            <div className="grid grid-cols-1 gap-3">
+              {(['twitter', 'instagram', 'linkedin', 'facebook', 'youtube'] as const).map(platform => (
+                <div key={platform} className="flex items-center gap-3">
+                  <span className="text-sm text-slate-500 w-20 capitalize shrink-0">{platform}</span>
+                  <input
+                    type="url"
+                    value={form.social_links[platform] || ''}
+                    onChange={e => setForm(f => ({
+                      ...f,
+                      social_links: { ...f.social_links, [platform]: e.target.value },
+                    }))}
+                    placeholder={`https://${platform}.com/yourcompany`}
+                    className="flex-1 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                </div>
+              ))}
             </div>
           </div>
 
