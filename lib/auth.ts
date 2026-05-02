@@ -10,8 +10,10 @@ export interface CPClient {
   primary_colour: string; logo_url: string | null; tagline: string | null
 }
 
-export async function login(email: string, password: string): Promise<void> {
-  const { data } = await api.post('/auth/admin/login', { email, password })
+export async function login(email: string, password: string, clientShortName?: string): Promise<void> {
+  const { data } = await api.post('/auth/admin/login', {
+    email, password, ...(clientShortName ? { client_short_name: clientShortName } : {}),
+  })
   localStorage.setItem('rt_cp_token', data.access_token)
   const me = await api.get<CPUser>('/auth/me')
   localStorage.setItem('rt_cp_user', JSON.stringify(me.data))

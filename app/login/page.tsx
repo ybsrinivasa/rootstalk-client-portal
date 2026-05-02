@@ -42,11 +42,12 @@ export default function LoginPage() {
     e.preventDefault()
     setError(''); setLoading(true)
     try {
-      await login(email, password)
-      if (branding) setClient({ ...branding, short_name: shortName.toLowerCase() })
+      await login(email, password, shortName.toLowerCase())
+      if (branding) setClient(branding)
       router.replace('/dashboard')
-    } catch {
-      setError('Invalid email or password.')
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Invalid email or password.')
     } finally { setLoading(false) }
   }
 
@@ -54,23 +55,31 @@ export default function LoginPage() {
     e.preventDefault()
     setError(''); setLoading(true)
     try {
-      await api.post('/auth/admin/request-email-otp', { email, purpose: 'LOGIN' })
+      await api.post('/auth/admin/request-email-otp', { email, purpose: 'LOGIN', client_short_name: shortName.toLowerCase() })
       setOtpSent(true)
       setInfo(`A 6-digit code was sent to ${email}`)
-    } catch { setError('Could not send OTP') } finally { setLoading(false) }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Could not send OTP')
+    } finally { setLoading(false) }
   }
 
   async function verifyOtp(e: FormEvent) {
     e.preventDefault()
     setError(''); setLoading(true)
     try {
-      const { data } = await api.post<{ access_token: string }>('/auth/admin/verify-email-otp', { email, otp_code: otpCode })
+      const { data } = await api.post<{ access_token: string }>('/auth/admin/verify-email-otp', {
+        email, otp_code: otpCode, client_short_name: shortName.toLowerCase(),
+      })
       localStorage.setItem('rt_cp_token', data.access_token)
       const me = await api.get('/auth/me')
       localStorage.setItem('rt_cp_user', JSON.stringify((me as { data: unknown }).data))
-      if (branding) setClient({ ...branding, short_name: shortName.toLowerCase() })
+      if (branding) setClient(branding)
       router.replace('/dashboard')
-    } catch { setError('Invalid or expired code') } finally { setLoading(false) }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Invalid or expired code')
+    } finally { setLoading(false) }
   }
 
   async function sendForgotOtp(e: FormEvent) {
