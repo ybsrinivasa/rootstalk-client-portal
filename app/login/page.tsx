@@ -11,6 +11,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [branding, setBranding] = useState<CPClient | null>(null)
   const [step, setStep] = useState<'company' | 'credentials'>('company')
+  const [loginMethod, setLoginMethod] = useState<'password' | 'otp'>('password')
+  const [otpCode, setOtpCode] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
+  const [forgotMode, setForgotMode] = useState(false)
+  const [forgotOtp, setForgotOtp] = useState('')
+  const [forgotNew, setForgotNew] = useState('')
+  const [forgotStage, setForgotStage] = useState<'email' | 'otp' | 'done'>('email')
+  const [info, setInfo] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -39,6 +47,52 @@ export default function LoginPage() {
       router.replace('/dashboard')
     } catch {
       setError('Invalid email or password.')
+    } finally { setLoading(false) }
+  }
+
+  async function sendOtp(e: FormEvent) {
+    e.preventDefault()
+    setError(''); setLoading(true)
+    try {
+      await api.post('/auth/admin/request-email-otp', { email, purpose: 'LOGIN' })
+      setOtpSent(true)
+      setInfo(`A 6-digit code was sent to ${email}`)
+    } catch { setError('Could not send OTP') } finally { setLoading(false) }
+  }
+
+  async function verifyOtp(e: FormEvent) {
+    e.preventDefault()
+    setError(''); setLoading(true)
+    try {
+      const { data } = await api.post<{ access_token: string }>('/auth/admin/verify-email-otp', { email, otp_code: otpCode })
+      localStorage.setItem('rt_cp_token', data.access_token)
+      const me = await api.get('/auth/me')
+      localStorage.setItem('rt_cp_user', JSON.stringify((me as { data: unknown }).data))
+      if (branding) setClient({ ...branding, short_name: shortName.toLowerCase() })
+      router.replace('/dashboard')
+    } catch { setError('Invalid or expired code') } finally { setLoading(false) }
+  }
+
+  async function sendForgotOtp(e: FormEvent) {
+    e.preventDefault()
+    setError(''); setLoading(true)
+    try {
+      await api.post('/auth/admin/forgot-password', { email })
+      setForgotStage('otp')
+      setInfo(`Reset code sent to ${email}`)
+    } catch { setError('Could not send reset code') } finally { setLoading(false) }
+  }
+
+  async function resetPassword(e: FormEvent) {
+    e.preventDefault()
+    setError(''); setLoading(true)
+    try {
+      await api.post('/auth/admin/reset-password', { email, otp_code: forgotOtp, new_password: forgotNew })
+      setForgotStage('done')
+      setInfo('Password reset. You can now sign in.')
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Reset failed')
     } finally { setLoading(false) }
   }
 
@@ -93,37 +147,119 @@ export default function LoginPage() {
             </>
           )}
 
-          {step === 'credentials' && (
+          {step === 'credentials' && !forgotMode && (
             <>
-              <div className="mb-8">
+              <div className="mb-6">
                 <button onClick={() => { setStep('company'); setBranding(null); setError('') }}
                   className="text-slate-400 text-sm hover:text-slate-600 mb-3">← Change company</button>
                 <h2 className="text-2xl font-bold text-slate-900">Welcome back</h2>
                 <p className="text-slate-500 text-sm mt-1">{branding?.display_name} · Client Portal</p>
               </div>
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
+              {/* Method toggle */}
+              <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
+                <button onClick={() => { setLoginMethod('password'); setError('') }}
+                  className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${loginMethod === 'password' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>
+                  Password
+                </button>
+                <button onClick={() => { setLoginMethod('otp'); setError(''); setOtpSent(false) }}
+                  className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${loginMethod === 'otp' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>
+                  Email OTP
+                </button>
+              </div>
+              {loginMethod === 'password' && (
+                <form onSubmit={handleLogin} className="space-y-4">
                   <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                     required autoFocus placeholder="you@company.com"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2"
-                    style={{ '--tw-ring-color': colour } as React.CSSProperties} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
                   <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                    required placeholder="••••••••"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2"
-                    style={{ '--tw-ring-color': colour } as React.CSSProperties} />
-                </div>
-                {error && <p className="text-sm text-red-600">{error}</p>}
-                <button type="submit" disabled={loading}
-                  className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                  {loading ? 'Signing in…' : 'Sign in'}
-                </button>
-              </form>
+                    required placeholder="Password"
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                  <button type="submit" disabled={loading}
+                    className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
+                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    {loading ? 'Signing in…' : 'Sign in'}
+                  </button>
+                  <button type="button" onClick={() => { setForgotMode(true); setForgotStage('email') }}
+                    className="w-full text-sm text-green-700 hover:underline text-center">
+                    Forgot password?
+                  </button>
+                </form>
+              )}
+              {loginMethod === 'otp' && !otpSent && (
+                <form onSubmit={sendOtp} className="space-y-4">
+                  <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                    required autoFocus placeholder="your registered email"
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                  <button type="submit" disabled={loading}
+                    className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
+                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    {loading ? 'Sending…' : 'Send OTP to my email'}
+                  </button>
+                </form>
+              )}
+              {loginMethod === 'otp' && otpSent && (
+                <form onSubmit={verifyOtp} className="space-y-4">
+                  {info && <p className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2">{info}</p>}
+                  <input value={otpCode} onChange={e => setOtpCode(e.target.value)}
+                    required autoFocus maxLength={6} placeholder="6-digit code"
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                  <button type="submit" disabled={loading}
+                    className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
+                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    {loading ? 'Verifying…' : 'Verify & Sign in'}
+                  </button>
+                </form>
+              )}
             </>
+          )}
+
+          {step === 'credentials' && forgotMode && (
+            <div>
+              <button onClick={() => { setForgotMode(false); setForgotStage('email'); setError(''); setInfo('') }}
+                className="text-slate-400 text-sm hover:text-slate-600 mb-5 block">← Back to sign in</button>
+              <h2 className="text-xl font-bold text-slate-900 mb-1">Reset password</h2>
+              {forgotStage === 'email' && (
+                <form onSubmit={sendForgotOtp} className="space-y-4 mt-4">
+                  <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                    required autoFocus placeholder="your registered email"
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                  <button type="submit" disabled={loading}
+                    className="w-full text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    {loading ? 'Sending…' : 'Send reset code'}
+                  </button>
+                </form>
+              )}
+              {forgotStage === 'otp' && (
+                <form onSubmit={resetPassword} className="space-y-4 mt-4">
+                  {info && <p className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2">{info}</p>}
+                  <input value={forgotOtp} onChange={e => setForgotOtp(e.target.value)}
+                    required autoFocus maxLength={6} placeholder="6-digit reset code"
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-center tracking-widest focus:outline-none" />
+                  <input type="password" value={forgotNew} onChange={e => setForgotNew(e.target.value)}
+                    required placeholder="New password (min 8 chars)"
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none" />
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                  <button type="submit" disabled={loading}
+                    className="w-full text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    {loading ? 'Resetting…' : 'Set new password'}
+                  </button>
+                </form>
+              )}
+              {forgotStage === 'done' && (
+                <div className="mt-4 text-center">
+                  <p className="text-3xl mb-3">✓</p>
+                  <p className="text-green-700 font-semibold">{info}</p>
+                  <button onClick={() => { setForgotMode(false); setForgotStage('email') }}
+                    className="mt-4 text-sm text-green-700 underline">Sign in now</button>
+                </div>
+              )}
+            </div>
           )}
 
           <p className="text-center text-xs text-slate-400 mt-10">Neytiri Eywafarm Agritech Pvt Ltd</p>
