@@ -43,6 +43,28 @@ interface VerifyResponse {
   amount_paid_paise?: number
 }
 
+interface PromoterAllocationRow {
+  promoter_user_id: string
+  promoter_name: string | null
+  promoter_phone: string | null
+  units_balance: number
+  allocated_total: number
+  reclaimed_total: number
+  consumed_total: number
+}
+
+interface AllocationsResponse {
+  client_id: string
+  company_unallocated_balance: number
+  promoters: PromoterAllocationRow[]
+}
+
+interface UserLookup {
+  id: string
+  name: string | null
+  phone: string | null
+}
+
 interface PoolBalance { balance: number }
 interface Quote {
   units: number
@@ -79,6 +101,15 @@ export default function SubscriptionPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  // Promoter allocations state (Phase C)
+  const [allocations, setAllocations] = useState<AllocationsResponse | null>(null)
+  const [allocLoading, setAllocLoading] = useState(false)
+  const [allocError, setAllocError] = useState('')
+  const [allocBusy, setAllocBusy] = useState<string>('')   // promoter_user_id currently being mutated
+  const [newPromoterPhone, setNewPromoterPhone] = useState('')
+  const [newPromoterUnits, setNewPromoterUnits] = useState('')
+  const [newPromoterBusy, setNewPromoterBusy] = useState(false)
+
   const loadBalance = () => {
     if (!clientId) return
     api.get<PoolBalance>(`/client/${clientId}/subscription-pool/balance`)
@@ -87,7 +118,68 @@ export default function SubscriptionPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadBalance() }, [clientId])
+  const loadAllocations = () => {
+    if (!clientId) return
+    setAllocLoading(true); setAllocError('')
+    api.get<AllocationsResponse>(`/client/${clientId}/promoter-allocations`)
+      .then(r => setAllocations(r.data))
+      .catch(() => setAllocError('Could not load promoter allocations.'))
+      .finally(() => setAllocLoading(false))
+  }
+
+  useEffect(() => {
+    loadBalance()
+    loadAllocations()
+  }, [clientId])
+
+  // ── Promoter allocation actions ─────────────────────────────────────────
+
+  async function adjustAllocation(
+    promoterId: string, delta: number, kind: 'allocate' | 'reclaim',
+  ) {
+    if (!clientId || delta <= 0) return
+    setAllocBusy(promoterId); setAllocError('')
+    try {
+      await api.post(
+        `/client/${clientId}/promoter-allocations/${promoterId}/${kind}`,
+        { units: delta },
+      )
+      loadAllocations()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setAllocError(msg || `Could not ${kind}.`)
+    } finally {
+      setAllocBusy('')
+    }
+  }
+
+  async function addNewPromoter() {
+    if (!clientId) return
+    const phone = newPromoterPhone.trim()
+    const u = parseInt(newPromoterUnits)
+    if (!phone || !Number.isFinite(u) || u < 1) {
+      setAllocError('Enter a phone number and a positive unit count.')
+      return
+    }
+    setNewPromoterBusy(true); setAllocError('')
+    try {
+      const lookupPhone = phone.startsWith('+') ? phone : `+91${phone}`
+      const { data: lookedUp } = await api.get<UserLookup>(
+        `/promoter/farmer-lookup`, { params: { phone: lookupPhone } },
+      )
+      await api.post(
+        `/client/${clientId}/promoter-allocations/${lookedUp.id}/allocate`,
+        { units: u },
+      )
+      setNewPromoterPhone(''); setNewPromoterUnits('')
+      loadAllocations()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setAllocError(msg || 'Could not add this promoter.')
+    } finally {
+      setNewPromoterBusy(false)
+    }
+  }
 
   // Live price preview — fetch a quote on every change to `units`,
   // debounced 250ms so we don't spam the API on each keystroke.
@@ -161,6 +253,7 @@ export default function SubscriptionPage() {
             )
             setBalance(verified.balance)
             setUnits('100')
+            loadAllocations()  // company unallocated balance just grew
           } catch (err: unknown) {
             const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
             setError(msg || 'Payment verification failed. Contact support with your Razorpay payment ID.')
@@ -291,6 +384,159 @@ export default function SubscriptionPage() {
           </button>
         </form>
       </div>
+
+      {/* ── Promoter Allocations (Phase C) ─────────────────────────────── */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
+        <div className="flex items-baseline justify-between mb-1">
+          <h3 className="font-semibold text-slate-800">Promoter Allocations</h3>
+          {allocations && (
+            <span className="text-xs text-slate-500">
+              Unallocated balance: <span className="font-semibold text-slate-800">
+                {allocations.company_unallocated_balance.toLocaleString('en-IN')}
+              </span>
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-slate-400 mb-4">
+          Each promoter can only assign subscriptions to farmers from their own allocation.
+          Reclaim and reallocate freely — already-consumed units cannot be returned.
+        </p>
+
+        {allocLoading && <p className="text-xs text-slate-400">Loading…</p>}
+        {allocError && <p className="text-sm text-red-600 mb-3">{allocError}</p>}
+
+        {allocations && allocations.promoters.length === 0 && (
+          <p className="text-sm text-slate-500 mb-4">
+            No promoters allocated yet. Use the form below to add the first one.
+          </p>
+        )}
+
+        {allocations && allocations.promoters.length > 0 && (
+          <div className="overflow-x-auto -mx-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-slate-500 text-left">
+                  <th className="px-2 py-1.5 font-medium">Promoter</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Allocated</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Used</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Balance</th>
+                  <th className="px-2 py-1.5 font-medium">Adjust</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allocations.promoters.map(p => (
+                  <PromoterRow
+                    key={p.promoter_user_id}
+                    row={p}
+                    busy={allocBusy === p.promoter_user_id}
+                    onAllocate={n => adjustAllocation(p.promoter_user_id, n, 'allocate')}
+                    onReclaim={n => adjustAllocation(p.promoter_user_id, n, 'reclaim')}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Add a new promoter */}
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <p className="text-xs font-medium text-slate-600 mb-2">Add a new promoter</p>
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={newPromoterPhone}
+              onChange={e => setNewPromoterPhone(e.target.value)}
+              placeholder="Promoter phone (e.g. 9876543210)"
+              className="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <input
+              type="number" min="1"
+              value={newPromoterUnits}
+              onChange={e => setNewPromoterUnits(e.target.value)}
+              placeholder="Units"
+              className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <button
+              onClick={addNewPromoter}
+              disabled={newPromoterBusy || !newPromoterPhone || !newPromoterUnits}
+              className="px-4 py-2 rounded-lg text-white text-sm font-medium disabled:opacity-50"
+              style={{ background: colour }}>
+              {newPromoterBusy ? 'Adding…' : 'Allocate'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
+  )
+}
+
+// ── PromoterRow — keeps each row's "delta" input local so typing in
+//    one row doesn't re-render the others. ─────────────────────────────
+
+function PromoterRow({
+  row, busy, onAllocate, onReclaim,
+}: {
+  row: PromoterAllocationRow
+  busy: boolean
+  onAllocate: (n: number) => void
+  onReclaim: (n: number) => void
+}) {
+  const [delta, setDelta] = useState('')
+  const n = parseInt(delta)
+  const valid = Number.isFinite(n) && n > 0
+
+  function go(kind: 'allocate' | 'reclaim') {
+    if (!valid) return
+    if (kind === 'allocate') onAllocate(n)
+    else onReclaim(n)
+    setDelta('')
+  }
+
+  return (
+    <tr className="border-t border-slate-100">
+      <td className="px-2 py-2.5">
+        <div className="font-medium text-slate-800">
+          {row.promoter_name || row.promoter_phone || row.promoter_user_id.slice(0, 8)}
+        </div>
+        {row.promoter_phone && (
+          <div className="text-xs text-slate-400">{row.promoter_phone}</div>
+        )}
+      </td>
+      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
+        {row.allocated_total.toLocaleString('en-IN')}
+      </td>
+      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
+        {row.consumed_total.toLocaleString('en-IN')}
+      </td>
+      <td className="px-2 py-2.5 text-right tabular-nums font-semibold text-slate-900">
+        {row.units_balance.toLocaleString('en-IN')}
+      </td>
+      <td className="px-2 py-2.5">
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number" min="1"
+            value={delta}
+            onChange={e => setDelta(e.target.value)}
+            placeholder="N"
+            className="w-16 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+          />
+          <button
+            type="button"
+            onClick={() => go('allocate')}
+            disabled={busy || !valid}
+            title="Allocate to this promoter"
+            className="px-2 py-1 rounded-md bg-green-50 text-green-700 text-xs font-medium hover:bg-green-100 disabled:opacity-40">
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => go('reclaim')}
+            disabled={busy || !valid || n > row.units_balance}
+            title="Reclaim from this promoter"
+            className="px-2 py-1 rounded-md bg-amber-50 text-amber-700 text-xs font-medium hover:bg-amber-100 disabled:opacity-40">
+            −
+          </button>
+        </div>
+      </td>
+    </tr>
   )
 }
