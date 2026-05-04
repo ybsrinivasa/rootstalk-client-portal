@@ -1,7 +1,47 @@
 'use client'
 import { useEffect, useState, FormEvent } from 'react'
+import Script from 'next/script'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayOptions) => { open: () => void }
+  }
+}
+
+interface RazorpayHandlerResponse {
+  razorpay_order_id: string
+  razorpay_payment_id: string
+  razorpay_signature: string
+}
+
+interface RazorpayOptions {
+  key: string
+  amount: number
+  currency: string
+  name: string
+  description: string
+  order_id: string
+  handler: (r: RazorpayHandlerResponse) => void | Promise<void>
+  prefill?: { name?: string; email?: string; contact?: string }
+  theme?: { color?: string }
+  modal?: { ondismiss?: () => void }
+}
+
+interface CreateOrderResponse {
+  razorpay_order_id: string
+  amount: number
+  currency: string
+  key_id: string
+}
+
+interface VerifyResponse {
+  detail: string
+  balance: number
+  units_added: number
+  amount_paid_paise?: number
+}
 
 interface PoolBalance { balance: number }
 interface Quote {
@@ -73,21 +113,76 @@ export default function SubscriptionPage() {
 
   async function handlePurchase(e: FormEvent) {
     e.preventDefault()
-    setPurchasing(true); setError(''); setSuccess('')
+    if (!clientId) return
+    setError(''); setSuccess('')
+
+    const n = parseInt(units)
+    if (!Number.isFinite(n) || n < 1) {
+      setError('Please choose a valid unit count.')
+      return
+    }
+    if (typeof window === 'undefined' || !window.Razorpay) {
+      setError('Payment SDK is still loading. Please try again in a moment.')
+      return
+    }
+
+    setPurchasing(true)
     try {
-      const n = parseInt(units)
-      await api.post(`/client/${clientId}/subscription-pool/purchase`, { units: n })
-      setSuccess(`Successfully added ${n} subscription units to your pool.`)
-      setUnits('100')
-      loadBalance()
+      // Step 1: ask the server for a Razorpay order at the
+      // server-computed amount.
+      const { data: order } = await api.post<CreateOrderResponse>(
+        `/client/${clientId}/subscription-pool/payment/create-order`,
+        { units: n },
+      )
+
+      // Step 2: open Razorpay checkout.
+      const options: RazorpayOptions = {
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'RootsTalk',
+        description: `Subscription pool top-up — ${n} units`,
+        order_id: order.razorpay_order_id,
+        prefill: { name: client?.display_name || '' },
+        theme: { color: colour },
+        handler: async (response: RazorpayHandlerResponse) => {
+          try {
+            const { data: verified } = await api.post<VerifyResponse>(
+              `/client/${clientId}/subscription-pool/payment/verify`,
+              {
+                units: n,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              },
+            )
+            setSuccess(
+              `${verified.units_added} units added. New balance: ${verified.balance.toLocaleString('en-IN')}.`,
+            )
+            setBalance(verified.balance)
+            setUnits('100')
+          } catch (err: unknown) {
+            const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+            setError(msg || 'Payment verification failed. Contact support with your Razorpay payment ID.')
+          } finally {
+            setPurchasing(false)
+          }
+        },
+        modal: {
+          ondismiss: () => setPurchasing(false),
+        },
+      }
+      new window.Razorpay(options).open()
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to purchase units.')
-    } finally { setPurchasing(false) }
+      setError(msg || 'Could not initiate payment.')
+      setPurchasing(false)
+    }
   }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Subscription Pool</h1>
         <p className="text-slate-500 text-sm mt-0.5">Manage subscription units for farmer onboarding</p>
