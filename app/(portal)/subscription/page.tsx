@@ -4,6 +4,26 @@ import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 
 interface PoolBalance { balance: number }
+interface Quote {
+  units: number
+  gross_paise: number
+  discount_paise: number
+  total_paise: number
+  per_unit_effective_paise: number
+  min_units: number
+  max_units: number
+  gross_rupees: string
+  discount_rupees: string
+  total_rupees: string
+}
+
+function formatINR(rupees: number | string): string {
+  const n = typeof rupees === 'string' ? parseFloat(rupees) : rupees
+  if (!isFinite(n)) return '—'
+  return n.toLocaleString('en-IN', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })
+}
 
 export default function SubscriptionPage() {
   const client = getClient()
@@ -13,6 +33,8 @@ export default function SubscriptionPage() {
   const [balance, setBalance] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [units, setUnits] = useState('100')
+  const [quote, setQuote] = useState<Quote | null>(null)
+  const [quoteError, setQuoteError] = useState('')
   const [purchasing, setPurchasing] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -26,6 +48,28 @@ export default function SubscriptionPage() {
   }
 
   useEffect(() => { loadBalance() }, [clientId])
+
+  // Live price preview — fetch a quote on every change to `units`,
+  // debounced 250ms so we don't spam the API on each keystroke.
+  useEffect(() => {
+    if (!clientId) return
+    const n = parseInt(units)
+    if (!Number.isFinite(n) || n < 1) {
+      setQuote(null); setQuoteError(''); return
+    }
+    const handle = setTimeout(() => {
+      api.get<Quote>(`/client/${clientId}/subscription-pool/quote`, {
+        params: { units: n },
+      })
+        .then(r => { setQuote(r.data); setQuoteError('') })
+        .catch((err: unknown) => {
+          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          setQuote(null)
+          setQuoteError(msg || 'Could not calculate price for this quantity.')
+        })
+    }, 250)
+    return () => clearTimeout(handle)
+  }, [units, clientId])
 
   async function handlePurchase(e: FormEvent) {
     e.preventDefault()
@@ -105,13 +149,50 @@ export default function SubscriptionPage() {
             ))}
           </div>
 
+          {/* Live price quote */}
+          {quote && (
+            <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-sm space-y-1.5">
+              <div className="flex justify-between text-slate-600">
+                <span>{quote.units.toLocaleString('en-IN')} units × ₹199</span>
+                <span>₹{formatINR(quote.gross_rupees)}</span>
+              </div>
+              {quote.discount_paise > 0 && (
+                <div className="flex justify-between text-green-700">
+                  <span>Volume discount</span>
+                  <span>− ₹{formatINR(quote.discount_rupees)}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-2 border-t border-slate-200 font-semibold text-slate-900">
+                <span>Total payable</span>
+                <span>₹{formatINR(quote.total_rupees)}</span>
+              </div>
+              {quote.units > 1 && (
+                <p className="text-xs text-slate-500 pt-1">
+                  Effective price: ₹{formatINR(quote.per_unit_effective_paise / 100)} per unit
+                </p>
+              )}
+            </div>
+          )}
+          {quoteError && <p className="text-sm text-amber-700">{quoteError}</p>}
+
+          {/* Non-refundable notice */}
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            <span className="font-semibold">Please note: </span>
+            Pool top-ups are <span className="font-semibold">non-refundable</span>.
+            Once purchased, units stay in your pool until allocated to a farmer subscription.
+          </div>
+
           {error && <p className="text-sm text-red-600">{error}</p>}
           {success && <p className="text-sm text-green-700">{success}</p>}
 
-          <button type="submit" disabled={purchasing}
+          <button type="submit" disabled={purchasing || !quote}
             className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-            {purchasing ? 'Processing…' : `Add ${parseInt(units) || 0} Units to Pool`}
+            {purchasing
+              ? 'Processing…'
+              : quote
+                ? `Pay ₹${formatINR(quote.total_rupees)} for ${quote.units.toLocaleString('en-IN')} units`
+                : `Add ${parseInt(units) || 0} Units to Pool`}
           </button>
         </form>
       </div>
