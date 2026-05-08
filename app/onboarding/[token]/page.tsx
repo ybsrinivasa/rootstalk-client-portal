@@ -179,8 +179,36 @@ export default function OnboardingPage() {
       await api.post(`/onboarding/${token}/submit`, form)
       setDone(true)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Submission failed. Please check all fields and try again.')
+      // Surface as much detail as the response carries, so the CA / CM
+      // can self-diagnose instead of staring at "Submission failed".
+      // Three shapes covered:
+      //   • detail: string         (HTTPException(detail="...") on backend)
+      //   • detail: array          (Pydantic validation error, FastAPI default)
+      //   • no detail at all       (5xx — likely backend exception, network, CORS)
+      const e = err as {
+        response?: {
+          status?: number
+          data?: { detail?: string | Array<{ msg?: string; loc?: (string | number)[] }> }
+        }
+        message?: string
+      }
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      let msg: string
+      if (Array.isArray(detail) && detail.length > 0) {
+        msg = detail
+          .map(d => `${(d.loc?.slice(-1)?.[0] ?? 'field')}: ${d.msg ?? 'invalid'}`)
+          .join('; ')
+      } else if (typeof detail === 'string' && detail) {
+        msg = detail
+      } else if (status) {
+        msg = `Submission failed (HTTP ${status}). The server didn't return details — please share this with support.`
+      } else {
+        msg = e?.message || 'Network error — check your connection and try again.'
+      }
+      setError(msg)
+      // Always log the raw error for DevTools — KK / dev can inspect.
+      console.error('Onboarding submission error', err)
     } finally { setSubmitting(false) }
   }
 
