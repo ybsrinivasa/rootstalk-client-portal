@@ -120,6 +120,7 @@ export default function FarmPunditsPage() {
   const [tab, setTab] = useState<'pundits' | 'search' | 'queries'>('pundits')
   const [pundits, setPundits] = useState<Pundit[]>([])
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([])
+  const [rejectedInvitations, setRejectedInvitations] = useState<PendingInvitation[]>([])
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [queries, setQueries] = useState<CompanyQuery[]>([])
   const [loading, setLoading] = useState(true)
@@ -145,13 +146,15 @@ export default function FarmPunditsPage() {
 
   const load = async () => {
     if (!clientId) return
-    const [p, inv, q] = await Promise.all([
+    const [p, invPending, invRejected, q] = await Promise.all([
       api.get<Pundit[]>(`/client/${clientId}/pundits`).catch(() => ({ data: [] as Pundit[] })),
       api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=PENDING`).catch(() => ({ data: [] as PendingInvitation[] })),
+      api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=REJECTED`).catch(() => ({ data: [] as PendingInvitation[] })),
       api.get<CompanyQuery[]>(`/client/${clientId}/queries`).catch(() => ({ data: [] as CompanyQuery[] })),
     ])
     setPundits(p.data)
-    setPendingInvitations(inv.data)
+    setPendingInvitations(invPending.data)
+    setRejectedInvitations(invRejected.data)
     setQueries(q.data)
     setLoading(false)
   }
@@ -198,8 +201,15 @@ export default function FarmPunditsPage() {
       // (not "Onboarded") and refresh the pendingInvitations list so
       // the My Experts tab reflects the new pending row.
       setSearchResults(prev => prev.map(r => r.id === resultId ? { ...r, already_onboarded: true } : r))
-      const inv = await api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=PENDING`)
-      setPendingInvitations(inv.data)
+      // Refresh both lists — re-inviting a previously-rejected expert
+      // creates a new PENDING row, but the old REJECTED row (with its
+      // reason text) is still useful context for the CA.
+      const [pending, rejected] = await Promise.all([
+        api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=PENDING`),
+        api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=REJECTED`),
+      ])
+      setPendingInvitations(pending.data)
+      setRejectedInvitations(rejected.data)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setInviteError(msg || 'Failed to invite.')
@@ -336,7 +346,50 @@ export default function FarmPunditsPage() {
             </div>
           )}
 
-          {pundits.length === 0 && pendingInvitations.length === 0 ? (
+          {/* Rejected invitations — surfaced so the CA can see WHY
+              an expert declined, per spec §14.3 Step 3 ("If
+              rejected: the expert must provide reasons before
+              rejection is processed"). The reason is captured by
+              the backend already; before this batch it had no path
+              back to the CA UI. */}
+          {rejectedInvitations.length > 0 && (
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-rose-200 bg-rose-100/60">
+                <p className="text-xs font-semibold text-rose-800 uppercase tracking-wide">
+                  Invitations declined
+                </p>
+              </div>
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-rose-100">
+                  {rejectedInvitations.map(inv => (
+                    <tr key={inv.id}>
+                      <td className="px-5 py-3 align-top">
+                        <p className="font-medium text-slate-800">{inv.name || '—'}</p>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                          {inv.phone && <span className="font-mono">{inv.phone}</span>}
+                          {inv.email && <span>{inv.email}</span>}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 align-top">
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600">
+                          {inv.role === 'PRIMARY' ? 'Primary' : 'Panel'}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-xs text-rose-800">
+                        {inv.rejection_reason ? (
+                          <p className="leading-relaxed">"{inv.rejection_reason}"</p>
+                        ) : (
+                          <p className="italic text-slate-400">No reason given</p>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {pundits.length === 0 && pendingInvitations.length === 0 && rejectedInvitations.length === 0 ? (
             <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
               <p className="text-slate-500 text-sm">No FarmPundits yet. Use the "Find Experts" tab to search and invite them.</p>
             </div>

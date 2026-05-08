@@ -28,6 +28,14 @@ export default function FieldManagerPage() {
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
   const [addForm, setAddForm] = useState({ name: '', phone: '', territory_notes: '' })
+  // Pre-flight phone lookup result. Surfaced inline in the modal so
+  // the CA can see whether they're attaching to an existing user
+  // (e.g. someone already registered as a Farmer or as a Promoter at
+  // another company) before committing the registration.
+  const [phoneLookup, setPhoneLookup] = useState<{
+    state: 'idle' | 'checking' | 'exists' | 'new'
+    name: string | null
+  }>({ state: 'idle', name: null })
 
   const load = async () => {
     if (!clientId) return
@@ -53,6 +61,7 @@ export default function FieldManagerPage() {
       })
       setShowAdd(false)
       setAddForm({ name: '', phone: '', territory_notes: '' })
+      setPhoneLookup({ state: 'idle', name: null })
       load()
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -72,10 +81,31 @@ export default function FieldManagerPage() {
     load()
   }
 
+  async function checkPhone(phone: string) {
+    const trimmed = phone.trim()
+    if (!trimmed) {
+      setPhoneLookup({ state: 'idle', name: null })
+      return
+    }
+    setPhoneLookup({ state: 'checking', name: null })
+    try {
+      const { data } = await api.get<{ exists: boolean; name: string | null }>(
+        `/admin/users/exists?phone=${encodeURIComponent(trimmed)}`,
+      )
+      setPhoneLookup({
+        state: data.exists ? 'exists' : 'new',
+        name: data.name,
+      })
+    } catch {
+      // Lookup failure shouldn't block the form — just clear the hint.
+      setPhoneLookup({ state: 'idle', name: null })
+    }
+  }
+
   const PromoterTable = ({ list, type }: { list: Promoter[], type: string }) => (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button onClick={() => { setAddingType(type as 'DEALER' | 'FACILITATOR'); setShowAdd(true); setAddError('') }}
+        <button onClick={() => { setAddingType(type as 'DEALER' | 'FACILITATOR'); setShowAdd(true); setAddError(''); setPhoneLookup({ state: 'idle', name: null }) }}
           className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
           style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
           + Register {type === 'DEALER' ? 'Dealer' : 'Facilitator'}
@@ -228,10 +258,33 @@ export default function FieldManagerPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Mobile Number</label>
-                <input value={addForm.phone} onChange={e => setAddForm(f => ({ ...f, phone: e.target.value }))}
+                <input value={addForm.phone}
+                  onChange={e => {
+                    setAddForm(f => ({ ...f, phone: e.target.value }))
+                    // Reset the lookup state on every keystroke so the
+                    // inline note can't go stale against an in-flight
+                    // edit. The actual lookup runs onBlur.
+                    if (phoneLookup.state !== 'idle') setPhoneLookup({ state: 'idle', name: null })
+                  }}
+                  onBlur={e => checkPhone(e.target.value)}
                   required placeholder="+91XXXXXXXXXX"
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono" />
-                <p className="text-xs text-slate-400 mt-1">They will use OTP on this number to log into the PWA</p>
+                {phoneLookup.state === 'checking' && (
+                  <p className="text-xs text-slate-400 mt-1">Checking…</p>
+                )}
+                {phoneLookup.state === 'exists' && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">
+                    ℹ This phone is already a RootsTalk user
+                    {phoneLookup.name ? <> — <strong>{phoneLookup.name}</strong></> : null}.
+                    Registering will add the {addingType === 'DEALER' ? 'Dealer' : 'Facilitator'} role for this company on top of their existing account.
+                  </p>
+                )}
+                {phoneLookup.state === 'new' && (
+                  <p className="text-xs text-green-700 mt-1">✓ New user — an account will be created for this phone.</p>
+                )}
+                {phoneLookup.state === 'idle' && (
+                  <p className="text-xs text-slate-400 mt-1">They will use OTP on this number to log into the PWA</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Territory / Notes</label>
@@ -241,7 +294,7 @@ export default function FieldManagerPage() {
               </div>
               {addError && <p className="text-sm text-red-600">{addError}</p>}
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowAdd(false); setAddError('') }}
+                <button type="button" onClick={() => { setShowAdd(false); setAddError(''); setPhoneLookup({ state: 'idle', name: null }) }}
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={adding}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
