@@ -17,11 +17,24 @@ const STATUS_COLOUR = {
   INACTIVE: 'bg-stone-100 text-stone-500',
 }
 
+const PAYMENT_MODEL_LABEL: Record<'COMPANY_PAYS' | 'FARMER_PAYS', { title: string; help: string }> = {
+  COMPANY_PAYS: {
+    title: 'Company Pays',
+    help: 'Farmers cannot self-subscribe. Only company-designated promoters can assign packages.',
+  },
+  FARMER_PAYS: {
+    title: 'Farmer Pays',
+    help: 'Farmers self-subscribe and pay directly. Company can also assign via promoters.',
+  },
+}
+
 export default function DashboardPage() {
   const client = getClient()
   const clientId = client?.id
   const clientName = client?.display_name
   const accent = client?.primary_colour || '#1A5C2A'
+  const paymentModel = client?.payment_model
+  const paymentLabel = paymentModel ? PAYMENT_MODEL_LABEL[paymentModel] : null
 
   const [packages, setPackages] = useState<Package[]>([])
   const [balance, setBalance] = useState<number | null>(null)
@@ -56,6 +69,17 @@ export default function DashboardPage() {
           <span style={{ color: accent }}>{clientName}</span>
         </h1>
         <p className="text-stone-500 text-sm mt-1">Client Portal · RootsTalk</p>
+        {paymentLabel && (
+          <div className="mt-3 inline-flex items-start gap-2 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2">
+            <span className="inline-block w-2 h-2 rounded-full mt-1.5" style={{ background: accent }} />
+            <div>
+              <p className="text-xs font-semibold text-stone-700 leading-tight">
+                Payment Model: <span style={{ color: accent }}>{paymentLabel.title}</span>
+              </p>
+              <p className="text-xs text-stone-500 mt-0.5 leading-tight">{paymentLabel.help}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Stats */}

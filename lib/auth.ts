@@ -10,6 +10,11 @@ export interface CPClient {
   id: string; short_name: string; display_name: string
   primary_colour: string; logo_url: string | null; tagline: string | null
   org_type_cosh_ids: string[]
+  /** Per spec §11.1 — client-level subscription configuration.
+   *  Optional in the type because cached CPClient objects from a
+   *  pre-payment-model login won't have it; UI should tolerate
+   *  `undefined` gracefully and refetch on next login. */
+  payment_model?: 'COMPANY_PAYS' | 'FARMER_PAYS'
 }
 
 export async function login(email: string, password: string, clientShortName?: string): Promise<void> {
