@@ -72,7 +72,13 @@ export default function OnboardingPage() {
     org_type_cosh_ids: [] as string[],
   })
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [logoStatus, setLogoStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [logoError, setLogoError] = useState<string>('')
   const logoRef = useRef<HTMLInputElement>(null)
+
+  // Per-field validation errors. Populated on submit; cleared field-
+  // by-field as the user fixes each input.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const primaryWarning = form.primary_colour ? nearestRoleWarning(form.primary_colour) : null
   const secondaryWarning = form.secondary_colour ? nearestRoleWarning(form.secondary_colour) : null
@@ -89,6 +95,7 @@ export default function OnboardingPage() {
 
   async function uploadLogo(file: File) {
     setUploadingLogo(true)
+    setLogoStatus('idle'); setLogoError('')
     try {
       const data = new FormData()
       data.append('file', file)
@@ -99,9 +106,27 @@ export default function OnboardingPage() {
         headers: token_header ? { Authorization: `Bearer ${token_header}` } : {},
         body: data,
       })
+      if (!res.ok) {
+        let msg = 'Upload failed — please try again.'
+        try { msg = (await res.json())?.detail || msg } catch {}
+        setLogoStatus('error'); setLogoError(msg)
+        return
+      }
       const json = await res.json()
+      if (!json?.url) {
+        setLogoStatus('error'); setLogoError('Upload failed — server did not return a URL.')
+        return
+      }
       setForm(f => ({ ...f, logo_url: json.url }))
-    } catch { /* silent */ } finally { setUploadingLogo(false) }
+      setLogoStatus('success')
+      // Clear any prior "logo missing" error once a logo is in place.
+      setFieldErrors(e => { const { logo_url, ...rest } = e; return rest })
+    } catch (err) {
+      setLogoStatus('error')
+      setLogoError(err instanceof Error ? err.message : 'Upload failed — check your connection and try again.')
+    } finally {
+      setUploadingLogo(false)
+    }
   }
 
   function toggleOrgType(id: string) {
@@ -113,8 +138,41 @@ export default function OnboardingPage() {
     }))
   }
 
+  /** Validate every mandatory field. Returns a map of {fieldKey:
+   *  human-readable message}; empty when valid. Field keys match
+   *  the data-error="<key>" attribute on each input so the
+   *  scroll-to-first-error logic can find them. */
+  function validate(): Record<string, string> {
+    const errs: Record<string, string> = {}
+    if (!form.display_name.trim()) errs.display_name = 'Display Name is required.'
+    if (!form.logo_url) errs.logo_url = 'Company Logo is required — please upload an image.'
+    if (!form.gst_number.trim()) errs.gst_number = 'GST Number is required.'
+    else if (form.gst_number.trim().length !== 15) errs.gst_number = 'GST Number must be exactly 15 characters.'
+    if (!form.pan_number.trim()) errs.pan_number = 'PAN Number is required.'
+    else if (form.pan_number.trim().length !== 10) errs.pan_number = 'PAN Number must be exactly 10 characters.'
+    if (!form.hq_address.trim()) errs.hq_address = 'Registered Address is required.'
+    if (form.org_type_cosh_ids.length === 0) errs.org_type_cosh_ids = 'Please select at least one organisation type.'
+    return errs
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+
+    const errs = validate()
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs)
+      // Scroll the first invalid field into view so the CA can see
+      // exactly what to fix instead of guessing why submit didn't work.
+      const firstKey = Object.keys(errs)[0]
+      requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-error-key="${firstKey}"]`)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+      setError(`Please fix ${Object.keys(errs).length} field${Object.keys(errs).length > 1 ? 's' : ''} below before submitting.`)
+      return
+    }
+
+    setFieldErrors({})
     setSubmitting(true); setError('')
     try {
       await api.post(`/onboarding/${token}/submit`, form)
@@ -178,11 +236,13 @@ export default function OnboardingPage() {
             <h2 className="font-semibold text-slate-800">Display & Branding</h2>
 
             {/* Logo upload — item #3 */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Company Logo</label>
+            <div data-error-key="logo_url">
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Company Logo <span className="text-red-500">*</span>
+              </label>
               <input ref={logoRef} type="file" accept="image/*" className="hidden"
                 onChange={e => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
-              <div className="flex items-center gap-4">
+              <div className={`flex items-center gap-4 ${fieldErrors.logo_url ? 'rounded-xl ring-2 ring-red-300 ring-offset-2 p-2 -m-2' : ''}`}>
                 {form.logo_url ? (
                   <img src={form.logo_url} alt="Logo preview" className="h-14 object-contain border border-slate-200 rounded-xl p-1 bg-white" />
                 ) : (
@@ -196,16 +256,34 @@ export default function OnboardingPage() {
                     {uploadingLogo ? 'Uploading…' : form.logo_url ? 'Change Logo' : 'Upload Logo'}
                   </button>
                   <p className="text-xs text-slate-400 mt-1">PNG or JPG, max 5 MB</p>
+                  {/* Explicit upload status — the preview thumb alone is too easy to miss. */}
+                  {logoStatus === 'success' && (
+                    <p className="text-xs text-green-600 mt-1 font-medium">✓ Logo uploaded successfully</p>
+                  )}
+                  {logoStatus === 'error' && (
+                    <p className="text-xs text-red-600 mt-1 font-medium">✗ {logoError}</p>
+                  )}
                 </div>
               </div>
+              {fieldErrors.logo_url && (
+                <p className="text-xs text-red-600 mt-1.5">{fieldErrors.logo_url}</p>
+              )}
             </div>
 
-            <div>
+            <div data-error-key="display_name">
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Display Name <span className="text-red-500">*</span></label>
-              <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
-                required placeholder="How farmers see your company name"
-                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-              <p className="text-xs text-slate-400 mt-1">This is shown on farmer-facing screens</p>
+              <input value={form.display_name}
+                onChange={e => {
+                  setForm(f => ({ ...f, display_name: e.target.value }))
+                  if (fieldErrors.display_name) setFieldErrors(p => { const { display_name, ...rest } = p; return rest })
+                }}
+                placeholder="How farmers see your company name"
+                className={`w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 ${
+                  fieldErrors.display_name ? 'border-red-400 focus:ring-red-300 bg-red-50' : 'border-slate-200 focus:ring-green-500'
+                }`} />
+              {fieldErrors.display_name
+                ? <p className="text-xs text-red-600 mt-1">{fieldErrors.display_name}</p>
+                : <p className="text-xs text-slate-400 mt-1">This is shown on farmer-facing screens</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Tagline</label>
@@ -246,23 +324,44 @@ export default function OnboardingPage() {
           {/* Legal Details */}
           <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-4">
             <h2 className="font-semibold text-slate-800">Legal Details</h2>
-            <div>
+            <div data-error-key="gst_number">
               <label className="block text-sm font-medium text-slate-700 mb-1.5">GST Number <span className="text-red-500">*</span></label>
-              <input value={form.gst_number} onChange={e => setForm(f => ({ ...f, gst_number: e.target.value.toUpperCase() }))}
-                required maxLength={15} minLength={15} placeholder="15-character GST number"
-                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono uppercase" />
+              <input value={form.gst_number}
+                onChange={e => {
+                  setForm(f => ({ ...f, gst_number: e.target.value.toUpperCase() }))
+                  if (fieldErrors.gst_number) setFieldErrors(p => { const { gst_number, ...rest } = p; return rest })
+                }}
+                maxLength={15} placeholder="15-character GST number"
+                className={`w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 font-mono uppercase ${
+                  fieldErrors.gst_number ? 'border-red-400 focus:ring-red-300 bg-red-50' : 'border-slate-200 focus:ring-green-500'
+                }`} />
+              {fieldErrors.gst_number && <p className="text-xs text-red-600 mt-1">{fieldErrors.gst_number}</p>}
             </div>
-            <div>
+            <div data-error-key="pan_number">
               <label className="block text-sm font-medium text-slate-700 mb-1.5">PAN Number <span className="text-red-500">*</span></label>
-              <input value={form.pan_number} onChange={e => setForm(f => ({ ...f, pan_number: e.target.value.toUpperCase() }))}
-                required maxLength={10} minLength={10} placeholder="10-character PAN"
-                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono uppercase" />
+              <input value={form.pan_number}
+                onChange={e => {
+                  setForm(f => ({ ...f, pan_number: e.target.value.toUpperCase() }))
+                  if (fieldErrors.pan_number) setFieldErrors(p => { const { pan_number, ...rest } = p; return rest })
+                }}
+                maxLength={10} placeholder="10-character PAN"
+                className={`w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 font-mono uppercase ${
+                  fieldErrors.pan_number ? 'border-red-400 focus:ring-red-300 bg-red-50' : 'border-slate-200 focus:ring-green-500'
+                }`} />
+              {fieldErrors.pan_number && <p className="text-xs text-red-600 mt-1">{fieldErrors.pan_number}</p>}
             </div>
-            <div>
+            <div data-error-key="hq_address">
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Registered Address <span className="text-red-500">*</span></label>
-              <textarea value={form.hq_address} onChange={e => setForm(f => ({ ...f, hq_address: e.target.value }))}
-                required rows={3} placeholder="Full registered office address"
-                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
+              <textarea value={form.hq_address}
+                onChange={e => {
+                  setForm(f => ({ ...f, hq_address: e.target.value }))
+                  if (fieldErrors.hq_address) setFieldErrors(p => { const { hq_address, ...rest } = p; return rest })
+                }}
+                rows={3} placeholder="Full registered office address"
+                className={`w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 resize-none ${
+                  fieldErrors.hq_address ? 'border-red-400 focus:ring-red-300 bg-red-50' : 'border-slate-200 focus:ring-green-500'
+                }`} />
+              {fieldErrors.hq_address && <p className="text-xs text-red-600 mt-1">{fieldErrors.hq_address}</p>}
             </div>
           </div>
 
@@ -313,14 +412,22 @@ export default function OnboardingPage() {
           </div>
 
           {/* Organisation Types */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-3">
+          <div data-error-key="org_type_cosh_ids"
+            className={`bg-white rounded-2xl p-6 border shadow-sm space-y-3 ${
+              fieldErrors.org_type_cosh_ids ? 'border-red-300 ring-2 ring-red-100' : 'border-slate-100'
+            }`}>
             <h2 className="font-semibold text-slate-800">Organisation Type(s) <span className="text-red-500">*</span></h2>
             <p className="text-slate-500 text-sm">Select all that apply. This determines which modules are available.</p>
             {ORG_TYPES.map(org => (
               <label key={org.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-xl hover:bg-slate-50">
                 <input type="checkbox"
                   checked={form.org_type_cosh_ids.includes(org.id)}
-                  onChange={() => toggleOrgType(org.id)}
+                  onChange={() => {
+                    toggleOrgType(org.id)
+                    if (fieldErrors.org_type_cosh_ids) {
+                      setFieldErrors(p => { const { org_type_cosh_ids, ...rest } = p; return rest })
+                    }
+                  }}
                   className="w-4 h-4 rounded accent-green-600" />
                 <div>
                   <span className="text-sm text-slate-800">{org.label}</span>
@@ -330,8 +437,8 @@ export default function OnboardingPage() {
                 </div>
               </label>
             ))}
-            {form.org_type_cosh_ids.length === 0 && (
-              <p className="text-xs text-red-500">Please select at least one organisation type.</p>
+            {fieldErrors.org_type_cosh_ids && (
+              <p className="text-xs text-red-600 font-medium">{fieldErrors.org_type_cosh_ids}</p>
             )}
           </div>
 
@@ -339,8 +446,11 @@ export default function OnboardingPage() {
             <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">{error}</div>
           )}
 
+          {/* Submit button is NOT disabled by per-field validity — let
+              the user click and get a clear error trail instead of a
+              silent greyed-out button they can't diagnose. */}
           <button type="submit"
-            disabled={submitting || form.org_type_cosh_ids.length === 0}
+            disabled={submitting}
             className="w-full py-4 rounded-2xl text-white font-bold text-base disabled:opacity-50"
             style={{ background: 'linear-gradient(135deg, #065f46, #1A5C2A)' }}>
             {submitting ? 'Submitting…' : 'Submit Company Registration →'}
