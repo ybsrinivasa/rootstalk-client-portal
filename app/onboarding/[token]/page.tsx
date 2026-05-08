@@ -99,11 +99,12 @@ export default function OnboardingPage() {
     try {
       const data = new FormData()
       data.append('file', file)
-      data.append('folder', 'logos')
-      const token_header = typeof window !== 'undefined' ? localStorage.getItem('rootstalk_token') : null
-      const res = await fetch(`${API_URL}/media/upload`, {
+      // Use the onboarding-token-scoped public endpoint — the CA isn't
+      // logged in yet during onboarding, so the authed /media/upload
+      // would 401 with "Not authenticated". Same auth boundary as the
+      // submit endpoint: the URL token is what authorises the upload.
+      const res = await fetch(`${API_URL}/onboarding/${token}/logo-upload`, {
         method: 'POST',
-        headers: token_header ? { Authorization: `Bearer ${token_header}` } : {},
         body: data,
       })
       if (!res.ok) {
