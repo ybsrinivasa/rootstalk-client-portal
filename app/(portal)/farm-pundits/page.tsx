@@ -7,6 +7,10 @@ interface Pundit {
   id: string; pundit_id: string; name: string | null; phone: string | null
   role: string; status: string; is_promoter_pundit: boolean; round_robin_sequence: number | null; onboarded_at: string
 }
+interface PendingInvitation {
+  id: string; pundit_id: string; name: string | null; phone: string | null; email: string | null
+  role: string; status: string; rejection_reason: string | null; created_at: string
+}
 interface SearchResult {
   id: string; user_id: string; name: string | null; phone: string | null; email: string | null
   education: string | null; experience_band: string | null; support_method: string | null; already_onboarded: boolean
@@ -25,6 +29,87 @@ const STATUS_COLOUR: Record<string, string> = {
   EXPIRED: 'bg-slate-100 text-slate-500',
 }
 
+// Filter option lists — kept in sync with the PWA `/pundit/register`
+// page so the CA filters can match what experts actually selected on
+// their profile. If the spec or the register page adds new values,
+// update both places.
+const STATES: Array<[string, string]> = [
+  ['state_andhra_pradesh', 'Andhra Pradesh'],
+  ['state_arunachal_pradesh', 'Arunachal Pradesh'],
+  ['state_assam', 'Assam'],
+  ['state_bihar', 'Bihar'],
+  ['state_chhattisgarh', 'Chhattisgarh'],
+  ['state_goa', 'Goa'],
+  ['state_gujarat', 'Gujarat'],
+  ['state_haryana', 'Haryana'],
+  ['state_himachal_pradesh', 'Himachal Pradesh'],
+  ['state_jharkhand', 'Jharkhand'],
+  ['state_karnataka', 'Karnataka'],
+  ['state_kerala', 'Kerala'],
+  ['state_madhya_pradesh', 'Madhya Pradesh'],
+  ['state_maharashtra', 'Maharashtra'],
+  ['state_manipur', 'Manipur'],
+  ['state_meghalaya', 'Meghalaya'],
+  ['state_mizoram', 'Mizoram'],
+  ['state_nagaland', 'Nagaland'],
+  ['state_odisha', 'Odisha'],
+  ['state_punjab', 'Punjab'],
+  ['state_rajasthan', 'Rajasthan'],
+  ['state_sikkim', 'Sikkim'],
+  ['state_tamil_nadu', 'Tamil Nadu'],
+  ['state_telangana', 'Telangana'],
+  ['state_tripura', 'Tripura'],
+  ['state_uttar_pradesh', 'Uttar Pradesh'],
+  ['state_uttarakhand', 'Uttarakhand'],
+  ['state_west_bengal', 'West Bengal'],
+  ['state_delhi', 'Delhi'],
+  ['state_jammu_and_kashmir', 'Jammu & Kashmir'],
+]
+const EXPERTISE_DOMAINS: Array<[string, string]> = [
+  ['plant_protection', 'Plant Protection'],
+  ['plant_nutrition', 'Plant Nutrition'],
+  ['overall_agronomy', 'Overall Agronomy'],
+  ['plant_propagation', 'Plant Propagation'],
+  ['farm_equipments_and_mechanisation', 'Farm Equipment & Mechanisation'],
+]
+const CROP_GROUPS: Array<[string, string]> = [
+  ['cereals', 'Cereals'],
+  ['oilseeds', 'Oilseeds'],
+  ['fruit_trees', 'Fruit Trees'],
+  ['fibre_crops', 'Fibre Crops'],
+  ['flower_crops', 'Flower Crops'],
+  ['fodder_crops', 'Fodder Crops'],
+  ['medicinal_and_aromatic_crops', 'Medicinal & Aromatic'],
+]
+const LANGUAGES: Array<[string, string]> = [
+  ['en', 'English'], ['hi', 'Hindi'], ['te', 'Telugu'], ['kn', 'Kannada'],
+  ['ta', 'Tamil'], ['ml', 'Malayalam'], ['mr', 'Marathi'], ['gu', 'Gujarati'],
+  ['pa', 'Punjabi'], ['bn', 'Bengali'],
+]
+const EDUCATIONS: Array<[string, string]> = [
+  ['DOCTORATE', 'Doctorate'],
+  ['MASTERS', 'Masters'],
+  ['BACCALAUREATE', 'Baccalaureate'],
+  ['CLASS_XII_AND_BELOW', 'Class XII and below'],
+  ['NO_FORMAL_EDUCATION', 'No formal education'],
+]
+const EXPERIENCES: Array<[string, string]> = [
+  ['UP_TO_5_YEARS', 'Up to 5 years'],
+  ['FROM_5_TO_10', '5–10 years'],
+  ['FROM_10_TO_15', '10–15 years'],
+  ['ABOVE_15', 'More than 15 years'],
+]
+const SUPPORT_METHODS: Array<[string, string]> = [
+  ['CONVENTIONAL', 'Conventional'],
+  ['NON_CHEMICAL', 'Non-chemical'],
+]
+const CULTIVATION_TYPES: Array<[string, string]> = [
+  ['open_field', 'Open Field'],
+  ['greenhouse', 'Greenhouse / Polyhouse'],
+  ['nursery', 'Nursery'],
+  ['hydroponic', 'Hydroponic'],
+]
+
 export default function FarmPunditsPage() {
   const client = getClient()
   const clientId = client?.id
@@ -32,6 +117,7 @@ export default function FarmPunditsPage() {
 
   const [tab, setTab] = useState<'pundits' | 'search' | 'queries'>('pundits')
   const [pundits, setPundits] = useState<Pundit[]>([])
+  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([])
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [queries, setQueries] = useState<CompanyQuery[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,11 +125,17 @@ export default function FarmPunditsPage() {
   const [inviting, setInviting] = useState<string | null>(null)
   const [inviteError, setInviteError] = useState('')
 
+  // Multi-select filters use string arrays so the URLSearchParams
+  // builder can repeat each key (?state_cosh_ids=a&state_cosh_ids=b).
   const [searchForm, setSearchForm] = useState({
-    state_cosh_id: '',
-    expertise_domain: '',
-    language_code: '',
+    state_cosh_ids: [] as string[],
+    expertise_domains: [] as string[],
+    language_codes: [] as string[],
+    crop_groups: [] as string[],
     education: '',
+    experience_band: '',
+    support_method: '',
+    cultivation_type: '',
     phone: '',
   })
 
@@ -51,36 +143,61 @@ export default function FarmPunditsPage() {
 
   const load = async () => {
     if (!clientId) return
-    const [p, q] = await Promise.all([
+    const [p, inv, q] = await Promise.all([
       api.get<Pundit[]>(`/client/${clientId}/pundits`).catch(() => ({ data: [] as Pundit[] })),
+      api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=PENDING`).catch(() => ({ data: [] as PendingInvitation[] })),
       api.get<CompanyQuery[]>(`/client/${clientId}/queries`).catch(() => ({ data: [] as CompanyQuery[] })),
     ])
     setPundits(p.data)
+    setPendingInvitations(inv.data)
     setQueries(q.data)
     setLoading(false)
   }
 
   useEffect(() => { load() }, [clientId])
 
+  function toggleArr(field: 'state_cosh_ids' | 'expertise_domains' | 'language_codes' | 'crop_groups', value: string) {
+    setSearchForm(f => ({
+      ...f,
+      [field]: f[field].includes(value) ? f[field].filter(x => x !== value) : [...f[field], value],
+    }))
+  }
+
   async function handleSearch(e: FormEvent) {
     e.preventDefault()
     setSearching(true)
     try {
       const params = new URLSearchParams()
-      Object.entries(searchForm).forEach(([k, v]) => { if (v) params.append(k, v) })
+      // Multi-value: append once per selected value so backend's
+      // list[str] = QueryParam(default=[]) reads them as a list.
+      searchForm.state_cosh_ids.forEach(v => params.append('state_cosh_ids', v))
+      searchForm.expertise_domains.forEach(v => params.append('expertise_domains', v))
+      searchForm.language_codes.forEach(v => params.append('language_codes', v))
+      searchForm.crop_groups.forEach(v => params.append('crop_groups', v))
+      // Single-value: append only if set.
+      if (searchForm.education) params.append('education', searchForm.education)
+      if (searchForm.experience_band) params.append('experience_band', searchForm.experience_band)
+      if (searchForm.support_method) params.append('support_method', searchForm.support_method)
+      if (searchForm.cultivation_type) params.append('cultivation_type', searchForm.cultivation_type)
+      if (searchForm.phone) params.append('phone', searchForm.phone)
       const { data } = await api.get<SearchResult[]>(`/client/${clientId}/pundit-search?${params}`)
       setSearchResults(data)
     } finally { setSearching(false) }
   }
 
-  async function invite(punditId: string) {
-    setInviting(punditId); setInviteError('')
+  async function invite(punditUserId: string, resultId: string) {
+    setInviting(resultId); setInviteError('')
     try {
       await api.post(`/client/${clientId}/pundit-invitations`, {
-        pundit_user_id: (searchResults.find(r => r.id === punditId) || { user_id: punditId })?.user_id || punditId,
-        role: inviteRole[punditId] || 'PRIMARY',
+        pundit_user_id: punditUserId,
+        role: inviteRole[resultId] || 'PRIMARY',
       })
-      setSearchResults(prev => prev.map(r => r.id === punditId ? { ...r, already_onboarded: true } : r))
+      // The expert hasn't accepted yet — flag the result as "Invited"
+      // (not "Onboarded") and refresh the pendingInvitations list so
+      // the My Experts tab reflects the new pending row.
+      setSearchResults(prev => prev.map(r => r.id === resultId ? { ...r, already_onboarded: true } : r))
+      const inv = await api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=PENDING`)
+      setPendingInvitations(inv.data)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setInviteError(msg || 'Failed to invite.')
@@ -98,6 +215,32 @@ export default function FarmPunditsPage() {
     load()
   }
 
+  // Reusable multi-select pill block — selected values fill with the
+  // role colour, unselected sit on a muted border.
+  const PillGroup = ({
+    label, options, selected, onToggle,
+  }: {
+    label: string
+    options: Array<[string, string]>
+    selected: string[]
+    onToggle: (v: string) => void
+  }) => (
+    <div>
+      <p className="text-xs font-medium text-slate-500 mb-1.5">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(([val, lbl]) => (
+          <button key={val} type="button" onClick={() => onToggle(val)}
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+              selected.includes(val) ? 'text-white border-transparent' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+            style={selected.includes(val) ? { background: COLOUR } : {}}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
@@ -110,7 +253,7 @@ export default function FarmPunditsPage() {
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
         {([
-          ['pundits', `My Experts (${pundits.length})`],
+          ['pundits', `My Experts (${pundits.length}${pendingInvitations.length > 0 ? ` · ${pendingInvitations.length} pending` : ''})`],
           ['search', 'Find Experts'],
           ['queries', `Queries (${queries.length})`],
         ] as const).map(([t, label]) => (
@@ -125,11 +268,48 @@ export default function FarmPunditsPage() {
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
       ) : tab === 'pundits' ? (
         <div className="space-y-4">
-          {pundits.length === 0 ? (
+          {/* Pending invitations — surfaced separately so the CA can
+              see what's "in flight" before the expert accepts.
+              Without this, an invited expert vanishes from the
+              workflow until they tap Accept in the PWA. */}
+          {pendingInvitations.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-amber-200 bg-amber-100/60">
+                <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+                  Invitations sent · awaiting expert acceptance
+                </p>
+              </div>
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-amber-100">
+                  {pendingInvitations.map(inv => (
+                    <tr key={inv.id}>
+                      <td className="px-5 py-3">
+                        <p className="font-medium text-slate-800">{inv.name || '—'}</p>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                          {inv.phone && <span className="font-mono">{inv.phone}</span>}
+                          {inv.email && <span>{inv.email}</span>}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
+                          {inv.role === 'PRIMARY' ? 'Primary' : 'Panel'}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-right text-xs text-amber-700 font-medium">
+                        Pending acceptance
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {pundits.length === 0 && pendingInvitations.length === 0 ? (
             <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
               <p className="text-slate-500 text-sm">No FarmPundits yet. Use the "Find Experts" tab to search and invite them.</p>
             </div>
-          ) : (
+          ) : pundits.length > 0 ? (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
@@ -183,74 +363,82 @@ export default function FarmPunditsPage() {
                 </tbody>
               </table>
             </div>
-          )}
+          ) : null}
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700 leading-relaxed">
             <strong>Promoter-Pundit (PP)</strong> — A facilitator who is also a FarmPundit. Queries from farmers they personally assigned get routed to them directly (not via round-robin).
           </div>
         </div>
       ) : tab === 'search' ? (
         <div className="space-y-4">
-          {/* Search filters */}
+          {/* Search filters — full §14.3 Step 1 set: 4 multi-select +
+              4 single-select + phone aid. */}
           <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
             <h3 className="font-semibold text-slate-800 mb-4">Search FarmPundits</h3>
-            <form onSubmit={handleSearch} className="grid grid-cols-2 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1.5">State (Cosh ID)</label>
-                <input value={searchForm.state_cosh_id}
-                  onChange={e => setSearchForm(f => ({ ...f, state_cosh_id: e.target.value }))}
-                  placeholder="state_karnataka"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none font-mono" />
+            <form onSubmit={handleSearch} className="space-y-4">
+              <PillGroup label="Support States" options={STATES}
+                selected={searchForm.state_cosh_ids}
+                onToggle={v => toggleArr('state_cosh_ids', v)} />
+              <PillGroup label="Expertise Domains" options={EXPERTISE_DOMAINS}
+                selected={searchForm.expertise_domains}
+                onToggle={v => toggleArr('expertise_domains', v)} />
+              <PillGroup label="Crop Groups" options={CROP_GROUPS}
+                selected={searchForm.crop_groups}
+                onToggle={v => toggleArr('crop_groups', v)} />
+              <PillGroup label="Languages" options={LANGUAGES}
+                selected={searchForm.language_codes}
+                onToggle={v => toggleArr('language_codes', v)} />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Education</label>
+                  <select value={searchForm.education}
+                    onChange={e => setSearchForm(f => ({ ...f, education: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
+                    <option value="">Any</option>
+                    {EDUCATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Years of Experience</label>
+                  <select value={searchForm.experience_band}
+                    onChange={e => setSearchForm(f => ({ ...f, experience_band: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
+                    <option value="">Any</option>
+                    {EXPERIENCES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Support Method</label>
+                  <select value={searchForm.support_method}
+                    onChange={e => setSearchForm(f => ({ ...f, support_method: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
+                    <option value="">Any</option>
+                    {SUPPORT_METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Cultivation Type</label>
+                  <select value={searchForm.cultivation_type}
+                    onChange={e => setSearchForm(f => ({ ...f, cultivation_type: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
+                    <option value="">Any</option>
+                    {CULTIVATION_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Phone Number (search aid)</label>
+                  <input value={searchForm.phone}
+                    onChange={e => setSearchForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="Partial match — e.g. 9876"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none font-mono" />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1.5">Expertise Domain</label>
-                <select value={searchForm.expertise_domain}
-                  onChange={e => setSearchForm(f => ({ ...f, expertise_domain: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
-                  <option value="">Any</option>
-                  <option value="plant_protection">Plant Protection</option>
-                  <option value="plant_nutrition">Plant Nutrition</option>
-                  <option value="overall_agronomy">Overall Agronomy</option>
-                  <option value="plant_propagation">Plant Propagation</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1.5">Language</label>
-                <select value={searchForm.language_code}
-                  onChange={e => setSearchForm(f => ({ ...f, language_code: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
-                  <option value="">Any</option>
-                  <option value="kn">Kannada</option>
-                  <option value="te">Telugu</option>
-                  <option value="ta">Tamil</option>
-                  <option value="hi">Hindi</option>
-                  <option value="en">English</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1.5">Education</label>
-                <select value={searchForm.education}
-                  onChange={e => setSearchForm(f => ({ ...f, education: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
-                  <option value="">Any</option>
-                  <option value="DOCTORATE">Doctorate</option>
-                  <option value="MASTERS">Masters</option>
-                  <option value="BACCALAUREATE">Baccalaureate</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1.5">Phone Number</label>
-                <input value={searchForm.phone}
-                  onChange={e => setSearchForm(f => ({ ...f, phone: e.target.value }))}
-                  placeholder="Search by phone"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none font-mono" />
-              </div>
-              <div className="col-span-2">
-                <button type="submit" disabled={searching}
-                  className="w-full text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                  {searching ? 'Searching…' : 'Search FarmPundits'}
-                </button>
-              </div>
+
+              <button type="submit" disabled={searching}
+                className="w-full text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {searching ? 'Searching…' : 'Search FarmPundits'}
+              </button>
             </form>
           </div>
 
@@ -275,7 +463,12 @@ export default function FarmPunditsPage() {
                       </div>
                     </div>
                     {r.already_onboarded ? (
-                      <span className="text-xs text-green-600 font-medium shrink-0">✓ Onboarded</span>
+                      // After invite OR already accepted — both paths
+                      // converge to already_onboarded=true. The
+                      // pendingInvitations list above is what tells
+                      // the CA whether the expert has actually
+                      // accepted.
+                      <span className="text-xs text-amber-600 font-medium shrink-0">✓ Invited</span>
                     ) : (
                       <div className="flex flex-col gap-1.5 shrink-0">
                         <select value={inviteRole[r.id] || 'PRIMARY'}
@@ -284,7 +477,7 @@ export default function FarmPunditsPage() {
                           <option value="PRIMARY">Primary</option>
                           <option value="PANEL">Panel</option>
                         </select>
-                        <button onClick={() => invite(r.id)} disabled={inviting === r.id}
+                        <button onClick={() => invite(r.user_id, r.id)} disabled={inviting === r.id}
                           className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
                           style={{ background: COLOUR }}>
                           {inviting === r.id ? '…' : 'Invite'}
