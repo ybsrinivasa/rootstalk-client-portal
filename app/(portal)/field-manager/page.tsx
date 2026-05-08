@@ -17,7 +17,7 @@ export default function FieldManagerPage() {
   const clientId = client?.id
   const colour = client?.primary_colour || '#1A5C2A'
 
-  const [tab, setTab] = useState<'dealers' | 'facilitators' | 'farmers' | 'assign'>('dealers')
+  const [tab, setTab] = useState<'dealers' | 'facilitators' | 'farmers'>('dealers')
   const [dealers, setDealers] = useState<Promoter[]>([])
   const [facilitators, setFacilitators] = useState<Promoter[]>([])
   const [farmers, setFarmers] = useState<Farmer[]>([])
@@ -28,16 +28,6 @@ export default function FieldManagerPage() {
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
   const [addForm, setAddForm] = useState({ name: '', phone: '', territory_notes: '' })
-
-  // Assignment
-  const [assignForm, setAssignForm] = useState({
-    farmer_subscription_id: '',
-    promoter_user_id: '',
-    promoter_type: 'DEALER',
-  })
-  const [assigning, setAssigning] = useState(false)
-  const [assignError, setAssignError] = useState('')
-  const [assignSuccess, setAssignSuccess] = useState('')
 
   const load = async () => {
     if (!clientId) return
@@ -68,23 +58,6 @@ export default function FieldManagerPage() {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setAddError(msg || 'Failed to register.')
     } finally { setAdding(false) }
-  }
-
-  async function handleAssign(e: FormEvent) {
-    e.preventDefault()
-    setAssigning(true); setAssignError(''); setAssignSuccess('')
-    try {
-      await api.post('/promoter/assignments/initiate', {
-        subscription_id: assignForm.farmer_subscription_id,
-        promoter_user_id: assignForm.promoter_user_id,
-        promoter_type: assignForm.promoter_type,
-      })
-      setAssignSuccess('Assignment sent. The farmer will be notified.')
-      setAssignForm({ farmer_subscription_id: '', promoter_user_id: '', promoter_type: 'DEALER' })
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setAssignError(msg || 'Failed to assign.')
-    } finally { setAssigning(false) }
   }
 
   async function deactivatePromoter(id: string) {
@@ -165,17 +138,33 @@ export default function FieldManagerPage() {
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Field Manager</h1>
-        <p className="text-slate-500 text-sm mt-0.5">Register dealers and facilitators, manage farmer assignments</p>
+        <p className="text-slate-500 text-sm mt-0.5">Register dealers and facilitators</p>
+      </div>
+
+      {/* Signpost — replaces the old "Assign Advisory" tab. Per spec
+          §11.2, advisory assignment is initiated by the Promoter on
+          their RootsTalk PWA, not by the CA from this page.
+          Allocation of subscription units to a Promoter happens on
+          the Subscriptions page. This banner makes that workflow
+          discoverable for CAs who land here looking for an action. */}
+      <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 text-sm text-blue-800 leading-relaxed">
+        <span className="font-semibold">How advisory assignment works:</span>{' '}
+        Promoters assign advisories to farmers from their own RootsTalk PWA.
+        To give a Promoter the units they need, see the{' '}
+        <a href="/subscription" className="underline font-medium hover:text-blue-900">
+          Subscriptions page
+        </a>{' '}
+        and allocate from your company pool.
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
-        {(['dealers', 'facilitators', 'farmers', 'assign'] as const).map(t => (
+        {(['dealers', 'facilitators', 'farmers'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 rounded-lg text-sm font-medium capitalize whitespace-nowrap transition-all ${tab === t ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
             {t === 'dealers' ? `Dealers (${dealers.length})` :
              t === 'facilitators' ? `Facilitators (${facilitators.length})` :
-             t === 'farmers' ? `Farmers (${farmers.length})` : 'Assign Advisory'}
+             `Farmers (${farmers.length})`}
           </button>
         ))}
       </div>
@@ -186,7 +175,8 @@ export default function FieldManagerPage() {
         <PromoterTable list={dealers} type="DEALER" />
       ) : tab === 'facilitators' ? (
         <PromoterTable list={facilitators} type="FACILITATOR" />
-      ) : tab === 'farmers' ? (
+      ) : (
+        /* Farmers tab */
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {farmers.length === 0 ? (
             <div className="p-10 text-center">
@@ -216,61 +206,6 @@ export default function FieldManagerPage() {
               </tbody>
             </table>
           )}
-        </div>
-      ) : (
-        /* Assignment Tab */
-        <div className="max-w-lg space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-800 mb-1">Assign a Dealer or Facilitator to a Farmer</h3>
-            <p className="text-slate-500 text-sm mb-5">
-              The promoter will be associated with this farmer's subscription. The farmer receives a notification and must accept.
-            </p>
-            <form onSubmit={handleAssign} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Farmer's Subscription</label>
-                <select value={assignForm.farmer_subscription_id}
-                  onChange={e => setAssignForm(f => ({ ...f, farmer_subscription_id: e.target.value }))}
-                  required
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="">Select farmer…</option>
-                  {farmers.filter(f => f.subscription_status === 'ACTIVE').map(f => (
-                    <option key={f.subscription_id} value={f.subscription_id}>
-                      {f.name || f.phone || f.user_id} — {f.subscription_status}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Assign to</label>
-                <select value={assignForm.promoter_type}
-                  onChange={e => setAssignForm(f => ({ ...f, promoter_type: e.target.value, promoter_user_id: '' }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 mb-2">
-                  <option value="DEALER">Dealer</option>
-                  <option value="FACILITATOR">Facilitator</option>
-                </select>
-                <select value={assignForm.promoter_user_id}
-                  onChange={e => setAssignForm(f => ({ ...f, promoter_user_id: e.target.value }))}
-                  required
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="">Select {assignForm.promoter_type.toLowerCase()}…</option>
-                  {(assignForm.promoter_type === 'DEALER' ? dealers : facilitators)
-                    .filter(p => p.status === 'ACTIVE')
-                    .map(p => (
-                      <option key={p.user_id} value={p.user_id}>
-                        {p.name || p.phone || p.user_id}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              {assignError && <p className="text-sm text-red-600">{assignError}</p>}
-              {assignSuccess && <p className="text-sm text-green-700">{assignSuccess}</p>}
-              <button type="submit" disabled={assigning}
-                className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                {assigning ? 'Assigning…' : 'Send Assignment'}
-              </button>
-            </form>
-          </div>
         </div>
       )}
 
