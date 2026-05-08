@@ -87,6 +87,18 @@ export default function FieldManagerPage() {
     } finally { setAssigning(false) }
   }
 
+  async function deactivatePromoter(id: string) {
+    if (!confirm('Deactivate this promoter? They will stop being able to assign packages on behalf of this company.')) return
+    await api.put(`/client/${clientId}/field-manager/promoters/${id}/deactivate`)
+    load()
+  }
+
+  async function reactivatePromoter(id: string) {
+    if (!confirm('Reactivate this promoter? They will resume being able to assign packages.')) return
+    await api.put(`/client/${clientId}/field-manager/promoters/${id}/reactivate`)
+    load()
+  }
+
   const PromoterTable = ({ list, type }: { list: Promoter[], type: string }) => (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -111,6 +123,7 @@ export default function FieldManagerPage() {
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden sm:table-cell">Phone</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Territory</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -125,6 +138,19 @@ export default function FieldManagerPage() {
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                       {p.status}
                     </span>
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    {p.status === 'ACTIVE' ? (
+                      <button onClick={() => deactivatePromoter(p.id)}
+                        className="text-xs px-2 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
+                        Deactivate
+                      </button>
+                    ) : (
+                      <button onClick={() => reactivatePromoter(p.id)}
+                        className="text-xs px-2 py-1 rounded-lg border border-green-200 text-green-600 hover:bg-green-50">
+                        Reactivate
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

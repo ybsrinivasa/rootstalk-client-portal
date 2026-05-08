@@ -5,7 +5,9 @@ import { getClient } from '@/lib/auth'
 
 interface Pundit {
   id: string; pundit_id: string; name: string | null; phone: string | null
-  role: string; status: string; is_promoter_pundit: boolean; round_robin_sequence: number | null; onboarded_at: string
+  role: string; status: string; is_promoter_pundit: boolean
+  round_robin_sequence: number | null; active_query_count: number
+  onboarded_at: string
 }
 interface PendingInvitation {
   id: string; pundit_id: string; name: string | null; phone: string | null; email: string | null
@@ -205,9 +207,38 @@ export default function FarmPunditsPage() {
   }
 
   async function deactivate(cpId: string) {
-    if (!confirm('Deactivate this FarmPundit? They will stop receiving new queries.')) return
+    if (!confirm('Deactivate this FarmPundit? They will stop receiving new queries. Their currently-held queries can still be acted on until resolved.')) return
     await api.put(`/client/${clientId}/pundits/${cpId}/deactivate`)
     load()
+  }
+
+  async function reactivate(cpId: string) {
+    if (!confirm('Reactivate this FarmPundit? They will start receiving new queries again.')) return
+    await api.put(`/client/${clientId}/pundits/${cpId}/reactivate`)
+    load()
+  }
+
+  async function changeRole(cpId: string, currentRole: string) {
+    const target = currentRole === 'PRIMARY' ? 'PANEL' : 'PRIMARY'
+    if (!confirm(`Change role to ${target === 'PRIMARY' ? 'Primary' : 'Panel'}? ${target === 'PANEL' ? 'They will be removed from the round-robin sequence.' : 'They will be added to the end of the round-robin sequence.'}`)) return
+    try {
+      await api.put(`/client/${clientId}/pundits/${cpId}/role`, { role: target })
+      load()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(msg || 'Failed to change role.')
+    }
+  }
+
+  async function removePundit(cpId: string, name: string | null) {
+    if (!confirm(`Remove ${name || 'this FarmPundit'} from your company entirely? Their PWA profile remains, and they can still be invited by other companies.`)) return
+    try {
+      await api.delete(`/client/${clientId}/pundits/${cpId}`)
+      load()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(msg || 'Failed to remove.')
+    }
   }
 
   async function togglePromoterPundit(cpId: string, current: boolean) {
@@ -355,6 +386,35 @@ export default function FarmPunditsPage() {
                               className="text-xs px-2 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
                               Deactivate
                             </button>
+                          )}
+                          {p.status === 'INACTIVE' && (
+                            <>
+                              <button onClick={() => reactivate(p.id)}
+                                className="text-xs px-2 py-1 rounded-lg border border-green-200 text-green-600 hover:bg-green-50">
+                                Reactivate
+                              </button>
+                              {/* Role-change + delete are only allowed
+                                  per spec §14.5 once active queries
+                                  are drained. The active_query_count
+                                  comes from the list endpoint. */}
+                              {p.active_query_count === 0 ? (
+                                <>
+                                  <button onClick={() => changeRole(p.id, p.role)}
+                                    className="text-xs px-2 py-1 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50">
+                                    {p.role === 'PRIMARY' ? '→ Panel' : '→ Primary'}
+                                  </button>
+                                  <button onClick={() => removePundit(p.id, p.name)}
+                                    className="text-xs px-2 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
+                                    Remove
+                                  </button>
+                                </>
+                              ) : (
+                                <span title="Wait until all active queries are resolved or returned"
+                                  className="text-xs text-slate-400 italic px-1">
+                                  {p.active_query_count} active
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>
