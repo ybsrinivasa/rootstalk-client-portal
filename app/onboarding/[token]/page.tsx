@@ -181,21 +181,40 @@ export default function OnboardingPage() {
     } catch (err: unknown) {
       // Surface as much detail as the response carries, so the CA / CM
       // can self-diagnose instead of staring at "Submission failed".
-      // Three shapes covered:
+      // Four shapes covered:
+      //   • detail: { field, code, message }  (field-level 422 from backend
+      //                                        — pin to the right input)
       //   • detail: string         (HTTPException(detail="...") on backend)
       //   • detail: array          (Pydantic validation error, FastAPI default)
       //   • no detail at all       (5xx — likely backend exception, network, CORS)
       const e = err as {
         response?: {
           status?: number
-          data?: { detail?: string | Array<{ msg?: string; loc?: (string | number)[] }> }
+          data?: {
+            detail?:
+              | string
+              | Array<{ msg?: string; loc?: (string | number)[] }>
+              | { field?: string; code?: string; message?: string }
+          }
         }
         message?: string
       }
       const status = e?.response?.status
       const detail = e?.response?.data?.detail
       let msg: string
-      if (Array.isArray(detail) && detail.length > 0) {
+      if (
+        detail && typeof detail === 'object' && !Array.isArray(detail)
+        && typeof (detail as { field?: string }).field === 'string'
+      ) {
+        const fld = detail as { field: string; message?: string }
+        const fieldMsg = fld.message || 'This value is not valid.'
+        setFieldErrors(prev => ({ ...prev, [fld.field]: fieldMsg }))
+        requestAnimationFrame(() => {
+          const el = document.querySelector(`[data-error-key="${fld.field}"]`)
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        })
+        msg = fieldMsg
+      } else if (Array.isArray(detail) && detail.length > 0) {
         msg = detail
           .map(d => `${(d.loc?.slice(-1)?.[0] ?? 'field')}: ${d.msg ?? 'invalid'}`)
           .join('; ')
