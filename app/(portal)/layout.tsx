@@ -128,6 +128,7 @@ const ALL_NAV: NavItem[] = [
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
   { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA' },
   { href: '/farm-pundits',       label: 'FarmPundits',       Icon: IconFarmPundits,  group: 'PORTAL', caOnly: true },
+  { href: '/standard-responses', label: 'Standard Q&A',      Icon: IconCHA,          group: 'CONTENT' },
   { href: '/users',              label: 'Users',             Icon: IconUsers,        group: 'PORTAL' },
   { href: '/setup',              label: 'Setup',             Icon: IconSetup,        group: 'PORTAL' },
   { href: '/profile',            label: 'Company Profile',   Icon: IconBuilding,     group: 'PORTAL', caOnly: true },
@@ -136,7 +137,7 @@ const ALL_NAV: NavItem[] = [
 ]
 
 const ROLE_NAV: Record<string, string[]> = {
-  SUBJECT_EXPERT:   ['/dashboard', '/advisory', '/cha', '/custom-parameters', '/alerts'],
+  SUBJECT_EXPERT:   ['/dashboard', '/advisory', '/cha', '/custom-parameters', '/standard-responses', '/alerts'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager', '/alerts'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
