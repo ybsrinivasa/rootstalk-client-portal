@@ -171,6 +171,29 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
       <div className="flex-1 flex items-center justify-center bg-[#F7F5F0] px-8 py-12">
         <div className="w-full max-w-sm">
 
+          {/* Mobile branding strip — the desktop brand panel above is
+              `hidden lg:flex`, so on screens < 1024px the logo never
+              rendered. Surfaced 2026-05-09 by KK testing the branded
+              login on a phone. This strip is the inverse — visible
+              < lg, hidden ≥ lg — and only appears when branding is
+              loaded so the company-name step on mobile keeps its
+              clean look. */}
+          {branding && (
+            <div className="lg:hidden mb-6 flex items-center gap-3 pb-4 border-b border-stone-200">
+              {branding.logo_url
+                ? <img src={branding.logo_url} alt={`${branding.display_name || 'Company'} logo`} className="h-10 object-contain" />
+                : <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold"
+                    style={{ background: `linear-gradient(135deg, ${colour}dd, ${colour})` }}>
+                    {branding.display_name?.[0] || 'R'}
+                  </div>
+              }
+              <div>
+                <p className="text-stone-900 font-bold text-sm">{branding.display_name}</p>
+                {branding.tagline && <p className="text-stone-500 text-xs">{branding.tagline}</p>}
+              </div>
+            </div>
+          )}
+
           {/* RootsTalk wordmark (company step only) */}
           {step === 'company' && (
             <div className="mb-8 flex items-center gap-2">
