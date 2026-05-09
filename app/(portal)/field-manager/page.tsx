@@ -5,7 +5,8 @@ import { getClient } from '@/lib/auth'
 
 interface Promoter {
   id: string; user_id: string; name: string | null; phone: string | null
-  promoter_type: string; status: string; territory_notes: string | null; registered_at: string
+  promoter_type: string; status: string; is_promoter: boolean
+  territory_notes: string | null; registered_at: string
 }
 interface Farmer {
   user_id: string; name: string | null; phone: string | null
@@ -106,6 +107,28 @@ export default function FieldManagerPage() {
     load()
   }
 
+  async function togglePromoterFlag(p: Promoter) {
+    const target = !p.is_promoter
+    const verb = target ? 'Mark' : 'Unmark'
+    const consequence = target
+      ? 'They will be able to assign packages on behalf of this company.'
+      : 'They will stop being able to assign packages on behalf of this company. Existing assignments are unaffected.'
+    if (!confirm(`${verb} ${p.name || 'this person'} as a Promoter? ${consequence}`)) return
+    try {
+      await api.put(
+        `/client/${clientId}/field-manager/promoters/${p.id}/promoter-flag`,
+        { is_promoter: target },
+      )
+      load()
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string'
+        ? detail
+        : (detail as { message?: string })?.message || 'Could not change Promoter status.'
+      alert(msg)
+    }
+  }
+
   async function checkPhone(phone: string) {
     const trimmed = phone.trim()
     if (!trimmed || !clientId) {
@@ -163,6 +186,11 @@ export default function FieldManagerPage() {
                 <tr key={p.id} className="hover:bg-slate-50">
                   <td className="px-5 py-3.5">
                     <p className="font-medium text-slate-800">{p.name || '—'}</p>
+                    {p.is_promoter && (
+                      <span className="inline-block mt-1 text-xs bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-medium">
+                        ★ Promoter
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 font-mono text-xs text-slate-600 hidden sm:table-cell">{p.phone || '—'}</td>
                   <td className="px-5 py-3.5 text-slate-400 text-xs hidden md:table-cell">{p.territory_notes || '—'}</td>
@@ -172,17 +200,29 @@ export default function FieldManagerPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    {p.status === 'ACTIVE' ? (
-                      <button onClick={() => deactivatePromoter(p.id)}
-                        className="text-xs px-2 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
-                        Deactivate
-                      </button>
-                    ) : (
-                      <button onClick={() => reactivatePromoter(p.id)}
-                        className="text-xs px-2 py-1 rounded-lg border border-green-200 text-green-600 hover:bg-green-50">
-                        Reactivate
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                      {p.status === 'ACTIVE' && (
+                        <button onClick={() => togglePromoterFlag(p)}
+                          className={`text-xs px-2 py-1 rounded-lg border whitespace-nowrap ${
+                            p.is_promoter
+                              ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                              : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'
+                          }`}>
+                          {p.is_promoter ? 'Unmark Promoter' : 'Mark as Promoter'}
+                        </button>
+                      )}
+                      {p.status === 'ACTIVE' ? (
+                        <button onClick={() => deactivatePromoter(p.id)}
+                          className="text-xs px-2 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
+                          Deactivate
+                        </button>
+                      ) : (
+                        <button onClick={() => reactivatePromoter(p.id)}
+                          className="text-xs px-2 py-1 rounded-lg border border-green-200 text-green-600 hover:bg-green-50">
+                          Reactivate
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
