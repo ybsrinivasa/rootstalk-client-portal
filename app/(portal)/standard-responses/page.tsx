@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, FormEvent } from 'react'
+import Link from 'next/link'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 
@@ -131,12 +132,6 @@ export default function StandardResponsesPage() {
         </button>
       </div>
 
-      {/* Sub-batch 3 placeholder. Will be replaced by the inline
-          Timeline + Practice editor once that lands. */}
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800 leading-relaxed">
-        <strong>Coming next:</strong> Timeline + Practice editor for each entry. Today you can curate the question and the crop scope; the advisory body (Timelines / Practices / Elements) will land in the next release. Existing entries will pick up the editor automatically — no data loss.
-      </div>
-
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <input value={search}
@@ -183,9 +178,14 @@ export default function StandardResponsesPage() {
                   )}
                 </div>
                 <div className="flex flex-col gap-1.5 shrink-0">
+                  <Link href={`/standard-responses/${item.id}`}
+                    className="text-xs px-2.5 py-1 rounded-lg text-white text-center font-medium hover:opacity-90"
+                    style={{ background: colour }}>
+                    Edit advisory →
+                  </Link>
                   <button onClick={() => openEdit(item)}
                     className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-                    Edit
+                    Rename
                   </button>
                   <button onClick={() => remove(item)}
                     className="text-xs px-2.5 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
