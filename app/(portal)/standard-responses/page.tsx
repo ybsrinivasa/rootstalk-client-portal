@@ -3,35 +3,27 @@ import { useEffect, useState, FormEvent } from 'react'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 
-// Spec §14.9. Subject Experts curate question/answer pairs for the
-// company. FarmPundits later browse this library while responding to
-// farmer queries (no edit; they layer their own additional guidance
-// on top). V1 answer body is text + media; Timelines/Practices
-// integration deferred to V1.1 — see audit memory for context.
-
-interface AnswerMediaItem {
-  media_type: string
-  url: string
-  caption?: string
-}
+// Spec §14.9 — UCAT pipe-3. Subject Experts curate question-rooted
+// advisories; FarmPundits pick a question while responding to a
+// farmer query, and the matched advisory's Timelines (with their
+// full Practice → Element scaffold) merge into the farmer's
+// advisory just like a CHA recommendation.
+//
+// Sub-batch 1 (this batch) ships the question/crop CRUD only. The
+// Timeline + Practice editor lands in Sub-batch 3 — until then,
+// each entry shows an "Edit advisory" placeholder where the editor
+// will live. The backend `pg_timelines` table is already
+// polymorphic (commit 4b8e2c1a93f5) so the editor will write into
+// it the same way the CHA editor writes PG timelines.
 
 interface StandardResponse {
   id: string
   client_id: string
   crop_cosh_id: string | null
   question_text: string
-  answer_text: string | null
-  answer_media: AnswerMediaItem[]
   created_at: string
   updated_at: string
 }
-
-const MEDIA_TYPES: Array<[string, string]> = [
-  ['IMAGE', 'Image'],
-  ['VIDEO', 'Video'],
-  ['AUDIO', 'Audio'],
-  ['HYPERLINK', 'Hyperlink'],
-]
 
 const CROP_FILTER_ALL = '__ALL__'
 const CROP_FILTER_AGNOSTIC = 'AGNOSTIC'
@@ -39,9 +31,7 @@ const CROP_FILTER_AGNOSTIC = 'AGNOSTIC'
 const emptyForm = {
   id: '' as string,
   question_text: '',
-  answer_text: '',
   crop_cosh_id: '',
-  answer_media: [] as AnswerMediaItem[],
 }
 
 export default function StandardResponsesPage() {
@@ -85,33 +75,10 @@ export default function StandardResponsesPage() {
     setForm({
       id: item.id,
       question_text: item.question_text,
-      answer_text: item.answer_text || '',
       crop_cosh_id: item.crop_cosh_id || '',
-      answer_media: item.answer_media || [],
     })
     setError('')
     setShowForm(true)
-  }
-
-  function addMediaRow() {
-    setForm(f => ({
-      ...f,
-      answer_media: [...f.answer_media, { media_type: 'IMAGE', url: '', caption: '' }],
-    }))
-  }
-
-  function updateMediaRow(idx: number, patch: Partial<AnswerMediaItem>) {
-    setForm(f => ({
-      ...f,
-      answer_media: f.answer_media.map((m, i) => i === idx ? { ...m, ...patch } : m),
-    }))
-  }
-
-  function removeMediaRow(idx: number) {
-    setForm(f => ({
-      ...f,
-      answer_media: f.answer_media.filter((_, i) => i !== idx),
-    }))
   }
 
   async function save(e: FormEvent) {
@@ -124,10 +91,7 @@ export default function StandardResponsesPage() {
     try {
       const payload = {
         question_text: form.question_text.trim(),
-        answer_text: form.answer_text.trim() || null,
         crop_cosh_id: form.crop_cosh_id.trim() || null,
-        // Drop empty rows so the backend's media validation doesn't 422 on them.
-        answer_media: form.answer_media.filter(m => m.url.trim()),
       }
       if (form.id) {
         await api.put(`/client/${clientId}/standard-responses/${form.id}`, payload)
@@ -157,7 +121,7 @@ export default function StandardResponsesPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Standard Q&amp;A Library</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Curate question/answer pairs that FarmPundits use when responding to farmer queries.
+            Curate question-rooted advisories. FarmPundits pick from this library when responding to farmer queries; the advisory's Timelines merge into the farmer's plan just like a CHA recommendation.
           </p>
         </div>
         <button onClick={openCreate}
@@ -165,6 +129,12 @@ export default function StandardResponsesPage() {
           style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
           + Add Q&amp;A
         </button>
+      </div>
+
+      {/* Sub-batch 3 placeholder. Will be replaced by the inline
+          Timeline + Practice editor once that lands. */}
+      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800 leading-relaxed">
+        <strong>Coming next:</strong> Timeline + Practice editor for each entry. Today you can curate the question and the crop scope; the advisory body (Timelines / Practices / Elements) will land in the next release. Existing entries will pick up the editor automatically — no data loss.
       </div>
 
       {/* Filters */}
@@ -192,10 +162,7 @@ export default function StandardResponsesPage() {
       ) : items.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
           <p className="text-slate-500 text-sm">
-            No entries yet. Add the first standard question + answer to start the library.
-          </p>
-          <p className="text-slate-400 text-xs mt-2">
-            FarmPundits will pick from this library when responding to farmer queries.
+            No entries yet. Add the first standard question + crop scope to start the library.
           </p>
         </div>
       ) : (
@@ -213,26 +180,6 @@ export default function StandardResponsesPage() {
                     <span className="inline-block mt-1 text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
                       Crop-agnostic
                     </span>
-                  )}
-                  {item.answer_text && (
-                    <p className="text-sm text-slate-600 mt-2 leading-relaxed whitespace-pre-wrap">
-                      {item.answer_text}
-                    </p>
-                  )}
-                  {item.answer_media && item.answer_media.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {item.answer_media.map((m, i) => (
-                        <a key={i} href={m.url} target="_blank" rel="noopener noreferrer"
-                          className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-100">
-                          {m.media_type} · {m.caption || m.url}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {!item.answer_text && (!item.answer_media || item.answer_media.length === 0) && (
-                    <p className="text-xs text-amber-600 mt-2 italic">
-                      ⚠ No answer body yet. FarmPundits will see only the question.
-                    </p>
                   )}
                 </div>
                 <div className="flex flex-col gap-1.5 shrink-0">
@@ -254,13 +201,13 @@ export default function StandardResponsesPage() {
       {/* Form modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
             <div className="p-6 border-b border-slate-100">
               <h2 className="font-bold text-slate-900">
                 {form.id ? 'Edit standard Q&A' : 'Add standard Q&A'}
               </h2>
               <p className="text-slate-500 text-sm mt-0.5">
-                FarmPundits will pick from this library while responding to farmer queries.
+                Curate the question and crop scope. Timelines for the advisory will be added in the next release.
               </p>
             </div>
             <form onSubmit={save} className="p-6 space-y-4">
@@ -281,47 +228,6 @@ export default function StandardResponsesPage() {
                   placeholder="crop:paddy — leave empty for crop-agnostic"
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono" />
                 <p className="text-xs text-slate-400 mt-1">Leave empty for crop-agnostic entries (apply to any crop).</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Answer (text)</label>
-                <textarea value={form.answer_text}
-                  onChange={e => setForm(f => ({ ...f, answer_text: e.target.value }))}
-                  rows={5}
-                  placeholder="The full answer the FarmPundit will forward to the farmer."
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-sm font-medium text-slate-700">Answer attachments (optional)</label>
-                  <button type="button" onClick={addMediaRow}
-                    className="text-xs text-green-700 hover:text-green-800 font-medium">+ Add</button>
-                </div>
-                {form.answer_media.length === 0 ? (
-                  <p className="text-xs text-slate-400">No attachments yet. Click "+ Add" to attach an image, video, audio, or hyperlink.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {form.answer_media.map((m, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <select value={m.media_type}
-                          onChange={e => updateMediaRow(idx, { media_type: e.target.value })}
-                          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs">
-                          {MEDIA_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                        </select>
-                        <input value={m.url}
-                          onChange={e => updateMediaRow(idx, { url: e.target.value })}
-                          placeholder="https://…"
-                          className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" />
-                        <input value={m.caption || ''}
-                          onChange={e => updateMediaRow(idx, { caption: e.target.value })}
-                          placeholder="Caption (optional)"
-                          className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
-                        <button type="button" onClick={() => removeMediaRow(idx)}
-                          className="text-red-400 hover:text-red-600 text-sm w-6">×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
 
               {error && (
