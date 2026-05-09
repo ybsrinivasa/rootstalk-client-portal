@@ -8,6 +8,10 @@ interface ClientLocation {
 }
 interface ClientCrop {
   id: string; crop_cosh_id: string; status: string; added_at: string
+  crop_name_en?: string | null
+}
+interface AvailableCrop {
+  cosh_id: string; name_en: string; status: string
 }
 
 export default function SetupPage() {
@@ -18,6 +22,7 @@ export default function SetupPage() {
   const [tab, setTab] = useState<'locations' | 'crops'>('locations')
   const [locations, setLocations] = useState<ClientLocation[]>([])
   const [crops, setCrops] = useState<ClientCrop[]>([])
+  const [available, setAvailable] = useState<AvailableCrop[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -31,9 +36,11 @@ export default function SetupPage() {
     Promise.all([
       api.get<ClientLocation[]>(`/client/${clientId}/locations`).catch(() => ({ data: [] as ClientLocation[] })),
       api.get<ClientCrop[]>(`/client/${clientId}/crops`).catch(() => ({ data: [] as ClientCrop[] })),
-    ]).then(([locRes, cropRes]) => {
+      api.get<AvailableCrop[]>(`/client/${clientId}/available-crops`).catch(() => ({ data: [] as AvailableCrop[] })),
+    ]).then(([locRes, cropRes, availRes]) => {
       setLocations(locRes.data)
       setCrops(cropRes.data)
+      setAvailable(availRes.data)
     }).finally(() => setLoading(false))
   }, [clientId])
 
@@ -64,14 +71,28 @@ export default function SetupPage() {
 
   async function addCrop(e: FormEvent) {
     e.preventDefault()
+    if (!cropForm.crop_cosh_id) return
     setSaving(true); setError('')
     try {
       const { data } = await api.post<ClientCrop>(`/client/${clientId}/crops`, cropForm)
       setCrops(prev => [...prev, data])
+      setAvailable(prev => prev.filter(c => c.cosh_id !== cropForm.crop_cosh_id))
       setCropForm({ crop_cosh_id: '' })
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to add crop.')
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      // Backend 422 envelopes `{code, message}` for snapshot errors.
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : (detail as { message?: string })?.message || 'Failed to add crop.'
+      const code = (detail as { code?: string })?.code
+      if (code === 'crop_missing_measure') {
+        setError(
+          `${msg} (Area-wise / plant-wise typing for this crop hasn't synced from Cosh yet — that ships in a separate Connect.)`,
+        )
+      } else {
+        setError(msg)
+      }
     } finally { setSaving(false) }
   }
 
@@ -79,8 +100,16 @@ export default function SetupPage() {
     if (!clientId || !confirm('Remove this crop?')) return
     setDeleting(id)
     try {
+      const removed = crops.find(c => c.id === id)
       await api.delete(`/client/${clientId}/crops/${id}`)
       setCrops(prev => prev.filter(c => c.id !== id))
+      // Refresh the picker so the just-removed crop reappears.
+      if (removed) {
+        try {
+          const { data } = await api.get<AvailableCrop[]>(`/client/${clientId}/available-crops`)
+          setAvailable(data)
+        } catch { /* picker refresh is best-effort */ }
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setError(msg || 'Failed to remove crop.')
@@ -174,10 +203,22 @@ export default function SetupPage() {
           <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
             <h3 className="font-semibold text-slate-800 mb-4">Add Crop</h3>
             <form onSubmit={addCrop} className="flex gap-3">
-              <input value={cropForm.crop_cosh_id} onChange={e => setCropForm({ crop_cosh_id: e.target.value })}
-                required placeholder="Crop Cosh ID (e.g. crop_paddy_kharif)"
-                className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono" />
-              <button type="submit" disabled={saving}
+              <select
+                value={cropForm.crop_cosh_id}
+                onChange={e => setCropForm({ crop_cosh_id: e.target.value })}
+                required
+                disabled={available.length === 0}
+                className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
+                <option value="">
+                  {available.length === 0
+                    ? 'No crops left to add — every Cosh-classified crop is already on this list.'
+                    : `Pick a crop (${available.length} available from Cosh)…`}
+                </option>
+                {available.map(c => (
+                  <option key={c.cosh_id} value={c.cosh_id}>{c.name_en}</option>
+                ))}
+              </select>
+              <button type="submit" disabled={saving || !cropForm.crop_cosh_id}
                 className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
                 style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                 {saving ? 'Adding…' : '+ Add'}
@@ -196,7 +237,8 @@ export default function SetupPage() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Crop Cosh ID</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Crop</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cosh ID</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Added</th>
                     <th className="px-5 py-3"></th>
@@ -205,7 +247,8 @@ export default function SetupPage() {
                 <tbody className="divide-y divide-slate-50">
                   {crops.map(crop => (
                     <tr key={crop.id}>
-                      <td className="px-5 py-3 font-mono text-xs text-slate-600">{crop.crop_cosh_id}</td>
+                      <td className="px-5 py-3 text-slate-800 font-medium">{crop.crop_name_en || '—'}</td>
+                      <td className="px-5 py-3 font-mono text-xs text-slate-500">{crop.crop_cosh_id}</td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${crop.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                           {crop.status}
