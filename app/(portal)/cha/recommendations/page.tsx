@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useMemo, Suspense } from 'react'
+import { useEffect, useState, useMemo, Suspense, FormEvent } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
@@ -18,6 +18,19 @@ interface ChaRec {
   created_at: string
 }
 
+interface ChaProblem {
+  cosh_id: string
+  name_en: string
+}
+
+interface GlobalPG {
+  id: string
+  problem_group_cosh_id: string
+  area_or_plant: 'AREA_WISE' | 'PLANT_WISE' | null
+  status: string
+  version: number
+}
+
 const STATUS_COLOUR: Record<string, string> = {
   DRAFT: 'bg-amber-100 text-amber-700',
   ACTIVE: 'bg-green-100 text-green-700',
@@ -27,25 +40,132 @@ const STATUS_COLOUR: Record<string, string> = {
 function ChaRecsContent() {
   const client = getClient()
   const clientId = client?.id
+  const colour = client?.primary_colour || '#1A5C2A'
   const params = useSearchParams()
   const pgFilter = params.get('pg') || ''
   const apFilter = params.get('ap') || ''
   const statusFilter = params.get('status') || ''
 
   const [recs, setRecs] = useState<ChaRec[]>([])
+  const [problems, setProblems] = useState<ChaProblem[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  // Create
+  const [showCreate, setShowCreate] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [form, setForm] = useState({
+    problem_group_cosh_id: '',
+    area_or_plant: 'AREA_WISE' as 'AREA_WISE' | 'PLANT_WISE',
+  })
+
+  // Import
+  const [showImport, setShowImport] = useState(false)
+  const [globals, setGlobals] = useState<GlobalPG[]>([])
+  const [loadingGlobals, setLoadingGlobals] = useState(false)
+  const [importing, setImporting] = useState<string | null>(null)
+  const [importError, setImportError] = useState('')
+
+  const load = async () => {
     if (!clientId) return
     setLoading(true)
     const qs = new URLSearchParams()
     if (pgFilter) qs.set('problem_group_cosh_id', pgFilter)
     if (apFilter) qs.set('area_or_plant', apFilter)
     if (statusFilter) qs.set('status', statusFilter)
-    api.get<ChaRec[]>(`/client/${clientId}/cha/recommendations?${qs.toString()}`)
-      .then(r => setRecs(r.data))
-      .finally(() => setLoading(false))
-  }, [clientId, pgFilter, apFilter, statusFilter])
+    try {
+      const [{ data: recsData }, { data: pbms }] = await Promise.all([
+        api.get<ChaRec[]>(`/client/${clientId}/cha/recommendations?${qs.toString()}`),
+        api.get<ChaProblem[]>(`/client/${clientId}/cha/problems`),
+      ])
+      setRecs(recsData)
+      setProblems(pbms)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [clientId, pgFilter, apFilter, statusFilter])
+
+  const openCreate = () => {
+    setForm({
+      problem_group_cosh_id: pgFilter || '',
+      area_or_plant: (apFilter as 'AREA_WISE' | 'PLANT_WISE') || 'AREA_WISE',
+    })
+    setCreateError('')
+    setShowCreate(true)
+  }
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault()
+    if (!clientId || !form.problem_group_cosh_id) return
+    setCreating(true); setCreateError('')
+    try {
+      await api.post(`/client/${clientId}/pg-recommendations`, {
+        problem_group_cosh_id: form.problem_group_cosh_id,
+        area_or_plant: form.area_or_plant,
+      })
+      setShowCreate(false)
+      await load()
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : (detail as { message?: string })?.message
+      const code = (detail as { code?: string })?.code
+      if (code === 'bundle_already_exists') {
+        setCreateError(`${msg} Open the existing bundle from the table below.`)
+      } else {
+        setCreateError(msg || 'Failed to create recommendation.')
+      }
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const openImport = async () => {
+    setShowImport(true); setImportError(''); setLoadingGlobals(true)
+    try {
+      const { data } = await api.get<GlobalPG[]>('/advisory/global/pg-recommendations')
+      setGlobals(data.filter(g => g.status === 'ACTIVE'))
+    } catch {
+      setGlobals([])
+    } finally {
+      setLoadingGlobals(false)
+    }
+  }
+
+  const doImport = async (globalId: string) => {
+    if (!clientId) return
+    setImporting(globalId); setImportError('')
+    try {
+      await api.post(`/client/${clientId}/pg-recommendations/import/${globalId}`)
+      setShowImport(false)
+      await load()
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : (detail as { message?: string })?.message
+      const code = (detail as { code?: string })?.code
+      if (code === 'import_would_overwrite') {
+        setImportError(
+          `${msg} (V1 doesn't surface a 'force overwrite' button — open the existing local copy and edit it instead.)`,
+        )
+      } else {
+        setImportError(msg || 'Failed to import.')
+      }
+    } finally {
+      setImporting(null)
+    }
+  }
+
+  const problemNameById = useMemo(
+    () => Object.fromEntries(problems.map(p => [p.cosh_id, p.name_en])),
+    [problems],
+  )
 
   const chips: ActiveChip[] = useMemo(() => {
     const out: ActiveChip[] = []
@@ -64,11 +184,25 @@ function ChaRecsContent() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Recommendations</h1>
-        <p className="text-slate-500 text-sm mt-0.5">
-          One row per (Problem × bundle). Each is its own DRAFT/ACTIVE lifecycle.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Recommendations</h1>
+          <p className="text-slate-500 text-sm mt-0.5">
+            One row per (Problem × bundle). Each is its own DRAFT/ACTIVE lifecycle.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={openImport}
+            className="border text-sm font-medium px-4 py-2.5 rounded-xl"
+            style={{ borderColor: colour, color: colour }}>
+            ↓ Import from Global
+          </button>
+          <button onClick={openCreate}
+            className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
+            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+            + New Recommendation
+          </button>
+        </div>
       </div>
 
       <FilterChips chips={chips} />
@@ -137,6 +271,137 @@ function ChaRecsContent() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* New Recommendation modal */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">New Recommendation</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Author from scratch. Pick the Problem and which side
+                (area-wise / plant-wise crops). Each bundle has its own
+                lifecycle.
+              </p>
+            </div>
+            <form onSubmit={handleCreate} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Problem Group</label>
+                <select value={form.problem_group_cosh_id}
+                  onChange={e => setForm(f => ({ ...f, problem_group_cosh_id: e.target.value }))}
+                  required
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
+                  <option value="">Pick a problem group…</option>
+                  {problems.map(p => (
+                    <option key={p.cosh_id} value={p.cosh_id}>{p.name_en}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">
+                  V1 list. When Cosh ships the <code className="font-mono">problem_group</code> Connect, more will appear here.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Bundle</label>
+                <div className="flex gap-3">
+                  {(['AREA_WISE', 'PLANT_WISE'] as const).map(v => (
+                    <label key={v} className="flex-1">
+                      <input type="radio" name="ap"
+                        checked={form.area_or_plant === v}
+                        onChange={() => setForm(f => ({ ...f, area_or_plant: v }))}
+                        className="sr-only peer" />
+                      <span className="block px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-center cursor-pointer peer-checked:border-green-500 peer-checked:bg-green-50 peer-checked:text-green-700 hover:bg-slate-50">
+                        {v === 'AREA_WISE' ? 'Area-wise crops' : 'Plant-wise crops'}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Each side is a separate bundle of timelines and practices.
+                </p>
+              </div>
+
+              {createError && <p className="text-sm text-red-600">{createError}</p>}
+
+              <div className="flex gap-3 pt-2">
+                <button type="button"
+                  onClick={() => { setShowCreate(false); setCreateError('') }}
+                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit"
+                  disabled={creating || !form.problem_group_cosh_id}
+                  className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  {creating ? 'Creating…' : 'Create Recommendation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Import from Global modal */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Import from Global CHA Library</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Get a copy of an ACTIVE global PG recommendation. Each bundle
+                (area-wise / plant-wise) imports into its own local row.
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {loadingGlobals ? (
+                <p className="text-center text-slate-400 text-sm py-8">Loading global library…</p>
+              ) : globals.length === 0 ? (
+                <p className="text-center text-slate-400 text-sm py-8">
+                  No active global PG recommendations yet. Ask your RootsTalk admin to publish some.
+                </p>
+              ) : (
+                globals.map(g => {
+                  const alreadyImported = recs.some(
+                    r => r.problem_group_cosh_id === g.problem_group_cosh_id
+                      && r.area_or_plant === g.area_or_plant,
+                  )
+                  return (
+                    <div key={g.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm text-slate-800">
+                          {problemNameById[g.problem_group_cosh_id] || g.problem_group_cosh_id}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {g.area_or_plant === 'AREA_WISE' ? 'Area-wise' :
+                            g.area_or_plant === 'PLANT_WISE' ? 'Plant-wise' : 'unscoped'} ·
+                          v{g.version} · {g.status.toLowerCase()}
+                        </p>
+                      </div>
+                      {alreadyImported ? (
+                        <span className="text-xs text-green-600 font-medium">✓ Imported</span>
+                      ) : (
+                        <button onClick={() => doImport(g.id)}
+                          disabled={importing === g.id}
+                          className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+                          style={{ background: colour }}>
+                          {importing === g.id ? 'Importing…' : 'Import'}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+              {importError && <p className="text-sm text-red-600 px-2">{importError}</p>}
+            </div>
+            <div className="p-4 border-t border-slate-100">
+              <button onClick={() => setShowImport(false)}
+                className="w-full border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
