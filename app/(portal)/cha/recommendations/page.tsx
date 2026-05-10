@@ -290,7 +290,7 @@ function ChaRecsContent() {
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="px-5 py-3.5">
                     <Link
-                      href={`/cha/timelines?pg=${encodeURIComponent(r.problem_group_cosh_id)}&rec=${encodeURIComponent(r.id)}`}
+                      href={`/cha/recommendations/${encodeURIComponent(r.id)}`}
                       className="font-medium text-slate-800 hover:text-green-700">
                       {r.problem_group_name_en}
                     </Link>
