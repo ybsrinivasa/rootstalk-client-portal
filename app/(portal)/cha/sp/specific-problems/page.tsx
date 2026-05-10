@@ -82,7 +82,7 @@ function SpProblemsContent() {
       // the new recommendation. The recommendation editor page lands
       // in Round 3; until then, /cha/sp/timelines is the closest
       // useful destination.
-      router.push(`/cha/sp/timelines?crop=${encodeURIComponent(cropFilter)}&rec=${encodeURIComponent(data.id)}`)
+      router.push(`/cha/sp/specific-problems/${encodeURIComponent(data.id)}`)
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
@@ -138,7 +138,7 @@ function SpProblemsContent() {
                   <td className="px-5 py-3.5">
                     {p.existing ? (
                       <Link
-                        href={`/cha/sp/timelines?crop=${encodeURIComponent(cropFilter)}&rec=${encodeURIComponent(p.existing.id)}`}
+                        href={`/cha/sp/specific-problems/${encodeURIComponent(p.existing.id)}`}
                         className="font-medium text-slate-800 hover:text-green-700">
                         {p.name_en}
                       </Link>
@@ -159,7 +159,7 @@ function SpProblemsContent() {
                   <td className="px-5 py-3.5 text-right">
                     {p.existing ? (
                       <Link
-                        href={`/cha/sp/timelines?crop=${encodeURIComponent(cropFilter)}&rec=${encodeURIComponent(p.existing.id)}`}
+                        href={`/cha/sp/specific-problems/${encodeURIComponent(p.existing.id)}`}
                         className="text-xs font-medium text-green-700 hover:text-green-800">
                         Open →
                       </Link>
