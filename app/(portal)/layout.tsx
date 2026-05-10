@@ -124,10 +124,14 @@ const ALL_NAV: NavItem[] = [
   { href: '/cca/packages',       label: 'CCA · Packages',    Icon: IconAdvisory,     group: 'CCA' },
   { href: '/cca/timelines',      label: 'CCA · Timelines',   Icon: IconAdvisory,     group: 'CCA' },
   { href: '/cca/practices',      label: 'CCA · Practices',   Icon: IconAdvisory,     group: 'CCA' },
-  { href: '/cha/problems',       label: 'CHA · Problems',        Icon: IconCHA,      group: 'CHA' },
-  { href: '/cha/recommendations',label: 'CHA · Recommendations', Icon: IconCHA,      group: 'CHA' },
-  { href: '/cha/timelines',      label: 'CHA · Timelines',       Icon: IconCHA,      group: 'CHA' },
-  { href: '/cha/practices',      label: 'CHA · Practices',       Icon: IconCHA,      group: 'CHA' },
+  { href: '/cha/problems',          label: 'CHA · PG · Problems',         Icon: IconCHA, group: 'CHA' },
+  { href: '/cha/recommendations',   label: 'CHA · PG · Recommendations',  Icon: IconCHA, group: 'CHA' },
+  { href: '/cha/timelines',         label: 'CHA · PG · Timelines',        Icon: IconCHA, group: 'CHA' },
+  { href: '/cha/practices',         label: 'CHA · PG · Practices',        Icon: IconCHA, group: 'CHA' },
+  { href: '/cha/sp/crops',          label: 'CHA · SP · Crops',            Icon: IconCHA, group: 'CHA' },
+  { href: '/cha/sp/specific-problems', label: 'CHA · SP · Specific Problems', Icon: IconCHA, group: 'CHA' },
+  { href: '/cha/sp/timelines',      label: 'CHA · SP · Timelines',        Icon: IconCHA, group: 'CHA' },
+  { href: '/cha/sp/practices',      label: 'CHA · SP · Practices',        Icon: IconCHA, group: 'CHA' },
   { href: '/custom-parameters',  label: 'Custom Parameters', Icon: IconCustomParams, group: 'CONTENT' },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
@@ -143,7 +147,7 @@ const ALL_NAV: NavItem[] = [
 ]
 
 const ROLE_NAV: Record<string, string[]> = {
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cca/packages', '/cca/timelines', '/cca/practices', '/cha/problems', '/cha/recommendations', '/cha/timelines', '/cha/practices', '/custom-parameters', '/standard-responses', '/alerts'],
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cca/packages', '/cca/timelines', '/cca/practices', '/cha/problems', '/cha/recommendations', '/cha/timelines', '/cha/practices', '/cha/sp/crops', '/cha/sp/specific-problems', '/cha/sp/timelines', '/cha/sp/practices', '/custom-parameters', '/standard-responses', '/alerts'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager', '/alerts'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
