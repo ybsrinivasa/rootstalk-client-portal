@@ -1,8 +1,9 @@
 'use client'
-import { useEffect, useState, FormEvent } from 'react'
+import { useEffect, useState, FormEvent, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
+import PackageCalendar from '@/components/cca/PackageCalendar'
 
 interface Package {
   id: string; name: string; crop_cosh_id: string
@@ -58,6 +59,10 @@ export default function PackageDetailPage() {
   const [pubError, setPubError] = useState('')
   const [readiness, setReadiness] = useState<PublishReadiness | null>(null)
   const [showPublishConfirm, setShowPublishConfirm] = useState(false)
+  const [practiceCounts, setPracticeCounts] = useState<Record<string, number>>({})
+
+  // Map for jumping from a calendar band to its timeline editor block.
+  const timelineRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   // Timeline form
   const [showAddTL, setShowAddTL] = useState(false)
@@ -85,8 +90,20 @@ export default function PackageDetailPage() {
   })
 
   const loadTimelines = async () => {
-    const { data } = await api.get<Timeline[]>(`/client/${clientId}/packages/${packageId}/timelines`)
-    setTimelines(data.sort((a, b) => a.display_order - b.display_order))
+    // Fetch the per-package timeline list (used by the editor body)
+    // and the cross-package /cca/timelines slice (which denormalises
+    // practice_count) in parallel. The latter feeds the calendar
+    // viz; both refresh together when timelines are added/removed.
+    const [{ data: tls }, { data: cca }] = await Promise.all([
+      api.get<Timeline[]>(`/client/${clientId}/packages/${packageId}/timelines`),
+      api.get<{ id: string; practice_count: number }[]>(
+        `/client/${clientId}/cca/timelines?package_id=${packageId}`,
+      ).catch(() => ({ data: [] as { id: string; practice_count: number }[] })),
+    ])
+    setTimelines(tls.sort((a, b) => a.display_order - b.display_order))
+    const counts: Record<string, number> = {}
+    for (const c of cca) counts[c.id] = c.practice_count
+    setPracticeCounts(counts)
   }
 
   const loadReadiness = async () => {
@@ -312,6 +329,22 @@ export default function PackageDetailPage() {
         )
       )}
 
+      {/* Calendar visualisation */}
+      {timelines.length > 0 && (
+        <PackageCalendar
+          pkg={pkg}
+          timelines={timelines}
+          practiceCounts={practiceCounts}
+          onTimelineClick={(id) => {
+            // Scroll to the timeline's editor block + expand it.
+            setExpanded(id)
+            if (!practiceMap[id]) loadPractices(id)
+            const el = timelineRefs.current[id]
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
+        />
+      )}
+
       {/* Timelines */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -341,7 +374,9 @@ export default function PackageDetailPage() {
         ) : (
           <div className="space-y-3">
             {timelines.map(tl => (
-              <div key={tl.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div key={tl.id}
+                ref={el => { timelineRefs.current[tl.id] = el }}
+                className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                 {/* Timeline header */}
                 <div className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-slate-50"
                   onClick={() => toggleTimeline(tl.id)}>
