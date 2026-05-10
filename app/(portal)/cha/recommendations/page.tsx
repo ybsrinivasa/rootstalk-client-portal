@@ -66,6 +66,18 @@ function ChaRecsContent() {
   const [importing, setImporting] = useState<string | null>(null)
   const [importError, setImportError] = useState('')
 
+  // Publish
+  const [publishTarget, setPublishTarget] = useState<ChaRec | null>(null)
+  const [publishReadiness, setPublishReadiness] = useState<{
+    ready: boolean
+    status: string
+    version: number
+    blocker_code?: string
+    missing?: { code: string; message: string }[]
+  } | null>(null)
+  const [publishing, setPublishing] = useState(false)
+  const [publishError, setPublishError] = useState('')
+
   const load = async () => {
     if (!clientId) return
     setLoading(true)
@@ -162,6 +174,44 @@ function ChaRecsContent() {
     }
   }
 
+  const openPublish = async (rec: ChaRec) => {
+    setPublishTarget(rec); setPublishError(''); setPublishReadiness(null)
+    try {
+      const { data } = await api.get(
+        `/client/${clientId}/pg-recommendations/${rec.id}/publish-readiness`,
+      )
+      setPublishReadiness(data)
+    } catch {
+      setPublishReadiness(null)
+    }
+  }
+
+  async function handlePublish() {
+    if (!publishTarget || !clientId) return
+    setPublishing(true); setPublishError('')
+    try {
+      await api.post(`/client/${clientId}/pg-recommendations/${publishTarget.id}/publish`)
+      setPublishTarget(null)
+      await load()
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : (detail as { message?: string })?.message
+      setPublishError(msg || 'Failed to publish.')
+      // Re-fetch readiness — server may have surfaced a new gate.
+      try {
+        const { data } = await api.get(
+          `/client/${clientId}/pg-recommendations/${publishTarget.id}/publish-readiness`,
+        )
+        setPublishReadiness(data)
+      } catch { /* keep old state */ }
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   const problemNameById = useMemo(
     () => Object.fromEntries(problems.map(p => [p.cosh_id, p.name_en])),
     [problems],
@@ -232,6 +282,7 @@ function ChaRecsContent() {
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Source</th>
                 <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Timelines</th>
                 <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Created</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -266,6 +317,15 @@ function ChaRecsContent() {
                   </td>
                   <td className="px-5 py-3.5 text-right text-slate-400 hidden lg:table-cell text-xs">
                     {new Date(r.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    {r.status === 'DRAFT' && (
+                      <button onClick={() => openPublish(r)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-lg border"
+                        style={{ borderColor: colour, color: colour }}>
+                        ✓ Publish
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -339,6 +399,66 @@ function ChaRecsContent() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Publish confirmation modal — gate panel + confirmation in one */}
+      {publishTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">
+                Publish {publishTarget.problem_group_name_en}?
+              </h2>
+              <p className="text-slate-500 text-sm mt-1.5">
+                {publishTarget.area_or_plant === 'AREA_WISE' ? 'Area-wise' : 'Plant-wise'} bundle
+                {publishTarget.version > 0 ? ` will become v${publishTarget.version + 1}` : ''}.
+              </p>
+            </div>
+            <div className="p-6 space-y-3">
+              {!publishReadiness ? (
+                <p className="text-sm text-slate-400">Checking readiness…</p>
+              ) : publishReadiness.ready ? (
+                <div className="rounded-xl bg-green-50 border border-green-100 p-3 text-sm text-green-800 flex items-start gap-2">
+                  <span className="text-green-600 mt-0.5">✓</span>
+                  <span>Ready to publish — every gate is clear.</span>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-900">
+                  <p className="font-medium mb-2 flex items-start gap-2">
+                    <span className="text-amber-600">⚠</span>
+                    {(publishReadiness.missing?.length || 0) === 1
+                      ? '1 thing to fix before publishing'
+                      : `${publishReadiness.missing?.length || 0} things to fix before publishing`}
+                  </p>
+                  <ul className="space-y-1.5 ml-6">
+                    {(publishReadiness.missing || []).map((m, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="text-amber-500 mt-0.5 text-xs">●</span>
+                        <span>{m.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {publishError && <p className="text-sm text-red-600">{publishError}</p>}
+            </div>
+            <div className="p-4 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => { setPublishTarget(null); setPublishError('') }}
+                disabled={publishing}
+                className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50 disabled:opacity-50">
+                Cancel
+              </button>
+              <button onClick={handlePublish}
+                disabled={publishing || !publishReadiness?.ready}
+                title={!publishReadiness?.ready ? 'Resolve the items above first' : ''}
+                className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {publishing ? 'Publishing…' : 'Confirm Publish'}
+              </button>
+            </div>
           </div>
         </div>
       )}
