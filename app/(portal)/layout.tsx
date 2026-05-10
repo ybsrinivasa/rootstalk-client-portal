@@ -120,7 +120,10 @@ interface NavItem {
 
 const ALL_NAV: NavItem[] = [
   { href: '/dashboard',          label: 'Dashboard',         Icon: IconHome,         group: 'PORTAL' },
-  { href: '/advisory',           label: 'CCA — Advisory',    Icon: IconAdvisory,     group: 'CONTENT' },
+  { href: '/cca/crops',          label: 'CCA · Crops',       Icon: IconAdvisory,     group: 'CCA' },
+  { href: '/cca/packages',       label: 'CCA · Packages',    Icon: IconAdvisory,     group: 'CCA' },
+  { href: '/cca/timelines',      label: 'CCA · Timelines',   Icon: IconAdvisory,     group: 'CCA' },
+  { href: '/cca/practices',      label: 'CCA · Practices',   Icon: IconAdvisory,     group: 'CCA' },
   { href: '/cha',                label: 'CHA — Crop Health', Icon: IconCHA,          group: 'CONTENT' },
   { href: '/custom-parameters',  label: 'Custom Parameters', Icon: IconCustomParams, group: 'CONTENT' },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
@@ -137,7 +140,7 @@ const ALL_NAV: NavItem[] = [
 ]
 
 const ROLE_NAV: Record<string, string[]> = {
-  SUBJECT_EXPERT:   ['/dashboard', '/advisory', '/cha', '/custom-parameters', '/standard-responses', '/alerts'],
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cca/packages', '/cca/timelines', '/cca/practices', '/cha', '/custom-parameters', '/standard-responses', '/alerts'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager', '/alerts'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
@@ -145,7 +148,7 @@ const ROLE_NAV: Record<string, string[]> = {
   REPORT_USER:      ['/dashboard'],
 }
 
-const GROUP_ORDER = ['PORTAL', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
+const GROUP_ORDER = ['PORTAL', 'CCA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
 
 function getNavForRole(role: string | null, client: CPClient | null): NavItem[] {
   const isSeedClient = client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
