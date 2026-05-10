@@ -32,6 +32,8 @@ interface PublishReadiness {
   ready: boolean
   status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
   version: number
+  published_at: string | null
+  subscriber_count: number
   blocker_code?: string
   missing?: PublishReadinessItem[]
 }
@@ -274,6 +276,12 @@ export default function PackageDetailPage() {
           </div>
           <p className="text-slate-500 text-sm mt-1">
             {pkg.crop_cosh_id} · {pkg.package_type.toLowerCase()} · {pkg.duration_days} days · v{pkg.version}
+            {readiness?.published_at && (
+              <> · last published {new Date(readiness.published_at).toLocaleDateString()}</>
+            )}
+            {readiness && readiness.subscriber_count > 0 && (
+              <> · {readiness.subscriber_count} subscriber{readiness.subscriber_count === 1 ? '' : 's'}</>
+            )}
           </p>
           {pkg.description && <p className="text-slate-600 text-sm mt-1">{pkg.description}</p>}
         </div>
@@ -647,17 +655,26 @@ export default function PackageDetailPage() {
                   <>This is the first publication. Once live, farmers can subscribe and the advisory
                   starts flowing on their app.</>
                 ) : (
-                  <>This will create version <strong>v{pkg.version + 1}</strong>. New subscriptions
-                  will use v{pkg.version + 1}; existing subscriptions on prior versions continue
-                  unchanged on their version.</>
+                  <>This will publish version <strong>v{pkg.version + 1}</strong>. New subscribers
+                  will receive v{pkg.version + 1} from the start.</>
                 )}
               </p>
+              {readiness && readiness.subscriber_count > 0 && (
+                <div className="mt-3 rounded-xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">
+                  <strong>{readiness.subscriber_count} existing subscriber{readiness.subscriber_count === 1 ? '' : 's'}</strong>{' '}
+                  on this package will switch to v{pkg.version + 1} the moment you publish.
+                  V1 advisory data is in-place — there are no frozen older snapshots.
+                </div>
+              )}
             </div>
             <div className="p-6 space-y-3">
               <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
                 <p><strong>Crop:</strong> {pkg.crop_cosh_id}</p>
                 <p><strong>Type:</strong> {pkg.package_type.toLowerCase()} · {pkg.duration_days} days</p>
                 <p><strong>Timelines:</strong> {timelines.length}</p>
+                {readiness?.published_at && (
+                  <p><strong>Last published:</strong> {new Date(readiness.published_at).toLocaleString()}</p>
+                )}
               </div>
               {pubError && <p className="text-sm text-red-600">{pubError}</p>}
             </div>
