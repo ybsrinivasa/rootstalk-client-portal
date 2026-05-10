@@ -138,7 +138,10 @@ const ALL_NAV: NavItem[] = [
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
   { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA' },
   { href: '/farm-pundits',       label: 'FarmPundits',       Icon: IconFarmPundits,  group: 'PORTAL', caOnly: true },
-  { href: '/standard-responses', label: 'Standard Q&A',      Icon: IconCHA,          group: 'CONTENT' },
+  { href: '/qa/crops',              label: 'Q&A · Crops',              Icon: IconCHA, group: 'QA' },
+  { href: '/qa/standard-responses', label: 'Q&A · Standard Responses', Icon: IconCHA, group: 'QA' },
+  { href: '/qa/timelines',          label: 'Q&A · Timelines',          Icon: IconCHA, group: 'QA' },
+  { href: '/qa/practices',          label: 'Q&A · Practices',          Icon: IconCHA, group: 'QA' },
   { href: '/users',              label: 'Users',             Icon: IconUsers,        group: 'PORTAL' },
   { href: '/setup',              label: 'Setup',             Icon: IconSetup,        group: 'PORTAL' },
   { href: '/profile',            label: 'Company Profile',   Icon: IconBuilding,     group: 'PORTAL', caOnly: true },
@@ -147,7 +150,7 @@ const ALL_NAV: NavItem[] = [
 ]
 
 const ROLE_NAV: Record<string, string[]> = {
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cca/packages', '/cca/timelines', '/cca/practices', '/cha/problems', '/cha/recommendations', '/cha/timelines', '/cha/practices', '/cha/sp/crops', '/cha/sp/specific-problems', '/cha/sp/timelines', '/cha/sp/practices', '/custom-parameters', '/standard-responses', '/alerts'],
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cca/packages', '/cca/timelines', '/cca/practices', '/cha/problems', '/cha/recommendations', '/cha/timelines', '/cha/practices', '/cha/sp/crops', '/cha/sp/specific-problems', '/cha/sp/timelines', '/cha/sp/practices', '/qa/crops', '/qa/standard-responses', '/qa/timelines', '/qa/practices', '/custom-parameters', '/alerts'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager', '/alerts'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
@@ -155,7 +158,7 @@ const ROLE_NAV: Record<string, string[]> = {
   REPORT_USER:      ['/dashboard'],
 }
 
-const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
+const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
 
 function getNavForRole(role: string | null, client: CPClient | null): NavItem[] {
   const isSeedClient = client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
