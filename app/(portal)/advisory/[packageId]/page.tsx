@@ -22,6 +22,19 @@ interface Practice {
   is_special_input: boolean; relation_id: string | null
 }
 
+interface PublishReadinessItem {
+  code: string
+  message: string
+  [key: string]: unknown
+}
+interface PublishReadiness {
+  ready: boolean
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
+  version: number
+  blocker_code?: string
+  missing?: PublishReadinessItem[]
+}
+
 const FROM_TYPE_LABEL = { DBS: 'Days Before Sowing', DAS: 'Days After Sowing', CALENDAR: 'Calendar' }
 const L0_COLOUR = {
   INPUT: 'bg-blue-100 text-blue-700',
@@ -43,6 +56,8 @@ export default function PackageDetailPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [pubError, setPubError] = useState('')
+  const [readiness, setReadiness] = useState<PublishReadiness | null>(null)
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false)
 
   // Timeline form
   const [showAddTL, setShowAddTL] = useState(false)
@@ -74,6 +89,20 @@ export default function PackageDetailPage() {
     setTimelines(data.sort((a, b) => a.display_order - b.display_order))
   }
 
+  const loadReadiness = async () => {
+    if (!clientId || !packageId) return
+    try {
+      const { data } = await api.get<PublishReadiness>(
+        `/client/${clientId}/packages/${packageId}/publish-readiness`,
+      )
+      setReadiness(data)
+    } catch {
+      // Non-fatal: panel just stays unrendered. The Publish button
+      // still works (relies on the publish 422 envelope as fallback).
+      setReadiness(null)
+    }
+  }
+
   const loadPractices = async (timelineId: string) => {
     const { data } = await api.get<Practice[]>(`/client/${clientId}/timelines/${timelineId}/practices`)
     setPracticeMap(m => ({ ...m, [timelineId]: data.sort((a, b) => a.display_order - b.display_order) }))
@@ -83,8 +112,9 @@ export default function PackageDetailPage() {
     if (!clientId) return
     api.get<Package>(`/client/${clientId}/packages/${packageId}`)
       .then(r => setPkg(r.data))
-      .catch(() => router.replace('/advisory'))
+      .catch(() => router.replace('/cca/packages'))
     loadTimelines()
+    loadReadiness()
   }, [clientId, packageId])
 
   const toggleTimeline = (id: string) => {
@@ -94,14 +124,23 @@ export default function PackageDetailPage() {
   }
 
   async function handlePublish() {
-    if (!confirm('Publish this package? Farmers will receive advisories once subscribed.')) return
     setPublishing(true); setPubError('')
     try {
       const { data } = await api.post<Package>(`/client/${clientId}/packages/${packageId}/publish`)
       setPkg(data)
+      setShowPublishConfirm(false)
+      await loadReadiness()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : (detail as { message?: string })?.message
       setPubError(msg || 'Failed to publish.')
+      // Re-fetch readiness — server-side state may have shifted
+      // (e.g. crop just dropped off the belt) since the panel was
+      // last rendered, surfacing a different blocker.
+      await loadReadiness()
     } finally { setPublishing(false) }
   }
 
@@ -151,6 +190,7 @@ export default function PackageDetailPage() {
       setShowAddTL(false)
       setTlForm({ name: '', from_type: 'DAS', from_value: '0', to_value: '30', display_order: '0' })
       await loadTimelines()
+      loadReadiness()
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setTlError(msg || 'Failed to add timeline.')
@@ -183,6 +223,7 @@ export default function PackageDetailPage() {
     if (!confirm(`Delete timeline "${tl.name}"? All practices in it will also be deleted.`)) return
     await api.delete(`/client/${clientId}/packages/${packageId}/timelines/${tl.id}`)
     await loadTimelines()
+    loadReadiness()
     if (expanded === tl.id) setExpanded(null)
   }
 
@@ -220,14 +261,56 @@ export default function PackageDetailPage() {
           {pkg.description && <p className="text-slate-600 text-sm mt-1">{pkg.description}</p>}
         </div>
         {pkg.status === 'DRAFT' && (
-          <button onClick={handlePublish} disabled={publishing}
+          <button onClick={() => setShowPublishConfirm(true)}
+            disabled={publishing || !readiness?.ready}
+            title={!readiness?.ready ? 'Resolve the items below first' : ''}
             className="shrink-0 text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
             style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-            {publishing ? 'Publishing…' : '✓ Publish Package'}
+            {publishing ? 'Publishing…' : '✓ Publish'}
           </button>
         )}
       </div>
       {pubError && <p className="text-sm text-red-600">{pubError}</p>}
+
+      {/* Pre-publish gate panel — only when DRAFT */}
+      {pkg.status === 'DRAFT' && readiness && (
+        readiness.ready ? (
+          <div className="bg-green-50 border border-green-100 rounded-2xl p-4 flex items-start gap-3">
+            <span className="text-green-600 mt-0.5">✓</span>
+            <div className="text-sm">
+              <p className="font-medium text-green-800">Ready to publish</p>
+              <p className="text-green-700 mt-0.5">
+                Every gate is clear. Click <strong>Publish</strong> to make this Package available
+                {pkg.version > 0 ? ` as v${pkg.version + 1}` : ''}.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+            <div className="flex items-start gap-3 mb-3">
+              <span className="text-amber-600 mt-0.5">⚠</span>
+              <div className="text-sm">
+                <p className="font-medium text-amber-800">
+                  {readiness.missing?.length === 1
+                    ? '1 thing to fix before publishing'
+                    : `${readiness.missing?.length || 0} things to fix before publishing`}
+                </p>
+                <p className="text-amber-700 mt-0.5 text-xs">
+                  Resolve each item, then come back here and click Publish.
+                </p>
+              </div>
+            </div>
+            <ul className="space-y-1.5 ml-7 text-sm text-amber-900">
+              {(readiness.missing || []).map((m, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="text-amber-500 mt-0.5 text-xs">●</span>
+                  <span>{m.message}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      )}
 
       {/* Timelines */}
       <div>
@@ -512,6 +595,48 @@ export default function PackageDetailPage() {
               <button onClick={() => { setShowImport(false); setImportError('') }}
                 className="px-5 rounded-xl border border-slate-200 text-slate-600 text-sm hover:bg-slate-50">
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Publish confirmation modal */}
+      {showPublishConfirm && pkg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Publish &quot;{pkg.name}&quot;?</h2>
+              <p className="text-slate-500 text-sm mt-1.5">
+                {pkg.version === 0 ? (
+                  <>This is the first publication. Once live, farmers can subscribe and the advisory
+                  starts flowing on their app.</>
+                ) : (
+                  <>This will create version <strong>v{pkg.version + 1}</strong>. New subscriptions
+                  will use v{pkg.version + 1}; existing subscriptions on prior versions continue
+                  unchanged on their version.</>
+                )}
+              </p>
+            </div>
+            <div className="p-6 space-y-3">
+              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
+                <p><strong>Crop:</strong> {pkg.crop_cosh_id}</p>
+                <p><strong>Type:</strong> {pkg.package_type.toLowerCase()} · {pkg.duration_days} days</p>
+                <p><strong>Timelines:</strong> {timelines.length}</p>
+              </div>
+              {pubError && <p className="text-sm text-red-600">{pubError}</p>}
+            </div>
+            <div className="p-4 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => { setShowPublishConfirm(false); setPubError('') }}
+                disabled={publishing}
+                className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50 disabled:opacity-50">
+                Cancel
+              </button>
+              <button onClick={handlePublish} disabled={publishing}
+                className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {publishing ? 'Publishing…' : 'Confirm Publish'}
               </button>
             </div>
           </div>
