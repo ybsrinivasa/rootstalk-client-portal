@@ -10,6 +10,17 @@ interface Package {
   package_type: 'ANNUAL' | 'PERENNIAL'
   status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
   duration_days: number; version: number; description: string | null
+  parent_global_id: string | null
+}
+interface LineageRow {
+  id: string
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
+  version: number
+  published_at: string | null
+  created_at: string
+  created_via: string | null
+  source_version_id: string | null
+  is_current: boolean
 }
 interface Timeline {
   id: string; package_id: string; name: string
@@ -91,6 +102,14 @@ export default function PackageDetailPage() {
     display_order: '0', is_special_input: false,
   })
 
+  // Lineage / multi-row versioning (locked 2026-05-11)
+  const [lineage, setLineage] = useState<LineageRow[]>([])
+  const [showVersions, setShowVersions] = useState(false)
+  const [pulling, setPulling] = useState(false)
+  const [cloning, setCloning] = useState(false)
+  const [rollingBack, setRollingBack] = useState<string | null>(null)
+  const [lineageError, setLineageError] = useState('')
+
   const loadTimelines = async () => {
     // Fetch the per-package timeline list (used by the editor body)
     // and the cross-package /cca/timelines slice (which denormalises
@@ -149,6 +168,7 @@ export default function PackageDetailPage() {
       setPkg(data)
       setShowPublishConfirm(false)
       await loadReadiness()
+      await loadLineage()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       const msg =
@@ -252,6 +272,70 @@ export default function PackageDetailPage() {
     await loadPractices(timelineId)
   }
 
+  // ── Multi-row versioning actions ──────────────────────────────────────────
+
+  const loadLineage = async () => {
+    if (!clientId || !packageId) return
+    try {
+      const { data } = await api.get<LineageRow[]>(
+        `/client/${clientId}/packages/${packageId}/lineage`,
+      )
+      setLineage(data)
+    } catch {
+      setLineage([])
+    }
+  }
+
+  function extractErrorMessage(err: unknown, fallback: string): string {
+    const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    const obj = detail as { code?: string; message?: string } | undefined
+    if (obj?.code === 'package_not_pushed_yet') {
+      return 'Not shared by your Content Manager yet.'
+    }
+    return obj?.message || fallback
+  }
+
+  async function handlePullNewVersion() {
+    if (!pkg?.parent_global_id) return
+    setPulling(true); setLineageError('')
+    try {
+      const { data } = await api.post<Package>(
+        `/client/${clientId}/packages/${pkg.parent_global_id}/pull`,
+      )
+      router.push(`/advisory/${data.id}`)
+    } catch (err) {
+      setLineageError(extractErrorMessage(err, 'Failed to pull.'))
+    } finally { setPulling(false) }
+  }
+
+  async function handleCloneToDraft() {
+    setCloning(true); setLineageError('')
+    try {
+      const { data } = await api.post<Package>(
+        `/client/${clientId}/packages/${packageId}/clone-to-draft`,
+      )
+      router.push(`/advisory/${data.id}`)
+    } catch (err) {
+      setLineageError(extractErrorMessage(err, 'Failed to start new edit.'))
+    } finally { setCloning(false) }
+  }
+
+  async function handleRollbackPublish(targetId: string) {
+    if (!confirm('Republish this historical version as a new live version? Your current live version will become history. Farmers will move to this content automatically.')) return
+    setRollingBack(targetId); setLineageError('')
+    try {
+      const { data } = await api.post<Package>(
+        `/client/${clientId}/packages/${targetId}/rollback-publish`,
+      )
+      router.push(`/advisory/${data.id}`)
+    } catch (err) {
+      setLineageError(extractErrorMessage(err, 'Failed to republish.'))
+    } finally { setRollingBack(null) }
+  }
+
+  useEffect(() => { if (pkg) loadLineage() }, [pkg?.id])
+
   if (!pkg) return (
     <div className="max-w-4xl mx-auto pt-20 text-center text-slate-400">Loading package…</div>
   )
@@ -285,17 +369,46 @@ export default function PackageDetailPage() {
           </p>
           {pkg.description && <p className="text-slate-600 text-sm mt-1">{pkg.description}</p>}
         </div>
-        {pkg.status === 'DRAFT' && (
-          <button onClick={() => setShowPublishConfirm(true)}
-            disabled={publishing || !readiness?.ready}
-            title={!readiness?.ready ? 'Resolve the items below first' : ''}
-            className="shrink-0 text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-            {publishing ? 'Publishing…' : '✓ Publish'}
-          </button>
-        )}
+        <div className="flex flex-col gap-2 shrink-0">
+          {pkg.status === 'DRAFT' && (
+            <button onClick={() => setShowPublishConfirm(true)}
+              disabled={publishing || !readiness?.ready}
+              title={!readiness?.ready ? 'Resolve the items below first' : ''}
+              className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
+              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              {publishing ? 'Publishing…' : '✓ Publish'}
+            </button>
+          )}
+          {pkg.status === 'ACTIVE' && (
+            <>
+              <button onClick={handleCloneToDraft}
+                disabled={cloning}
+                title="Start a new edit cycle. Your live version stays untouched."
+                className="text-sm font-semibold px-4 py-2.5 rounded-xl text-white disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {cloning ? 'Starting…' : '+ Start new edit'}
+              </button>
+              {pkg.parent_global_id && (
+                <button onClick={handlePullNewVersion}
+                  disabled={pulling}
+                  title="Pull the latest version your Content Manager has published."
+                  className="text-sm font-medium px-4 py-2 rounded-xl border disabled:opacity-50"
+                  style={{ borderColor: colour, color: colour }}>
+                  {pulling ? 'Pulling…' : '↻ Pull new version'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
       {pubError && <p className="text-sm text-red-600">{pubError}</p>}
+      {lineageError && <p className="text-sm text-red-600">{lineageError}</p>}
+
+      <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs text-slate-600">
+        Each publish creates a new version. Farmers always move to the latest published
+        version automatically — the previous version is preserved as history below.
+        {pkg.parent_global_id && <> Pull new versions from your Content Manager any time.</>}
+      </div>
 
       {/* Pre-publish gate panel — only when DRAFT */}
       {pkg.status === 'DRAFT' && readiness && (
@@ -442,6 +555,72 @@ export default function PackageDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Version history panel */}
+      {lineage.length > 1 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowVersions(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-50">
+            <span className="text-sm font-semibold text-slate-700">
+              Version history <span className="text-slate-400 font-normal">({lineage.length} versions)</span>
+            </span>
+            <svg className={`w-4 h-4 text-slate-400 transition-transform ${showVersions ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showVersions && (
+            <div className="border-t border-slate-100 divide-y divide-slate-50">
+              {lineage.map(row => {
+                const statusBadge = row.status === 'ACTIVE' ? 'bg-green-100 text-green-700'
+                  : row.status === 'DRAFT' ? 'bg-amber-100 text-amber-700'
+                  : 'bg-slate-100 text-slate-500'
+                const dateLabel = row.published_at
+                  ? `Published ${new Date(row.published_at).toLocaleDateString()}`
+                  : `Created ${new Date(row.created_at).toLocaleDateString()}`
+                const originLabel: Record<string, string> = {
+                  CM_PUSH: 'CM push',
+                  SE_PULL_DRAFT: 'Pulled from Global',
+                  SE_EDIT_DRAFT: 'Self edit',
+                  SE_ROLLBACK_PUBLISH: 'Rolled back',
+                }
+                const origin = row.created_via ? originLabel[row.created_via] || row.created_via : null
+                return (
+                  <div key={row.id} className={`flex items-center gap-3 px-5 py-3 ${row.is_current ? 'bg-blue-50/30' : ''}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-slate-700">v{row.version}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusBadge}`}>{row.status}</span>
+                        {origin && <span className="text-xs text-slate-400">· {origin}</span>}
+                        {row.is_current && <span className="text-xs font-medium text-blue-600">· you are here</span>}
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">{dateLabel}</p>
+                    </div>
+                    {!row.is_current && (
+                      <div className="flex items-center gap-2">
+                        {row.status === 'INACTIVE' && (
+                          <button onClick={() => handleRollbackPublish(row.id)}
+                            disabled={rollingBack === row.id}
+                            className="text-xs font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-50"
+                            style={{ borderColor: colour, color: colour }}>
+                            {rollingBack === row.id ? 'Republishing…' : '↻ Republish this'}
+                          </button>
+                        )}
+                        <button onClick={() => router.push(`/advisory/${row.id}`)}
+                          className="text-xs font-medium text-slate-500 px-3 py-1.5 hover:underline">
+                          Open
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Add Timeline Modal */}
       {showAddTL && (
