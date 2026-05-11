@@ -50,6 +50,49 @@ interface PublishReadiness {
 }
 
 const FROM_TYPE_LABEL = { DBS: 'Days Before Sowing', DAS: 'Days After Sowing', CALENDAR: 'Calendar' }
+
+// Reference Type constrained by package_type (matches SA portal):
+//   Annual    → DAS / DBS only
+//   Perennial → CALENDAR only
+const ALLOWED_FROM_TYPES_BY_PACKAGE_TYPE: Record<string, string[]> = {
+  ANNUAL: ['DAS', 'DBS'],
+  PERENNIAL: ['CALENDAR'],
+}
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+const MONTH_OFFSETS = MONTH_DAYS.reduce<number[]>((acc, d, i) => {
+  acc.push(i === 0 ? 0 : acc[i - 1] + MONTH_DAYS[i - 1])
+  return acc
+}, [])
+
+function dayOfYear(month: number, day: number): number {
+  return MONTH_OFFSETS[month - 1] + day
+}
+
+function doyToMonthDay(doy: number): { month: number; day: number } {
+  if (doy < 1) return { month: 1, day: 1 }
+  if (doy > 365) return { month: 12, day: 31 }
+  let m = 0
+  while (m < 11 && MONTH_OFFSETS[m + 1] < doy) m++
+  return { month: m + 1, day: doy - MONTH_OFFSETS[m] }
+}
+
+function shortMonthDay(doy: number): string {
+  const { month, day } = doyToMonthDay(doy)
+  return `${MONTH_NAMES[month - 1].slice(0, 3)} ${day}`
+}
+
+function formatTimelineRange(tl: { from_type: string; from_value: number; to_value: number }): string {
+  if (tl.from_type === 'CALENDAR') {
+    return `${shortMonthDay(tl.from_value)} → ${shortMonthDay(tl.to_value)}`
+  }
+  return `Day ${tl.from_value} → ${tl.to_value}`
+}
+
 const L0_COLOUR = {
   INPUT: 'bg-blue-100 text-blue-700',
   NON_INPUT: 'bg-purple-100 text-purple-700',
@@ -81,7 +124,12 @@ export default function PackageDetailPage() {
   const [showAddTL, setShowAddTL] = useState(false)
   const [addingTL, setAddingTL] = useState(false)
   const [tlError, setTlError] = useState('')
-  const [tlForm, setTlForm] = useState({ name: '', from_type: 'DAS', from_value: '0', to_value: '30', display_order: '0' })
+  const [tlForm, setTlForm] = useState({
+    name: '', from_type: 'DAS', from_value: '0', to_value: '30', display_order: '0',
+    // Calendar-only — drive month/day pickers; serialised to
+    // from_value/to_value (day-of-year) on submit.
+    from_month: '1', from_day: '1', to_month: '12', to_day: '31',
+  })
 
   // Timeline import
   const [showImport, setShowImport] = useState(false)
@@ -215,19 +263,62 @@ export default function PackageDetailPage() {
     } finally { setImporting(false) }
   }
 
+  function openAddTimeline() {
+    if (!pkg) return
+    const isPerennial = pkg.package_type === 'PERENNIAL'
+    setTlForm({
+      name: '',
+      from_type: isPerennial ? 'CALENDAR' : 'DAS',
+      from_value: '0',
+      to_value: '30',
+      from_month: '1', from_day: '1',
+      to_month: '12', to_day: '31',
+      display_order: '0',
+    })
+    setTlError('')
+    setShowAddTL(true)
+  }
+
   async function handleAddTimeline(e: FormEvent) {
     e.preventDefault()
-    setAddingTL(true); setTlError('')
+    setTlError('')
+
+    // Compute from_value / to_value per Reference Type.
+    let fromVal: number
+    let toVal: number
+    if (tlForm.from_type === 'CALENDAR') {
+      fromVal = dayOfYear(parseInt(tlForm.from_month), parseInt(tlForm.from_day))
+      toVal = dayOfYear(parseInt(tlForm.to_month), parseInt(tlForm.to_day))
+      if (fromVal >= toVal) {
+        setTlError('FROM date must be earlier than TO date in the calendar year.')
+        return
+      }
+    } else {
+      fromVal = parseInt(tlForm.from_value)
+      toVal = parseInt(tlForm.to_value)
+      if (Number.isNaN(fromVal) || Number.isNaN(toVal)) {
+        setTlError('FROM and TO must be whole numbers.'); return
+      }
+      if (tlForm.from_type === 'DAS' && fromVal >= toVal) {
+        setTlError('For DAS, FROM (smaller) must be less than TO (larger). The number increases as the season progresses.')
+        return
+      }
+      if (tlForm.from_type === 'DBS' && fromVal <= toVal) {
+        setTlError('For DBS, FROM (larger) must be greater than TO (smaller). The number counts down toward sowing.')
+        return
+      }
+    }
+
+    setAddingTL(true)
     try {
       await api.post(`/client/${clientId}/packages/${packageId}/timelines`, {
         name: tlForm.name,
         from_type: tlForm.from_type,
-        from_value: parseInt(tlForm.from_value),
-        to_value: parseInt(tlForm.to_value),
+        from_value: fromVal,
+        to_value: toVal,
         display_order: parseInt(tlForm.display_order),
       })
       setShowAddTL(false)
-      setTlForm({ name: '', from_type: 'DAS', from_value: '0', to_value: '30', display_order: '0' })
       await loadTimelines()
       loadReadiness()
     } catch (err: unknown) {
@@ -475,7 +566,7 @@ export default function PackageDetailPage() {
               className="text-sm font-medium px-3 py-1.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50">
               ↓ Import
             </button>
-            <button onClick={() => setShowAddTL(true)}
+            <button onClick={openAddTimeline}
               className="text-sm font-medium px-3 py-1.5 rounded-xl border"
               style={{ borderColor: colour, color: colour }}>
               + Add
@@ -486,7 +577,7 @@ export default function PackageDetailPage() {
         {timelines.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-dashed border-slate-200">
             <p className="text-slate-500 text-sm">No timelines yet. A timeline defines a window (e.g. Day 0–30 after sowing) and contains the practices for that window.</p>
-            <button onClick={() => setShowAddTL(true)}
+            <button onClick={openAddTimeline}
               className="mt-3 text-sm font-medium text-white px-4 py-2 rounded-xl"
               style={{ background: colour }}>
               Add First Timeline
@@ -504,7 +595,7 @@ export default function PackageDetailPage() {
                   <div className="flex-1">
                     <p className="font-medium text-slate-800 text-sm">{tl.name}</p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {FROM_TYPE_LABEL[tl.from_type]} · Day {tl.from_value} → {tl.to_value}
+                      {FROM_TYPE_LABEL[tl.from_type]} · {formatTimelineRange(tl)}
                     </p>
                   </div>
                   <button onClick={e => { e.stopPropagation(); handleDeleteTimeline(tl) }}
@@ -637,35 +728,99 @@ export default function PackageDetailPage() {
                   required placeholder="e.g. Basal Dose Application"
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Reference Type</label>
-                <select value={tlForm.from_type} onChange={e => setTlForm(f => ({ ...f, from_type: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="DBS">DBS — Days Before Sowing</option>
-                  <option value="DAS">DAS — Days After Sowing</option>
-                  <option value="CALENDAR">Calendar Date</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">From (day)</label>
-                  <input type="number" value={tlForm.from_value}
-                    onChange={e => setTlForm(f => ({ ...f, from_value: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              {pkg && (() => {
+                const allowed = ALLOWED_FROM_TYPES_BY_PACKAGE_TYPE[pkg.package_type] || ['DAS', 'DBS', 'CALENDAR']
+                return (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      Reference Type
+                      {allowed.length === 1 && (
+                        <span className="text-xs text-slate-400 font-normal ml-2">
+                          (locked — {pkg.package_type === 'PERENNIAL' ? 'Perennials use the calendar' : 'Annuals use DAS / DBS'})
+                        </span>
+                      )}
+                    </label>
+                    <select value={tlForm.from_type}
+                      onChange={e => setTlForm(f => ({ ...f, from_type: e.target.value }))}
+                      disabled={allowed.length === 1}
+                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-slate-50 disabled:text-slate-500">
+                      {allowed.map(t => <option key={t} value={t}>{FROM_TYPE_LABEL[t as keyof typeof FROM_TYPE_LABEL]}</option>)}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      {tlForm.from_type === 'DAS' && 'Days After Sowing — FROM (smaller number) → TO (larger number). The clock runs forward.'}
+                      {tlForm.from_type === 'DBS' && 'Days Before Sowing — FROM (larger number) → TO (smaller number). The countdown runs toward sowing.'}
+                      {tlForm.from_type === 'CALENDAR' && 'Calendar date — FROM (earlier date) → TO (later date) within a calendar year.'}
+                    </p>
+                  </div>
+                )
+              })()}
+
+              {tlForm.from_type === 'CALENDAR' ? (
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-slate-700">Window (calendar date)</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">From</label>
+                      <div className="flex gap-1.5">
+                        <select value={tlForm.from_month}
+                          onChange={e => setTlForm(f => ({ ...f, from_month: e.target.value }))}
+                          className="flex-1 border border-slate-200 rounded-xl px-2 py-2 text-sm bg-white">
+                          {MONTH_NAMES.map((n, i) => <option key={i} value={i + 1}>{n}</option>)}
+                        </select>
+                        <input type="number" min="1" max={MONTH_DAYS[parseInt(tlForm.from_month) - 1]}
+                          value={tlForm.from_day}
+                          onChange={e => setTlForm(f => ({ ...f, from_day: e.target.value }))}
+                          className="w-16 border border-slate-200 rounded-xl px-2 py-2 text-sm text-center" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">To</label>
+                      <div className="flex gap-1.5">
+                        <select value={tlForm.to_month}
+                          onChange={e => setTlForm(f => ({ ...f, to_month: e.target.value }))}
+                          className="flex-1 border border-slate-200 rounded-xl px-2 py-2 text-sm bg-white">
+                          {MONTH_NAMES.map((n, i) => <option key={i} value={i + 1}>{n}</option>)}
+                        </select>
+                        <input type="number" min="1" max={MONTH_DAYS[parseInt(tlForm.to_month) - 1]}
+                          value={tlForm.to_day}
+                          onChange={e => setTlForm(f => ({ ...f, to_day: e.target.value }))}
+                          className="w-16 border border-slate-200 rounded-xl px-2 py-2 text-sm text-center" />
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Order</label>
+                    <input type="number" min="0" value={tlForm.display_order}
+                      onChange={e => setTlForm(f => ({ ...f, display_order: e.target.value }))}
+                      className="w-24 border border-slate-200 rounded-xl px-2 py-2 text-sm" />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">To (day)</label>
-                  <input type="number" value={tlForm.to_value}
-                    onChange={e => setTlForm(f => ({ ...f, to_value: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      From (day) {tlForm.from_type === 'DBS' && <span className="text-xs text-slate-400 font-normal">(larger)</span>}
+                    </label>
+                    <input type="number" value={tlForm.from_value}
+                      onChange={e => setTlForm(f => ({ ...f, from_value: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      To (day) {tlForm.from_type === 'DBS' && <span className="text-xs text-slate-400 font-normal">(smaller)</span>}
+                    </label>
+                    <input type="number" value={tlForm.to_value}
+                      onChange={e => setTlForm(f => ({ ...f, to_value: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Order</label>
+                    <input type="number" min="0" value={tlForm.display_order}
+                      onChange={e => setTlForm(f => ({ ...f, display_order: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Order</label>
-                  <input type="number" min="0" value={tlForm.display_order}
-                    onChange={e => setTlForm(f => ({ ...f, display_order: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                </div>
-              </div>
+              )}
               {tlError && <p className="text-sm text-red-600">{tlError}</p>}
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => { setShowAddTL(false); setTlError('') }}
@@ -787,7 +942,7 @@ export default function PackageDetailPage() {
                   <option value="">Select a timeline…</option>
                   {importTimelines.map(t => (
                     <option key={t.id} value={t.id}>
-                      {t.name} — {FROM_TYPE_LABEL[t.from_type]} {t.from_value}→{t.to_value}
+                      {t.name} — {FROM_TYPE_LABEL[t.from_type]} {formatTimelineRange(t)}
                     </option>
                   ))}
                 </select>
