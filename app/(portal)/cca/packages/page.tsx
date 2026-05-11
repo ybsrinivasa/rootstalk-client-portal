@@ -75,7 +75,9 @@ function PackagesContent() {
     description: '',
   })
 
-  // Import
+  // Pull from Library — SE-side refresh of a Global the CM has
+  // already pushed. Variables retain "forking" naming for now to
+  // minimise diff churn; semantically these track the pull flow.
   const [showImport, setShowImport] = useState(false)
   const [globals, setGlobals] = useState<GlobalPackage[]>([])
   const [loadingGlobals, setLoadingGlobals] = useState(false)
@@ -173,16 +175,25 @@ function PackagesContent() {
     if (!clientId) return
     setForking(globalId); setForkError('')
     try {
-      await api.post(`/client/${clientId}/packages/${globalId}/fork`)
+      // Locked 2026-05-11: /pull replaces /fork on the SE-side.
+      // First contact (CM push) happens out of band from the SA
+      // portal; subsequent versions are pulled here. The backend
+      // returns 422 package_not_pushed_yet if the CM hasn't
+      // pushed yet — surface that as a clear inline error.
+      await api.post(`/client/${clientId}/packages/${globalId}/pull`)
       setShowImport(false)
       await load()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const detailObj = detail as { code?: string; message?: string } | undefined
+      const code = typeof detail === 'object' && detail ? detailObj?.code : undefined
       const msg =
         typeof detail === 'string'
           ? detail
-          : (detail as { message?: string })?.message
-      setForkError(msg || 'Failed to import.')
+          : code === 'package_not_pushed_yet'
+            ? 'Not shared with your company yet. Ask your Content Manager to push it first.'
+            : detailObj?.message
+      setForkError(msg || 'Failed to pull.')
     } finally {
       setForking(null)
     }
@@ -201,7 +212,7 @@ function PackagesContent() {
           <button onClick={openImport}
             className="border text-sm font-medium px-4 py-2.5 rounded-xl"
             style={{ borderColor: colour, color: colour }}>
-            ↓ Import from Library
+            ↓ Pull from Library
           </button>
           <button onClick={openCreate}
             disabled={crops.length === 0}
@@ -391,10 +402,11 @@ function PackagesContent() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="p-6 border-b border-slate-100">
-              <h2 className="font-bold text-slate-900">Import from Global CCA Library</h2>
+              <h2 className="font-bold text-slate-900">Pull from Global CCA Library</h2>
               <p className="text-slate-500 text-sm mt-0.5">
-                Get a copy of RootsTalk&apos;s standard Package of Practices templates.
-                You&apos;ll own an independent copy to customise for your company.
+                Pull the latest version of packages your Content Manager has shared with
+                your company. Each pull creates a new draft for you to review — your live
+                version stays untouched until you publish the draft.
               </p>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
@@ -406,7 +418,14 @@ function PackagesContent() {
                 </p>
               ) : (
                 globals.map(g => {
-                  const alreadyForked = packages.some(p => p.crop_cosh_id === g.crop_cosh_id && p.name === g.name)
+                  // Heuristic: a Global is "shared with us" if we already
+                  // have a local row matching its crop+name. The CM-push
+                  // step creates exactly that. SE can then pull subsequent
+                  // versions. Globals without a matching local row haven't
+                  // been pushed yet — the SE can still tap Pull, but the
+                  // backend will refuse with package_not_pushed_yet and
+                  // we surface that as a clear inline error.
+                  const alreadyShared = packages.some(p => p.crop_cosh_id === g.crop_cosh_id && p.name === g.name)
                   return (
                     <div key={g.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50">
                       <div className="flex-1">
@@ -415,15 +434,17 @@ function PackagesContent() {
                           {g.crop_cosh_id} · {g.package_type.toLowerCase()} · {g.duration_days}d
                         </p>
                       </div>
-                      {alreadyForked ? (
-                        <span className="text-xs text-green-600 font-medium">✓ Imported</span>
-                      ) : (
+                      {alreadyShared ? (
                         <button onClick={() => doFork(g.id)}
                           disabled={forking === g.id}
                           className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
                           style={{ background: colour }}>
-                          {forking === g.id ? 'Importing…' : 'Import'}
+                          {forking === g.id ? 'Pulling…' : '↻ Pull update'}
                         </button>
+                      ) : (
+                        <span className="text-xs text-slate-400 font-medium" title="Ask your Content Manager to push this package first.">
+                          Not shared yet
+                        </span>
                       )}
                     </div>
                   )
