@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, FormEvent } from 'react'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 
 interface PortalUser {
@@ -62,8 +63,7 @@ export default function UsersPage() {
       setForm({ email: '', name: '', role: 'SUBJECT_EXPERT', password: '' })
       load()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to add user.')
+      setError(extractErrorMessage(err, 'Failed to add user.'))
     } finally { setInviting(false) }
   }
 
@@ -75,8 +75,7 @@ export default function UsersPage() {
       await api.put(`/client/${clientId}/users/${userId}/status`, { status: newStatus })
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, status: newStatus } : u))
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to update user status.')
+      setError(extractErrorMessage(err, 'Failed to update user status.'))
     } finally { setToggling(null) }
   }
 

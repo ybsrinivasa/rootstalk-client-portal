@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef, FormEvent } from 'react'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 import { getClient, getToken } from '@/lib/auth'
 
 // ── Colour distance helper ────────────────────────────────────────────────────
@@ -166,8 +167,7 @@ export default function ProfilePage() {
       })
       setSaveSuccess(true)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setSaveError(msg || 'Save failed. Please try again.')
+      setSaveError(extractErrorMessage(err, 'Save failed. Please try again.'))
     } finally {
       setSaving(false)
     }

@@ -223,7 +223,7 @@ export default function PackageDetailPage() {
         typeof detail === 'string'
           ? detail
           : (detail as { message?: string })?.message
-      setPubError(msg || 'Failed to publish.')
+      setPubError(extractErrorMessage(err, 'Failed to publish.'))
       // Re-fetch readiness — server-side state may have shifted
       // (e.g. crop just dropped off the belt) since the panel was
       // last rendered, surfacing a different blocker.
@@ -258,8 +258,7 @@ export default function PackageDetailPage() {
       setImportSourcePkgId(''); setImportSourceTlId(''); setImportNewName('')
       await loadTimelines()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setImportError(msg || 'Import failed.')
+      setImportError(extractErrorMessage(err, 'Import failed.'))
     } finally { setImporting(false) }
   }
 
@@ -322,8 +321,7 @@ export default function PackageDetailPage() {
       await loadTimelines()
       loadReadiness()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setTlError(msg || 'Failed to add timeline.')
+      setTlError(extractErrorMessage(err, 'Failed to add timeline.'))
     } finally { setAddingTL(false) }
   }
 
@@ -344,8 +342,7 @@ export default function PackageDetailPage() {
       setPracticeForm({ l0_type: 'INPUT', l1_type: '', l2_type: '', display_order: '0', is_special_input: false })
       await loadPractices(showAddPractice)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setPracticeError(msg || 'Failed to add practice.')
+      setPracticeError(extractErrorMessage(err, 'Failed to add practice.'))
     } finally { setAddingPractice(false) }
   }
 

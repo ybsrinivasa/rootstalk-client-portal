@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, FormEvent } from 'react'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 
 interface ClientLocation {
@@ -52,8 +53,7 @@ export default function SetupPage() {
       setLocations(prev => [...prev, data])
       setLocForm({ state_cosh_id: '', district_cosh_id: '' })
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to add location.')
+      setError(extractErrorMessage(err, 'Failed to add location.'))
     } finally { setSaving(false) }
   }
 
@@ -64,8 +64,7 @@ export default function SetupPage() {
       await api.delete(`/client/${clientId}/locations/${id}`)
       setLocations(prev => prev.filter(l => l.id !== id))
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to remove location.')
+      setError(extractErrorMessage(err, 'Failed to remove location.'))
     } finally { setDeleting(null) }
   }
 
@@ -111,8 +110,7 @@ export default function SetupPage() {
         } catch { /* picker refresh is best-effort */ }
       }
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to remove crop.')
+      setError(extractErrorMessage(err, 'Failed to remove crop.'))
     } finally { setDeleting(null) }
   }
 

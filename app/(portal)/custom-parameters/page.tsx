@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { getClient } from '@/lib/auth'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 
 interface Parameter {
   id: string; name: string; crop_cosh_id: string; source: string; status: string
@@ -89,8 +90,7 @@ export default function CustomParametersPage() {
       setNewVariables(['', ''])
       loadParameters()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setCreateError(msg || 'Failed to create parameter')
+      setCreateError(extractErrorMessage(err, 'Failed to create parameter'))
     } finally { setCreating(false) }
   }
 

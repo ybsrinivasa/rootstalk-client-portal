@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, FormEvent } from 'react'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 
 interface Pundit {
@@ -211,8 +212,7 @@ export default function FarmPunditsPage() {
       setPendingInvitations(pending.data)
       setRejectedInvitations(rejected.data)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setInviteError(msg || 'Failed to invite.')
+      setInviteError(extractErrorMessage(err, 'Failed to invite.'))
     } finally { setInviting(null) }
   }
 
@@ -235,8 +235,7 @@ export default function FarmPunditsPage() {
       await api.put(`/client/${clientId}/pundits/${cpId}/role`, { role: target })
       load()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(msg || 'Failed to change role.')
+      alert(extractErrorMessage(err, 'Failed to change role.'))
     }
   }
 
@@ -246,8 +245,7 @@ export default function FarmPunditsPage() {
       await api.delete(`/client/${clientId}/pundits/${cpId}`)
       load()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(msg || 'Failed to remove.')
+      alert(extractErrorMessage(err, 'Failed to remove.'))
     }
   }
 

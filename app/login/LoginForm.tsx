@@ -3,6 +3,7 @@ import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { login, getToken, setClient, CPClient } from '@/lib/auth'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 
 interface LoginFormProps {
   /**
@@ -84,8 +85,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
       if (branding) setClient(branding)
       router.replace('/dashboard')
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Invalid email or password.')
+      setError(extractErrorMessage(err, 'Invalid email or password.'))
     } finally { setLoading(false) }
   }
 
@@ -97,8 +97,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
       setOtpSent(true)
       setInfo(`A 6-digit code was sent to ${email}`)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Could not send OTP')
+      setError(extractErrorMessage(err, 'Could not send OTP'))
     } finally { setLoading(false) }
   }
 
@@ -115,8 +114,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
       if (branding) setClient(branding)
       router.replace('/dashboard')
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Invalid or expired code')
+      setError(extractErrorMessage(err, 'Invalid or expired code'))
     } finally { setLoading(false) }
   }
 
@@ -138,8 +136,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
       setForgotStage('done')
       setInfo('Password reset. You can now sign in.')
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Reset failed')
+      setError(extractErrorMessage(err, 'Reset failed'))
     } finally { setLoading(false) }
   }
 

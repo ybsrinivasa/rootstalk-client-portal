@@ -2,6 +2,7 @@
 import { useState, FormEvent } from 'react'
 import { getClient } from '@/lib/auth'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 
 export default function ChangePasswordPage() {
   const client = getClient()
@@ -25,8 +26,7 @@ export default function ChangePasswordPage() {
       setSuccess('Password changed successfully.')
       setForm({ current_password: '', new_password: '', confirm: '' })
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to change password')
+      setError(extractErrorMessage(err, 'Failed to change password'))
     } finally { setLoading(false) }
   }
 

@@ -3,6 +3,7 @@ import { useEffect, useState, FormEvent } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 
 // Standard Q&A — advisory body editor (UCAT pipe-3, spec §14.9).
@@ -96,8 +97,7 @@ export default function StandardResponseDetailPage() {
       setSr(found)
       setTimelines(tlsRes.data)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Failed to load.')
+      setError(extractErrorMessage(err, 'Failed to load.'))
     } finally { setLoading(false) }
   }
 
@@ -118,8 +118,7 @@ export default function StandardResponseDetailPage() {
       setTlForm(emptyTLForm)
       load()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(msg || 'Failed to add timeline.')
+      alert(extractErrorMessage(err, 'Failed to add timeline.'))
     } finally { setSavingTL(false) }
   }
 
@@ -129,8 +128,7 @@ export default function StandardResponseDetailPage() {
       await api.delete(`/client/${clientId}/standard-responses/${srId}/timelines/${tl.id}`)
       load()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(msg || 'Failed to delete.')
+      alert(extractErrorMessage(err, 'Failed to delete.'))
     }
   }
 
@@ -155,8 +153,7 @@ export default function StandardResponseDetailPage() {
       setPracticeForm(emptyPracticeForm)
       load()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(msg || 'Failed to add practice.')
+      alert(extractErrorMessage(err, 'Failed to add practice.'))
     } finally { setSavingPractice(false) }
   }
 
@@ -169,8 +166,7 @@ export default function StandardResponseDetailPage() {
       )
       load()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(msg || 'Failed to delete.')
+      alert(extractErrorMessage(err, 'Failed to delete.'))
     }
   }
 

@@ -2,6 +2,7 @@
 import { useEffect, useState, FormEvent } from 'react'
 import Script from 'next/script'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 
 declare global {
@@ -146,8 +147,7 @@ export default function SubscriptionPage() {
       )
       loadAllocations()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setAllocError(msg || `Could not ${kind}.`)
+      setAllocError(extractErrorMessage(err, `Could not ${kind}.`))
     } finally {
       setAllocBusy('')
     }
@@ -174,8 +174,7 @@ export default function SubscriptionPage() {
       setNewPromoterPhone(''); setNewPromoterUnits('')
       loadAllocations()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setAllocError(msg || 'Could not add this promoter.')
+      setAllocError(extractErrorMessage(err, 'Could not add this promoter.'))
     } finally {
       setNewPromoterBusy(false)
     }
@@ -195,9 +194,8 @@ export default function SubscriptionPage() {
       })
         .then(r => { setQuote(r.data); setQuoteError('') })
         .catch((err: unknown) => {
-          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
           setQuote(null)
-          setQuoteError(msg || 'Could not calculate price for this quantity.')
+          setQuoteError(extractErrorMessage(err, 'Could not calculate price for this quantity.'))
         })
     }, 250)
     return () => clearTimeout(handle)
@@ -255,8 +253,7 @@ export default function SubscriptionPage() {
             setUnits('100')
             loadAllocations()  // company unallocated balance just grew
           } catch (err: unknown) {
-            const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-            setError(msg || 'Payment verification failed. Contact support with your Razorpay payment ID.')
+            setError(extractErrorMessage(err, 'Payment verification failed. Contact support with your Razorpay payment ID.'))
           } finally {
             setPurchasing(false)
           }
@@ -267,8 +264,7 @@ export default function SubscriptionPage() {
       }
       new window.Razorpay(options).open()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Could not initiate payment.')
+      setError(extractErrorMessage(err, 'Could not initiate payment.'))
       setPurchasing(false)
     }
   }
