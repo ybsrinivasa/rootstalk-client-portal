@@ -1307,14 +1307,16 @@ export default function PackageDetailPage() {
                             </button>
                           </>
                         )}
-                        <button
-                          onClick={() => {
-                            setNewVarForParamId(newVarForParamId === param.id ? null : param.id)
-                            setNewVarName('')
-                          }}
-                          className="text-xs text-blue-600 hover:underline">
-                          {newVarForParamId === param.id ? 'Cancel' : '+ Variable'}
-                        </button>
+                        {isCustom && (
+                          <button
+                            onClick={() => {
+                              setNewVarForParamId(newVarForParamId === param.id ? null : param.id)
+                              setNewVarName('')
+                            }}
+                            className="text-xs text-blue-600 hover:underline">
+                            {newVarForParamId === param.id ? 'Cancel' : '+ Variable'}
+                          </button>
+                        )}
                       </div>
                       {vars.length > 0 && (() => {
                         const coshVars = vars.filter(v => v.cosh_id !== null)
