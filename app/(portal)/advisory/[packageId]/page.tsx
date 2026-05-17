@@ -509,8 +509,19 @@ export default function PackageDetailPage() {
   async function openImport() {
     setShowImport(true)
     setImportError('')
+    setImportSourcePkgId('')
+    setImportTimelines([])
+    if (!pkg) return
     const { data } = await api.get<Package[]>(`/client/${clientId}/packages`)
-    setImportPackages(data.filter(p => p.id !== packageId))
+    // Same-crop only — Packages live inside a Crop (Crops → Packages
+    // → Timelines → Practices). Include the current Package itself
+    // only when it has ≥ 1 timeline (otherwise there's nothing to
+    // clone-within-package).
+    const sameCrop = data.filter(p => p.crop_cosh_id === pkg.crop_cosh_id)
+    const selfHasTimeline = timelines.length > 0
+    setImportPackages(
+      sameCrop.filter(p => p.id !== packageId || selfHasTimeline)
+    )
   }
 
   async function loadImportTimelines(pkgId: string) {
@@ -1755,17 +1766,27 @@ export default function PackageDetailPage() {
               You must give it a new name.
             </p>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Source Package</label>
-              <select value={importSourcePkgId}
-                onChange={e => loadImportTimelines(e.target.value)}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none">
-                <option value="">Select a package…</option>
-                {importPackages.map(p => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.crop_cosh_id})</option>
-                ))}
-              </select>
-            </div>
+            {importPackages.length === 0 ? (
+              <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl px-4 py-6 text-center">
+                <p className="text-sm text-slate-500">
+                  No packages have timelines yet for this crop. Create a timeline in this Package or another one first.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Source Package</label>
+                <select value={importSourcePkgId}
+                  onChange={e => loadImportTimelines(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none">
+                  <option value="">Select a package…</option>
+                  {importPackages.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}{p.id === packageId ? ' (this Package)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {importTimelines.length > 0 && (
               <div>
