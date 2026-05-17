@@ -27,15 +27,6 @@ interface CcaCrop {
   name_en: string
 }
 
-interface GlobalPackage {
-  id: string
-  name: string
-  crop_cosh_id: string
-  package_type: string
-  duration_days: number
-  status: string
-}
-
 const STATUS_COLOUR: Record<string, string> = {
   DRAFT: 'bg-amber-100 text-amber-700',
   ACTIVE: 'bg-green-100 text-green-700',
@@ -74,15 +65,6 @@ function PackagesContent() {
     start_date_label_cosh_id: 'label:sowing_date',
     description: '',
   })
-
-  // Pull from Library — SE-side refresh of a Global the CM has
-  // already pushed. Variables retain "forking" naming for now to
-  // minimise diff churn; semantically these track the pull flow.
-  const [showImport, setShowImport] = useState(false)
-  const [globals, setGlobals] = useState<GlobalPackage[]>([])
-  const [loadingGlobals, setLoadingGlobals] = useState(false)
-  const [forking, setForking] = useState<string | null>(null)
-  const [forkError, setForkError] = useState('')
 
   const load = async () => {
     if (!clientId) return
@@ -159,46 +141,6 @@ function PackagesContent() {
     }
   }
 
-  const openImport = async () => {
-    setShowImport(true); setForkError(''); setLoadingGlobals(true)
-    try {
-      const { data } = await api.get<GlobalPackage[]>('/advisory/global/packages')
-      setGlobals(data.filter(g => g.status === 'ACTIVE'))
-    } catch {
-      setGlobals([])
-    } finally {
-      setLoadingGlobals(false)
-    }
-  }
-
-  const doFork = async (globalId: string) => {
-    if (!clientId) return
-    setForking(globalId); setForkError('')
-    try {
-      // Locked 2026-05-11: /pull replaces /fork on the SE-side.
-      // First contact (CM push) happens out of band from the SA
-      // portal; subsequent versions are pulled here. The backend
-      // returns 422 package_not_pushed_yet if the CM hasn't
-      // pushed yet — surface that as a clear inline error.
-      await api.post(`/client/${clientId}/packages/${globalId}/pull`)
-      setShowImport(false)
-      await load()
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-      const detailObj = detail as { code?: string; message?: string } | undefined
-      const code = typeof detail === 'object' && detail ? detailObj?.code : undefined
-      const msg =
-        typeof detail === 'string'
-          ? detail
-          : code === 'package_not_pushed_yet'
-            ? 'Not shared with your company yet. Ask your Content Manager to push it first.'
-            : detailObj?.message
-      setForkError(msg || 'Failed to pull.')
-    } finally {
-      setForking(null)
-    }
-  }
-
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -209,11 +151,6 @@ function PackagesContent() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={openImport}
-            className="border text-sm font-medium px-4 py-2.5 rounded-xl"
-            style={{ borderColor: colour, color: colour }}>
-            ↓ Pull from Library
-          </button>
           <button onClick={openCreate}
             disabled={crops.length === 0}
             className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm disabled:opacity-50"
@@ -236,7 +173,7 @@ function PackagesContent() {
           </p>
           {chips.length === 0 && crops.length > 0 && (
             <p className="text-slate-400 text-sm mt-1">
-              Click <strong>+ New Package</strong> to author one, or <strong>Import from Library</strong> to start from a template.
+              Click <strong>+ New Package</strong> to author one.
             </p>
           )}
           {crops.length === 0 && (
@@ -397,70 +334,6 @@ function PackagesContent() {
         </div>
       )}
 
-      {/* Import from Library modal */}
-      {showImport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
-            <div className="p-6 border-b border-slate-100">
-              <h2 className="font-bold text-slate-900">Pull from Global CCA Library</h2>
-              <p className="text-slate-500 text-sm mt-0.5">
-                Pull the latest version of packages your Content Manager has shared with
-                your company. Each pull creates a new draft for you to review — your live
-                version stays untouched until you publish the draft.
-              </p>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {loadingGlobals ? (
-                <p className="text-center text-slate-400 text-sm py-8">Loading global library…</p>
-              ) : globals.length === 0 ? (
-                <p className="text-center text-slate-400 text-sm py-8">
-                  No active global packages yet. Ask your RootsTalk admin to publish some templates.
-                </p>
-              ) : (
-                globals.map(g => {
-                  // Heuristic: a Global is "shared with us" if we already
-                  // have a local row matching its crop+name. The CM-push
-                  // step creates exactly that. SE can then pull subsequent
-                  // versions. Globals without a matching local row haven't
-                  // been pushed yet — the SE can still tap Pull, but the
-                  // backend will refuse with package_not_pushed_yet and
-                  // we surface that as a clear inline error.
-                  const alreadyShared = packages.some(p => p.crop_cosh_id === g.crop_cosh_id && p.name === g.name)
-                  return (
-                    <div key={g.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50">
-                      <div className="flex-1">
-                        <p className="font-medium text-sm text-slate-800">{g.name}</p>
-                        <p className="text-xs text-slate-400 font-mono">
-                          {g.crop_cosh_id} · {g.package_type.toLowerCase()} · {g.duration_days}d
-                        </p>
-                      </div>
-                      {alreadyShared ? (
-                        <button onClick={() => doFork(g.id)}
-                          disabled={forking === g.id}
-                          className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
-                          style={{ background: colour }}>
-                          {forking === g.id ? 'Pulling…' : '↻ Pull update'}
-                        </button>
-                      ) : (
-                        <span className="text-xs text-slate-400 font-medium" title="Ask your Content Manager to push this package first.">
-                          Not shared yet
-                        </span>
-                      )}
-                    </div>
-                  )
-                })
-              )}
-              {forkError && <p className="text-sm text-red-600 px-2">{forkError}</p>}
-            </div>
-            <div className="p-4 border-t border-slate-100">
-              <button onClick={() => setShowImport(false)}
-                className="w-full border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
