@@ -49,6 +49,23 @@ interface Practice {
   frequency_days?: number | null
   elements?: PracticeElement[]
 }
+interface ClientParameter {
+  id: string
+  crop_cosh_id: string
+  name: string
+  source: 'COSH' | 'CUSTOM'
+  display_order: number
+}
+interface ClientVariable {
+  id: string
+  parameter_id: string
+  name: string
+  cosh_id: string | null
+}
+interface PackageVariableAssignment {
+  parameter_id: string
+  variable_id: string
+}
 
 interface PublishReadinessItem {
   code: string
@@ -143,6 +160,27 @@ export default function PackageDetailPage() {
   const [locationsSelected, setLocationsSelected] = useState<Set<string>>(new Set())
   const [savingLocations, setSavingLocations] = useState(false)
   const [locationsError, setLocationsError] = useState('')
+
+  // Parameters & Variables (Package Signature). Mirror of SA Global
+  // CCA (2026-05-17). Lives behind ✎ Set Signature; compact summary
+  // in the header. CA-side endpoints under /client/{cid}/parameters
+  // and /client/{cid}/packages/{pkg}/variables.
+  const [showSignature, setShowSignature] = useState(false)
+  const [parameters, setParameters] = useState<ClientParameter[]>([])
+  const [variablesByParam, setVariablesByParam] = useState<Record<string, ClientVariable[]>>({})
+  const [packageVariables, setPackageVariables] = useState<PackageVariableAssignment[]>([])
+  const [newVarForParamId, setNewVarForParamId] = useState<string | null>(null)
+  const [newVarName, setNewVarName] = useState('')
+  const [pvSaveError, setPvSaveError] = useState('')
+  const [creatingParam, setCreatingParam] = useState(false)
+  const [paramDraft, setParamDraft] = useState<{ name: string; variables: string[] }>({
+    name: '', variables: ['', ''],
+  })
+  const [editingParamId, setEditingParamId] = useState<string | null>(null)
+  const [editingParamName, setEditingParamName] = useState('')
+  const [editingVarKey, setEditingVarKey] = useState<string | null>(null)
+  const [editingVarName, setEditingVarName] = useState('')
+  const [hideUnusedParams, setHideUnusedParams] = useState(false)
 
   // Map for jumping from a calendar band to its timeline editor block.
   const timelineRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -281,6 +319,153 @@ export default function PackageDetailPage() {
       setSavingLocations(false)
     }
   }
+
+  // ── Parameters & Variables ────────────────────────────────────────────────
+
+  const loadParameters = async (cropCoshId: string) => {
+    if (!clientId) return
+    const { data } = await api.get<ClientParameter[]>(
+      `/client/${clientId}/parameters?crop_cosh_id=${encodeURIComponent(cropCoshId)}`,
+    )
+    setParameters(data)
+    const map: Record<string, ClientVariable[]> = {}
+    for (const p of data) {
+      const r = await api.get<ClientVariable[]>(
+        `/client/${clientId}/parameters/${p.id}/variables`,
+      )
+      map[p.id] = r.data
+    }
+    setVariablesByParam(map)
+  }
+
+  const loadPackageVariables = async () => {
+    if (!clientId) return
+    const { data } = await api.get<PackageVariableAssignment[]>(
+      `/client/${clientId}/packages/${packageId}/variables`,
+    )
+    setPackageVariables(data)
+  }
+
+  function openCreateParam() {
+    setParamDraft({ name: '', variables: ['', ''] })
+    setPvSaveError('')
+    setCreatingParam(true)
+  }
+
+  async function handleCreateCustomParam() {
+    if (!pkg || !clientId) return
+    const name = paramDraft.name.trim()
+    const variables = paramDraft.variables.map(v => v.trim()).filter(Boolean)
+    if (!name) { setPvSaveError('Parameter name is required.'); return }
+    if (variables.length < 2) { setPvSaveError('At least 2 variables are required.'); return }
+    setPvSaveError('')
+    try {
+      await api.post(`/client/${clientId}/parameters`, {
+        crop_cosh_id: pkg.crop_cosh_id,
+        name,
+        variables: variables.map(n => ({ name: n })),
+      })
+      setCreatingParam(false)
+      await loadParameters(pkg.crop_cosh_id)
+    } catch (err: unknown) {
+      setPvSaveError(extractErrorMessage(err, 'Failed to create parameter.'))
+    }
+  }
+
+  async function handleRenameParameter(paramId: string, newName: string) {
+    if (!pkg || !clientId || !newName.trim()) return
+    setPvSaveError('')
+    try {
+      await api.put(`/client/${clientId}/parameters/${paramId}`, { name: newName.trim() })
+      setEditingParamId(null)
+      await loadParameters(pkg.crop_cosh_id)
+    } catch (err: unknown) {
+      setPvSaveError(extractErrorMessage(err, 'Failed to rename parameter.'))
+    }
+  }
+
+  async function handleDeleteParameter(paramId: string, paramName: string) {
+    if (!pkg || !clientId) return
+    if (!confirm(`Delete parameter "${paramName}" and all its variables?`)) return
+    setPvSaveError('')
+    try {
+      await api.delete(`/client/${clientId}/parameters/${paramId}`)
+      await loadParameters(pkg.crop_cosh_id)
+    } catch (err: unknown) {
+      setPvSaveError(extractErrorMessage(err, 'Failed to delete parameter.'))
+    }
+  }
+
+  async function handleRenameVariable(paramId: string, varId: string, newName: string) {
+    if (!pkg || !clientId || !newName.trim()) return
+    setPvSaveError('')
+    try {
+      await api.put(
+        `/client/${clientId}/parameters/${paramId}/variables/${varId}`,
+        { name: newName.trim() },
+      )
+      setEditingVarKey(null)
+      await loadParameters(pkg.crop_cosh_id)
+    } catch (err: unknown) {
+      setPvSaveError(extractErrorMessage(err, 'Failed to rename variable.'))
+    }
+  }
+
+  async function handleDeleteVariable(paramId: string, varId: string, varName: string) {
+    if (!pkg || !clientId) return
+    if (!confirm(`Delete variable "${varName}"?`)) return
+    setPvSaveError('')
+    try {
+      await api.delete(`/client/${clientId}/parameters/${paramId}/variables/${varId}`)
+      await loadParameters(pkg.crop_cosh_id)
+    } catch (err: unknown) {
+      setPvSaveError(extractErrorMessage(err, 'Failed to delete variable.'))
+    }
+  }
+
+  async function handleAddVariable(parameterId: string) {
+    if (!newVarName.trim() || !pkg || !clientId) return
+    setPvSaveError('')
+    try {
+      await api.post(
+        `/client/${clientId}/parameters/${parameterId}/variables`,
+        { parameter_id: parameterId, name: newVarName.trim() },
+      )
+      setNewVarName(''); setNewVarForParamId(null)
+      await loadParameters(pkg.crop_cosh_id)
+    } catch (err: unknown) {
+      setPvSaveError(extractErrorMessage(err, 'Failed to add variable.'))
+    }
+  }
+
+  function getAssignedVariableId(parameterId: string): string {
+    return packageVariables.find(pv => pv.parameter_id === parameterId)?.variable_id || ''
+  }
+
+  async function handleAssignVariable(parameterId: string, variableId: string) {
+    if (!clientId) return
+    setPvSaveError('')
+    const next: PackageVariableAssignment[] = packageVariables
+      .filter(pv => pv.parameter_id !== parameterId)
+    if (variableId) {
+      next.push({ parameter_id: parameterId, variable_id: variableId })
+    }
+    try {
+      await api.put(
+        `/client/${clientId}/packages/${packageId}/variables`,
+        { assignments: next },
+      )
+      setPackageVariables(next)
+    } catch (err: unknown) {
+      setPvSaveError(extractErrorMessage(err, 'Failed to update package signature.'))
+    }
+  }
+
+  useEffect(() => {
+    if (!pkg) return
+    loadParameters(pkg.crop_cosh_id)
+    loadPackageVariables()
+  }, [pkg?.crop_cosh_id])
 
   useEffect(() => {
     if (!clientId) return
@@ -588,6 +773,26 @@ export default function PackageDetailPage() {
             )}
           </p>
           {pkg.description && <p className="text-slate-600 text-sm mt-1">{pkg.description}</p>}
+          {parameters.length > 0 && (
+            <p className="text-xs text-slate-500 mt-2">
+              <span className="font-semibold text-slate-600">Signature:</span>{' '}
+              {parameters.map((p, i) => {
+                const assignedId = packageVariables.find(pv => pv.parameter_id === p.id)?.variable_id
+                const variable = assignedId
+                  ? (variablesByParam[p.id] || []).find(v => v.id === assignedId)
+                  : null
+                return (
+                  <span key={p.id}>
+                    {i > 0 && <span className="text-slate-300 mx-1.5">·</span>}
+                    <span className="text-slate-500">{p.name}: </span>
+                    <span className={variable ? 'text-slate-700 font-medium' : 'text-slate-400 italic'}>
+                      {variable ? variable.name : 'not set'}
+                    </span>
+                  </span>
+                )
+              })}
+            </p>
+          )}
         </div>
         <div className="flex flex-col gap-2 shrink-0">
           <a
@@ -595,6 +800,11 @@ export default function PackageDetailPage() {
             className="text-center border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
             👁 Preview
           </a>
+          <button
+            onClick={() => { setShowSignature(true); setPvSaveError('') }}
+            className="border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
+            ✎ Set signature
+          </button>
           {pkg.status === 'DRAFT' && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}
@@ -974,6 +1184,293 @@ export default function PackageDetailPage() {
                 className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                 style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                 {savingLocations ? 'Saving…' : 'Save Locations'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Set Signature Modal — Parameters & Variables. Mirror of SA
+          Global CCA (2026-05-17). Same UX, only URL prefixes differ. */}
+      {showSignature && pkg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Package Signature</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Parameters &amp; Variables that distinguish this Package from siblings for the
+                same crop. Farmers see only the variant that matches their context.
+              </p>
+              {parameters.length > 0 && (() => {
+                const usedCount = parameters.filter(p => getAssignedVariableId(p.id) !== '').length
+                return (
+                  <div className="flex items-center justify-between mt-3">
+                    <span className="text-xs text-slate-500">
+                      {usedCount} of {parameters.length} parameter{parameters.length === 1 ? '' : 's'} assigned
+                    </span>
+                    <label className="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+                      <input type="checkbox"
+                        checked={hideUnusedParams}
+                        onChange={e => setHideUnusedParams(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded" />
+                      Hide unused
+                    </label>
+                  </div>
+                )
+              })()}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-3">
+              {parameters.length === 0 ? (
+                <p className="text-sm text-slate-400 italic">
+                  No parameters yet for <span className="font-mono">{pkg.crop_cosh_id}</span>.
+                  Add one below (e.g. Irrigation) and give it a couple of variables
+                  (e.g. Drip, Flood).
+                </p>
+              ) : (() => {
+                const visibleParams = hideUnusedParams
+                  ? parameters.filter(p => getAssignedVariableId(p.id) !== '')
+                  : parameters
+                if (visibleParams.length === 0) {
+                  return (
+                    <p className="text-sm text-slate-400 italic">
+                      No parameters assigned for this Package yet. Uncheck &ldquo;Hide unused&rdquo;
+                      above to see all parameters and assign variables.
+                    </p>
+                  )
+                }
+                return visibleParams.map(param => {
+                  const vars = variablesByParam[param.id] || []
+                  const assignedId = getAssignedVariableId(param.id)
+                  const isUsed = assignedId !== ''
+                  const isCustom = param.source === 'CUSTOM'
+                  const isEditingThisParam = editingParamId === param.id
+                  return (
+                    <div key={param.id}
+                      className={`py-3 last:border-0 ${isUsed ? 'border-b border-green-100 bg-green-50/40 -mx-2 px-2 rounded-lg' : 'border-b border-slate-50'}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          {isEditingThisParam ? (
+                            <input
+                              value={editingParamName}
+                              onChange={e => setEditingParamName(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleRenameParameter(param.id, editingParamName)
+                                if (e.key === 'Escape') setEditingParamId(null)
+                              }}
+                              onBlur={() => handleRenameParameter(param.id, editingParamName)}
+                              autoFocus
+                              className="w-full border border-blue-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-slate-700 truncate">{param.name}</p>
+                              {!isCustom && (
+                                <span className="text-[10px] uppercase tracking-wide bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
+                                  Cosh
+                                </span>
+                              )}
+                              {isUsed && (
+                                <span className="text-[10px] uppercase tracking-wide bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                  Used
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <select
+                          value={assignedId}
+                          onChange={e => handleAssignVariable(param.id, e.target.value)}
+                          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
+                          <option value="">— not set —</option>
+                          {vars.map(v => (
+                            <option key={v.id} value={v.id}>{v.name}</option>
+                          ))}
+                        </select>
+                        {isCustom && !isEditingThisParam && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setEditingParamId(param.id)
+                                setEditingParamName(param.name)
+                              }}
+                              className="text-slate-400 hover:text-blue-500 p-1" title="Rename parameter">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteParameter(param.id, param.name)}
+                              className="text-slate-400 hover:text-red-500 p-1" title="Delete parameter">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22" />
+                              </svg>
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => {
+                            setNewVarForParamId(newVarForParamId === param.id ? null : param.id)
+                            setNewVarName('')
+                          }}
+                          className="text-xs text-blue-600 hover:underline">
+                          {newVarForParamId === param.id ? 'Cancel' : '+ Variable'}
+                        </button>
+                      </div>
+                      {vars.length > 0 && (() => {
+                        const coshVars = vars.filter(v => v.cosh_id !== null)
+                        const seVars = vars.filter(v => v.cosh_id === null)
+                        return (
+                          <div className="mt-1.5 ml-1 space-y-1">
+                            {coshVars.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 items-center">
+                                {coshVars.map(v => {
+                                  const isAssigned = v.id === assignedId
+                                  return (
+                                    <span key={v.id}
+                                      className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2.5 py-0.5 ${isAssigned ? 'bg-green-100 text-green-800 font-medium ring-1 ring-green-300' : 'bg-blue-50 text-blue-700'}`}
+                                      title={isAssigned ? 'Assigned to this Package' : 'From Cosh — read-only'}>
+                                      {v.name}
+                                    </span>
+                                  )
+                                })}
+                              </div>
+                            )}
+                            {seVars.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {seVars.map(v => {
+                                  const key = `${param.id}:${v.id}`
+                                  const editingThis = editingVarKey === key
+                                  const isAssigned = v.id === assignedId
+                                  return editingThis ? (
+                                    <input key={v.id}
+                                      value={editingVarName}
+                                      onChange={e => setEditingVarName(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') handleRenameVariable(param.id, v.id, editingVarName)
+                                        if (e.key === 'Escape') setEditingVarKey(null)
+                                      }}
+                                      onBlur={() => handleRenameVariable(param.id, v.id, editingVarName)}
+                                      autoFocus
+                                      className="border border-blue-300 rounded-full px-2 py-0.5 text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                  ) : (
+                                    <span key={v.id}
+                                      className={`inline-flex items-center gap-1 text-[11px] rounded-full pl-2.5 pr-1 py-0.5 ${isAssigned ? 'bg-green-100 text-green-800 font-medium ring-1 ring-green-300' : 'bg-slate-100 text-slate-600'}`}
+                                      title={isAssigned ? 'Assigned to this Package' : undefined}>
+                                      <button onClick={() => { setEditingVarKey(key); setEditingVarName(v.name) }}
+                                        className={isAssigned ? 'hover:text-green-900' : 'hover:text-blue-600'}>{v.name}</button>
+                                      <button onClick={() => handleDeleteVariable(param.id, v.id, v.name)}
+                                        className={`ml-0.5 leading-none ${isAssigned ? 'text-green-600 hover:text-red-500' : 'text-slate-400 hover:text-red-500'}`}
+                                        title="Delete variable">
+                                        ×
+                                      </button>
+                                    </span>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  )
+                })
+              })()}
+
+              {newVarForParamId && (
+                <div className="flex items-center gap-2 pt-2">
+                  <input
+                    value={newVarName}
+                    onChange={e => setNewVarName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAddVariable(newVarForParamId) }}
+                    autoFocus
+                    placeholder="New variable name (e.g. Drip)"
+                    className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <button onClick={() => handleAddVariable(newVarForParamId)}
+                    disabled={!newVarName.trim()}
+                    className="text-xs font-semibold bg-blue-600 text-white px-3 py-1.5 rounded-lg disabled:opacity-50">
+                    Add
+                  </button>
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-50">
+                {!creatingParam ? (
+                  <button onClick={openCreateParam}
+                    className="w-full text-sm font-medium px-3 py-2 rounded-lg border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50">
+                    + New Custom Parameter
+                  </button>
+                ) : (
+                  <div className="border border-blue-200 rounded-xl p-4 space-y-3 bg-blue-50/30">
+                    <h4 className="text-sm font-semibold text-slate-800">New Custom Parameter</h4>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
+                      <input
+                        value={paramDraft.name}
+                        onChange={e => setParamDraft(d => ({ ...d, name: e.target.value }))}
+                        autoFocus
+                        placeholder="e.g. Irrigation"
+                        className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Variables <span className="text-slate-400 font-normal">(at least 2 required)</span>
+                      </label>
+                      <div className="space-y-1.5">
+                        {paramDraft.variables.map((v, i) => (
+                          <div key={i} className="flex gap-1.5">
+                            <input
+                              value={v}
+                              onChange={e => setParamDraft(d => ({
+                                ...d, variables: d.variables.map((vv, ii) => ii === i ? e.target.value : vv),
+                              }))}
+                              placeholder={`Variable ${i + 1} (e.g. ${i === 0 ? 'Drip' : 'Flood'})`}
+                              className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            {paramDraft.variables.length > 2 && (
+                              <button type="button"
+                                onClick={() => setParamDraft(d => ({
+                                  ...d, variables: d.variables.filter((_, ii) => ii !== i),
+                                }))}
+                                className="text-slate-400 hover:text-red-500 px-2"
+                                title="Remove this variable slot">
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <button type="button"
+                        onClick={() => setParamDraft(d => ({ ...d, variables: [...d.variables, ''] }))}
+                        className="text-xs text-blue-600 hover:underline mt-1.5">
+                        + Add another variable
+                      </button>
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button type="button"
+                        onClick={() => { setCreatingParam(false); setPvSaveError('') }}
+                        className="flex-1 text-sm border border-slate-200 text-slate-700 font-medium py-1.5 rounded-lg hover:bg-white">
+                        Cancel
+                      </button>
+                      <button type="button"
+                        onClick={handleCreateCustomParam}
+                        disabled={
+                          !paramDraft.name.trim()
+                          || paramDraft.variables.filter(v => v.trim()).length < 2
+                        }
+                        className="flex-1 text-sm bg-blue-600 text-white font-semibold py-1.5 rounded-lg disabled:opacity-50">
+                        Create
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {pvSaveError && <p className="text-xs text-red-600">{pvSaveError}</p>}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShowSignature(false)}
+                className="text-sm font-medium text-slate-700 px-4 py-2 rounded-xl hover:bg-slate-50">
+                Done
               </button>
             </div>
           </div>
