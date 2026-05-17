@@ -245,15 +245,22 @@ export default function RecDetailPage() {
             {' · '}v{rec.version}
           </p>
         </div>
-        {rec.status === 'DRAFT' && (
-          <button onClick={() => setShowPublishConfirm(true)}
-            disabled={publishing || !readiness?.ready}
-            title={!readiness?.ready ? 'Resolve the items below first' : ''}
-            className="shrink-0 text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-            {publishing ? 'Publishing…' : '✓ Publish'}
-          </button>
-        )}
+        <div className="shrink-0 flex flex-col items-end gap-2">
+          <Link href={`/cha/recommendations/${recId}/preview`}
+            className="text-sm font-medium px-4 py-2 rounded-xl border"
+            style={{ borderColor: colour, color: colour }}>
+            👁 Preview
+          </Link>
+          {rec.status === 'DRAFT' && (
+            <button onClick={() => setShowPublishConfirm(true)}
+              disabled={publishing || !readiness?.ready}
+              title={!readiness?.ready ? 'Resolve the items below first' : ''}
+              className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
+              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              {publishing ? 'Publishing…' : '✓ Publish'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Pre-publish gate panel */}
