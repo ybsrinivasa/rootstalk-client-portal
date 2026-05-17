@@ -3,6 +3,7 @@ import { useEffect, useState, FormEvent } from 'react'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
+import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
 
 interface ClientLocation {
   id: string; state_cosh_id: string; district_cosh_id: string; status: string; added_at: string
@@ -21,51 +22,52 @@ export default function SetupPage() {
   const colour = client?.primary_colour || '#1A5C2A'
 
   const [tab, setTab] = useState<'locations' | 'crops'>('locations')
-  const [locations, setLocations] = useState<ClientLocation[]>([])
   const [crops, setCrops] = useState<ClientCrop[]>([])
   const [available, setAvailable] = useState<AvailableCrop[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [savedHint, setSavedHint] = useState('')
 
-  const [locForm, setLocForm] = useState({ state_cosh_id: '', district_cosh_id: '' })
+  // Location picker state (2026-05-17 rebuild). `universe` is the
+  // full Cosh India list; `selectedKeys` mirrors the company's
+  // ACTIVE ClientLocation footprint as `${state}::${district}`
+  // composite keys.
+  const [universe, setUniverse] = useState<LocationUniverse>({ states: [] })
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+
   const [cropForm, setCropForm] = useState({ crop_cosh_id: '' })
 
   useEffect(() => {
     if (!clientId) return
     Promise.all([
+      api.get<LocationUniverse>('/cosh/locations/india').catch(() => ({ data: { states: [] } as LocationUniverse })),
       api.get<ClientLocation[]>(`/client/${clientId}/locations`).catch(() => ({ data: [] as ClientLocation[] })),
       api.get<ClientCrop[]>(`/client/${clientId}/crops`).catch(() => ({ data: [] as ClientCrop[] })),
       api.get<AvailableCrop[]>(`/client/${clientId}/available-crops`).catch(() => ({ data: [] as AvailableCrop[] })),
-    ]).then(([locRes, cropRes, availRes]) => {
-      setLocations(locRes.data)
+    ]).then(([uniRes, locRes, cropRes, availRes]) => {
+      setUniverse(uniRes.data)
+      const keys = new Set<string>()
+      for (const l of locRes.data) {
+        if (l.status === 'ACTIVE') keys.add(pairKey(l.state_cosh_id, l.district_cosh_id))
+      }
+      setSelectedKeys(keys)
       setCrops(cropRes.data)
       setAvailable(availRes.data)
     }).finally(() => setLoading(false))
   }, [clientId])
 
-  async function addLocation(e: FormEvent) {
-    e.preventDefault()
-    setSaving(true); setError('')
+  async function saveLocations() {
+    if (!clientId) return
+    setSaving(true); setError(''); setSavedHint('')
     try {
-      const { data } = await api.post<ClientLocation>(`/client/${clientId}/locations`, locForm)
-      setLocations(prev => [...prev, data])
-      setLocForm({ state_cosh_id: '', district_cosh_id: '' })
+      const pairs = Array.from(selectedKeys).map(k => unpairKey(k))
+      await api.put(`/client/${clientId}/locations`, pairs)
+      setSavedHint(`Saved ${pairs.length} district${pairs.length === 1 ? '' : 's'}.`)
     } catch (err: unknown) {
-      setError(extractErrorMessage(err, 'Failed to add location.'))
+      setError(extractErrorMessage(err, 'Failed to save locations.'))
     } finally { setSaving(false) }
-  }
-
-  async function deleteLocation(id: string) {
-    if (!clientId || !confirm('Remove this location?')) return
-    setDeleting(id)
-    try {
-      await api.delete(`/client/${clientId}/locations/${id}`)
-      setLocations(prev => prev.filter(l => l.id !== id))
-    } catch (err: unknown) {
-      setError(extractErrorMessage(err, 'Failed to remove location.'))
-    } finally { setDeleting(null) }
   }
 
   async function addCrop(e: FormEvent) {
@@ -135,65 +137,29 @@ export default function SetupPage() {
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
       ) : tab === 'locations' ? (
         <div className="space-y-4">
-          {/* Add Location Form */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
-            <h3 className="font-semibold text-slate-800 mb-4">Add Location</h3>
-            <form onSubmit={addLocation} className="flex gap-3 flex-wrap">
-              <input value={locForm.state_cosh_id} onChange={e => setLocForm(f => ({ ...f, state_cosh_id: e.target.value }))}
-                required placeholder="State Cosh ID (e.g. state_telangana)"
-                className="flex-1 min-w-[180px] border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono" />
-              <input value={locForm.district_cosh_id} onChange={e => setLocForm(f => ({ ...f, district_cosh_id: e.target.value }))}
-                required placeholder="District Cosh ID (e.g. district_warangal)"
-                className="flex-1 min-w-[180px] border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono" />
-              <button type="submit" disabled={saving}
+            <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-800">Company Footprint</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Districts {client?.display_name || 'this company'} operates in. Packages can only target districts you&apos;ve enabled here.
+                </p>
+              </div>
+              <button onClick={saveLocations} disabled={saving}
                 className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
                 style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                {saving ? 'Adding…' : '+ Add'}
+                {saving ? 'Saving…' : '✓ Save Locations'}
               </button>
-            </form>
-            {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+            </div>
+            <LocationPicker
+              universe={universe}
+              selected={selectedKeys}
+              onChange={setSelectedKeys}
+              accentColour={colour}
+              emptyMessage="Cosh hasn't synced India locations to this server yet. Ask your RootsTalk admin to run a sync." />
+            {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+            {savedHint && <p className="text-sm text-green-700 mt-3">{savedHint}</p>}
           </div>
-
-          {/* Location list */}
-          {locations.length === 0 ? (
-            <div className="bg-white rounded-2xl p-8 text-center border border-dashed border-slate-200">
-              <p className="text-slate-500 text-sm">No locations configured. Add state+district pairs that this client operates in.</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-100">
-                  <tr>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">State ID</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">District ID</th>
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                    <th className="px-5 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {locations.map(loc => (
-                    <tr key={loc.id}>
-                      <td className="px-5 py-3 font-mono text-xs text-slate-600">{loc.state_cosh_id}</td>
-                      <td className="px-5 py-3 font-mono text-xs text-slate-600">{loc.district_cosh_id}</td>
-                      <td className="px-5 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${loc.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {loc.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <button
-                          onClick={() => deleteLocation(loc.id)}
-                          disabled={deleting === loc.id}
-                          className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40">
-                          {deleting === loc.id ? '…' : 'Remove'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       ) : (
         <div className="space-y-4">
