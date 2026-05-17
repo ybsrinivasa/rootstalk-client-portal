@@ -256,18 +256,31 @@ function PackagesContent() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Crop</label>
-                <select value={form.crop_cosh_id}
-                  onChange={e => setForm(f => ({ ...f, crop_cosh_id: e.target.value }))}
-                  required
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
-                  <option value="">Pick a crop…</option>
-                  {crops.map(c => (
-                    <option key={c.crop_cosh_id} value={c.crop_cosh_id}>{c.name_en}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400 mt-1">
-                  Only crops on the company&apos;s belt are listed. CA manages this list in Setup.
-                </p>
+                {cropFilter ? (
+                  <>
+                    <div className="w-full border border-slate-200 bg-slate-50 rounded-xl px-4 py-2.5 text-sm text-slate-600">
+                      {cropName}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Locked — you reached this modal from the {cropName} crop drill-down. Go back to <strong>Crops</strong> if you need to pick a different one.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <select value={form.crop_cosh_id}
+                      onChange={e => setForm(f => ({ ...f, crop_cosh_id: e.target.value }))}
+                      required
+                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
+                      <option value="">Pick a crop…</option>
+                      {crops.map(c => (
+                        <option key={c.crop_cosh_id} value={c.crop_cosh_id}>{c.name_en}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Only crops on the company&apos;s belt are listed. CA manages this list in Setup.
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
