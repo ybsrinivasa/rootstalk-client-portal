@@ -50,6 +50,19 @@ interface Practice {
   frequency_days?: number | null
   elements?: PracticeElement[]
 }
+interface PackageAuthor {
+  id: string
+  user_id: string
+  user_name: string | null
+  display_order: number
+}
+interface PortalUser {
+  id: string
+  email: string
+  name: string
+  role: string
+  status: string
+}
 interface ClientParameter {
   id: string
   crop_cosh_id: string
@@ -223,6 +236,19 @@ export default function PackageDetailPage() {
   const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
   const [expandedPractice, setExpandedPractice] = useState<string | null>(null)
 
+  // Package authors (Subject Experts of this company credited on
+  // the package). Backend at PUT /packages/{pkg}/authors does the
+  // replace-all + SE validation; UI here is name-pick + reorder
+  // only. Designation + professional_profile come from User
+  // Management later (Tasks D+E).
+  const [authors, setAuthors] = useState<PackageAuthor[]>([])
+  const [availableSEs, setAvailableSEs] = useState<PortalUser[]>([])
+  const [showEditAuthors, setShowEditAuthors] = useState(false)
+  const [authorsDraft, setAuthorsDraft] = useState<{ user_id: string; user_name: string | null }[]>([])
+  const [addAuthorPick, setAddAuthorPick] = useState('')
+  const [savingAuthors, setSavingAuthors] = useState(false)
+  const [authorsError, setAuthorsError] = useState('')
+
   // Edit Package details — mirror of SA Global CCA (2026-05-17).
   // 5-field form: Name, Start Date Label, Duration, Description,
   // Status. Crop + Type stay immutable.
@@ -313,6 +339,82 @@ export default function PackageDetailPage() {
       setLocationOptions(data)
     } catch {
       setLocationOptions({ states: [] })
+    }
+  }
+
+  const loadAuthors = async () => {
+    if (!clientId || !packageId) return
+    try {
+      const { data } = await api.get<PackageAuthor[]>(
+        `/client/${clientId}/packages/${packageId}/authors`,
+      )
+      setAuthors(data)
+    } catch {
+      setAuthors([])
+    }
+  }
+
+  const loadAvailableSEs = async () => {
+    if (!clientId) return
+    try {
+      const { data } = await api.get<PortalUser[]>(`/client/${clientId}/users`)
+      setAvailableSEs(
+        data.filter(u => u.role === 'SUBJECT_EXPERT' && u.status === 'ACTIVE'),
+      )
+    } catch {
+      setAvailableSEs([])
+    }
+  }
+
+  function openEditAuthors() {
+    setAuthorsDraft(
+      authors
+        .slice()
+        .sort((a, b) => a.display_order - b.display_order)
+        .map(a => ({ user_id: a.user_id, user_name: a.user_name })),
+    )
+    setAddAuthorPick('')
+    setAuthorsError('')
+    setShowEditAuthors(true)
+  }
+
+  function addAuthorToDraft() {
+    if (!addAuthorPick) return
+    if (authorsDraft.some(a => a.user_id === addAuthorPick)) return
+    const se = availableSEs.find(u => u.id === addAuthorPick)
+    if (!se) return
+    setAuthorsDraft([...authorsDraft, { user_id: se.id, user_name: se.name }])
+    setAddAuthorPick('')
+  }
+
+  function removeAuthorFromDraft(user_id: string) {
+    setAuthorsDraft(authorsDraft.filter(a => a.user_id !== user_id))
+  }
+
+  function moveAuthorInDraft(index: number, delta: -1 | 1) {
+    const next = index + delta
+    if (next < 0 || next >= authorsDraft.length) return
+    const copy = authorsDraft.slice()
+    const [row] = copy.splice(index, 1)
+    copy.splice(next, 0, row)
+    setAuthorsDraft(copy)
+  }
+
+  async function handleSaveAuthors() {
+    setSavingAuthors(true); setAuthorsError('')
+    try {
+      const body = authorsDraft.map((a, i) => ({
+        user_id: a.user_id,
+        display_order: i,
+      }))
+      await api.put(`/client/${clientId}/packages/${packageId}/authors`, body)
+      setShowEditAuthors(false)
+      await loadAuthors()
+      loadReadiness()
+    } catch (err: unknown) {
+      setAuthorsError(extractErrorMessage(err, 'Failed to save authors.'))
+    } finally {
+      setSavingAuthors(false)
     }
   }
 
@@ -498,6 +600,8 @@ export default function PackageDetailPage() {
     loadReadiness()
     loadLocations()
     loadLocationOptions()
+    loadAuthors()
+    loadAvailableSEs()
   }, [clientId, packageId])
 
   const toggleTimeline = (id: string) => {
@@ -1005,6 +1109,46 @@ export default function PackageDetailPage() {
         )}
       </div>
 
+      {/* Authors panel — Subject Experts credited on this package.
+          Designation + professional profile come from User Management
+          (out of scope here); PWA composes the full author tag from
+          name + those fields. */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="font-semibold text-slate-800">
+              Authors <span className="text-slate-400 font-normal text-sm">({authors.length})</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Subject Experts credited on this Package. Their name, designation, and professional profile appear next to the PoP on the farmer&apos;s app.
+            </p>
+          </div>
+          <button onClick={openEditAuthors}
+            className="text-sm font-medium px-3 py-1.5 rounded-xl border"
+            style={{ borderColor: colour, color: colour }}>
+            ✎ Edit Authors
+          </button>
+        </div>
+        {authors.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">
+            No authors yet. Pick the Subject Experts who created this PoP.
+          </p>
+        ) : (
+          <ol className="flex flex-wrap gap-1.5">
+            {authors
+              .slice()
+              .sort((a, b) => a.display_order - b.display_order)
+              .map((a, i) => (
+                <li key={a.id}
+                  className="text-xs bg-slate-50 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200">
+                  <span className="text-slate-400 font-mono mr-1.5">{i + 1}.</span>
+                  {a.user_name || a.user_id}
+                </li>
+              ))}
+          </ol>
+        )}
+      </div>
+
       {/* Calendar visualisation */}
       {timelines.length > 0 && (
         <PackageCalendar
@@ -1259,6 +1403,97 @@ export default function PackageDetailPage() {
                 className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                 style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                 {savingLocations ? 'Saving…' : 'Save Locations'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Authors Modal — Subject Experts of this company. */}
+      {showEditAuthors && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Edit Authors</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Pick the Subject Experts who authored this PoP. Order matters — the farmer&apos;s app lists them in this sequence.
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {authorsDraft.length === 0 ? (
+                <p className="text-sm text-slate-400 italic">No authors picked yet.</p>
+              ) : (
+                <ol className="space-y-2">
+                  {authorsDraft.map((a, i) => (
+                    <li key={a.user_id}
+                      className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                      <span className="text-xs text-slate-400 font-mono w-5">{i + 1}.</span>
+                      <span className="flex-1 text-sm text-slate-800">{a.user_name || a.user_id}</span>
+                      <button type="button" onClick={() => moveAuthorInDraft(i, -1)}
+                        disabled={i === 0}
+                        className="text-slate-400 hover:text-slate-700 disabled:opacity-30 p-1"
+                        title="Move up">↑</button>
+                      <button type="button" onClick={() => moveAuthorInDraft(i, 1)}
+                        disabled={i === authorsDraft.length - 1}
+                        className="text-slate-400 hover:text-slate-700 disabled:opacity-30 p-1"
+                        title="Move down">↓</button>
+                      <button type="button" onClick={() => removeAuthorFromDraft(a.user_id)}
+                        className="text-slate-400 hover:text-red-500 p-1"
+                        title="Remove author">×</button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              {(() => {
+                const pickedIds = new Set(authorsDraft.map(a => a.user_id))
+                const choices = availableSEs.filter(u => !pickedIds.has(u.id))
+                if (choices.length === 0 && availableSEs.length === 0) {
+                  return (
+                    <p className="text-xs text-slate-400 italic">
+                      No active Subject Experts in this company yet. Add them in <strong>Users</strong> first.
+                    </p>
+                  )
+                }
+                if (choices.length === 0) {
+                  return (
+                    <p className="text-xs text-slate-400 italic">
+                      All Subject Experts of this company are already in the list.
+                    </p>
+                  )
+                }
+                return (
+                  <div className="flex gap-2 pt-2 border-t border-slate-100">
+                    <select value={addAuthorPick}
+                      onChange={e => setAddAuthorPick(e.target.value)}
+                      className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none">
+                      <option value="">Pick a Subject Expert to add…</option>
+                      {choices.map(u => (
+                        <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={addAuthorToDraft}
+                      disabled={!addAuthorPick}
+                      className="text-sm font-medium px-4 rounded-xl text-white disabled:opacity-40"
+                      style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                      + Add
+                    </button>
+                  </div>
+                )
+              })()}
+
+              {authorsError && <p className="text-sm text-red-600">{authorsError}</p>}
+            </div>
+            <div className="p-4 border-t border-slate-100 flex gap-3">
+              <button type="button"
+                onClick={() => { setShowEditAuthors(false); setAuthorsError('') }}
+                className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="button" onClick={handleSaveAuthors} disabled={savingAuthors}
+                className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {savingAuthors ? 'Saving…' : 'Save Authors'}
               </button>
             </div>
           </div>
