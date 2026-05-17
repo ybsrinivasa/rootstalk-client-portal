@@ -1463,20 +1463,20 @@ export default function PackageDetailPage() {
                   )
                 }
                 return (
-                  <div className="flex gap-2 pt-2 border-t border-slate-100">
+                  <div className="pt-3 border-t border-slate-100 space-y-2">
                     <select value={addAuthorPick}
                       onChange={e => setAddAuthorPick(e.target.value)}
-                      className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none">
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none">
                       <option value="">Pick a Subject Expert to add…</option>
                       {choices.map(u => (
-                        <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                        <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
                     </select>
                     <button type="button" onClick={addAuthorToDraft}
                       disabled={!addAuthorPick}
-                      className="text-sm font-medium px-4 rounded-xl text-white disabled:opacity-40"
+                      className="w-full text-sm font-semibold py-2.5 rounded-xl text-white disabled:opacity-40"
                       style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                      + Add
+                      + Add Author
                     </button>
                   </div>
                 )
