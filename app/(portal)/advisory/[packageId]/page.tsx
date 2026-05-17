@@ -4,6 +4,8 @@ import { useParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 import PackageCalendar from '@/components/cca/PackageCalendar'
+import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
+import { practiceShortLabel } from '@/lib/practice-label'
 
 interface Package {
   id: string; name: string; crop_cosh_id: string
@@ -26,12 +28,25 @@ interface Timeline {
   id: string; package_id: string; name: string
   from_type: 'DBS' | 'DAS' | 'CALENDAR'
   from_value: number; to_value: number; display_order: number
+  status?: 'ACTIVE' | 'INACTIVE'  // Batch 28 — Inactive timelines stay listed but exit farmer advisory
+}
+interface PracticeElement {
+  element_type: string
+  label: string
+  cosh_ref: string | null
+  value: string | null
+  unit_cosh_id: string | null
+  display_value: string | null
+  display_order: number
 }
 interface Practice {
   id: string; timeline_id: string
   l0_type: 'INPUT' | 'NON_INPUT' | 'INSTRUCTION' | 'MEDIA'
   l1_type: string | null; l2_type: string | null; display_order: number
   is_special_input: boolean; relation_id: string | null
+  is_brand_locked?: boolean
+  frequency_days?: number | null
+  elements?: PracticeElement[]
 }
 
 interface PublishReadinessItem {
@@ -141,13 +156,24 @@ export default function PackageDetailPage() {
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
 
-  // Practice form
+  // Practice authoring goes through the shared <PracticeFormModal>
+  // (Phase 2 of CA-portal parity, 2026-05-17). `showAddPractice`
+  // holds the timeline id the modal opens against; `editingPractice`
+  // carries the row when the modal opens in edit mode.
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
-  const [addingPractice, setAddingPractice] = useState(false)
-  const [practiceError, setPracticeError] = useState('')
-  const [practiceForm, setPracticeForm] = useState({
-    l0_type: 'INPUT', l1_type: '', l2_type: '',
-    display_order: '0', is_special_input: false,
+  const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
+  const [expandedPractice, setExpandedPractice] = useState<string | null>(null)
+
+  // Edit Timeline (Batch 28 parity). `showEditTL` carries the
+  // Timeline being edited; from_type stays read-only (locked at
+  // create time).
+  const [showEditTL, setShowEditTL] = useState<Timeline | null>(null)
+  const [editingTL, setEditingTL] = useState(false)
+  const [editTLError, setEditTLError] = useState('')
+  const [editTLForm, setEditTLForm] = useState({
+    name: '', from_value: '1', to_value: '30',
+    from_month: '1', from_day: '1', to_month: '12', to_day: '31',
+    status: 'ACTIVE',
   })
 
   // Lineage / multi-row versioning (locked 2026-05-11)
@@ -325,25 +351,67 @@ export default function PackageDetailPage() {
     } finally { setAddingTL(false) }
   }
 
-  async function handleAddPractice(e: FormEvent) {
+  function openEditTimeline(tl: Timeline) {
+    const isCalendar = tl.from_type === 'CALENDAR'
+    const fromMD = isCalendar ? doyToMonthDay(tl.from_value) : { month: 1, day: 1 }
+    const toMD = isCalendar ? doyToMonthDay(tl.to_value) : { month: 12, day: 31 }
+    setEditTLForm({
+      name: tl.name,
+      from_value: String(tl.from_value),
+      to_value: String(tl.to_value),
+      from_month: String(fromMD.month), from_day: String(fromMD.day),
+      to_month: String(toMD.month), to_day: String(toMD.day),
+      status: tl.status || 'ACTIVE',
+    })
+    setEditTLError('')
+    setShowEditTL(tl)
+  }
+
+  async function handleEditTimeline(e: FormEvent) {
     e.preventDefault()
-    if (!showAddPractice) return
-    setAddingPractice(true); setPracticeError('')
+    if (!showEditTL) return
+    setEditTLError('')
+
+    const isCalendar = showEditTL.from_type === 'CALENDAR'
+    let fromVal: number, toVal: number
+    if (isCalendar) {
+      fromVal = dayOfYear(parseInt(editTLForm.from_month), parseInt(editTLForm.from_day))
+      toVal = dayOfYear(parseInt(editTLForm.to_month), parseInt(editTLForm.to_day))
+      if (fromVal >= toVal) {
+        setEditTLError('FROM date must be earlier than TO date in the calendar year.')
+        return
+      }
+    } else {
+      fromVal = parseInt(editTLForm.from_value)
+      toVal = parseInt(editTLForm.to_value)
+      if (Number.isNaN(fromVal) || Number.isNaN(toVal)) {
+        setEditTLError('FROM and TO must be whole numbers.'); return
+      }
+      if (showEditTL.from_type === 'DAS' && fromVal >= toVal) {
+        setEditTLError('For DAS, FROM (smaller) must be less than TO (larger).'); return
+      }
+      if (showEditTL.from_type === 'DBS' && fromVal <= toVal) {
+        setEditTLError('For DBS, FROM (larger) must be greater than TO (smaller).'); return
+      }
+    }
+
+    setEditingTL(true)
     try {
-      await api.post(`/client/${clientId}/timelines/${showAddPractice}/practices`, {
-        l0_type: practiceForm.l0_type,
-        l1_type: practiceForm.l1_type || null,
-        l2_type: practiceForm.l2_type || null,
-        display_order: parseInt(practiceForm.display_order),
-        is_special_input: practiceForm.is_special_input,
-        elements: [],
-      })
-      setShowAddPractice(null)
-      setPracticeForm({ l0_type: 'INPUT', l1_type: '', l2_type: '', display_order: '0', is_special_input: false })
-      await loadPractices(showAddPractice)
+      const { data } = await api.put<Timeline>(
+        `/client/${clientId}/packages/${packageId}/timelines/${showEditTL.id}`,
+        {
+          name: editTLForm.name,
+          from_value: fromVal,
+          to_value: toVal,
+          status: editTLForm.status,
+        },
+      )
+      setTimelines(tls => tls.map(t => t.id === data.id ? data : t))
+      setShowEditTL(null)
+      loadReadiness()
     } catch (err: unknown) {
-      setPracticeError(extractErrorMessage(err, 'Failed to add practice.'))
-    } finally { setAddingPractice(false) }
+      setEditTLError(extractErrorMessage(err, 'Failed to save timeline.'))
+    } finally { setEditingTL(false) }
   }
 
   async function handleDeleteTimeline(tl: Timeline) {
@@ -595,13 +663,26 @@ export default function PackageDetailPage() {
                 <div className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-slate-50"
                   onClick={() => toggleTimeline(tl.id)}>
                   <div className="flex-1">
-                    <p className="font-medium text-slate-800 text-sm">{tl.name}</p>
+                    <p className="font-medium text-slate-800 text-sm">
+                      {tl.name}
+                      {tl.status === 'INACTIVE' && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">Inactive</span>
+                      )}
+                    </p>
                     <p className="text-xs text-slate-400 mt-0.5">
                       {FROM_TYPE_LABEL[tl.from_type]} · {formatTimelineRange(tl)}
                     </p>
                   </div>
+                  <button onClick={e => { e.stopPropagation(); openEditTimeline(tl) }}
+                    className="text-slate-300 hover:text-blue-500 transition-colors p-1"
+                    title="Edit timeline">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
                   <button onClick={e => { e.stopPropagation(); handleDeleteTimeline(tl) }}
-                    className="text-slate-300 hover:text-red-400 transition-colors p-1">
+                    className="text-slate-300 hover:text-red-400 transition-colors p-1"
+                    title="Delete timeline">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
@@ -620,23 +701,63 @@ export default function PackageDetailPage() {
                     ) : practiceMap[tl.id].length === 0 ? (
                       <p className="text-xs text-slate-400">No practices in this timeline yet.</p>
                     ) : (
-                      practiceMap[tl.id].map(p => (
-                        <div key={p.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${L0_COLOUR[p.l0_type]}`}>{p.l0_type}</span>
-                          <span className="text-sm text-slate-700 flex-1">
-                            {[p.l1_type, p.l2_type].filter(Boolean).join(' › ') || <span className="text-slate-400 italic">No sub-type</span>}
-                          </span>
-                          {p.is_special_input && <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Special</span>}
-                          <button onClick={() => handleDeletePractice(tl.id, p.id)}
-                            className="text-slate-300 hover:text-red-400 p-1">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      ))
+                      practiceMap[tl.id].map(p => {
+                        const isPExpanded = expandedPractice === p.id
+                        const hasElements = (p.elements?.length || 0) > 0
+                        return (
+                          <div key={p.id} className="border-b border-slate-50 last:border-0">
+                            <div
+                              className="flex items-center gap-3 py-2 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
+                              onClick={() => setExpandedPractice(isPExpanded ? null : p.id)}>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${L0_COLOUR[p.l0_type]}`}>{p.l0_type}</span>
+                              <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">
+                                {p.l2_type ? practiceShortLabel(p) : <span className="text-slate-400 italic">No sub-type</span>}
+                              </span>
+                              {p.is_special_input && <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">special</span>}
+                              {p.is_brand_locked && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full" title="Locked brand">🔒 locked</span>}
+                              <span className="text-[11px] text-slate-400">
+                                {hasElements ? `${p.elements!.length} element${p.elements!.length === 1 ? '' : 's'}` : 'no elements'}
+                              </span>
+                              <button onClick={e => {
+                                e.stopPropagation()
+                                setEditingPractice({ timelineId: tl.id, practice: p })
+                                setShowAddPractice(tl.id)
+                              }}
+                                className="text-slate-300 hover:text-blue-500 p-1" title="Edit practice">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); handleDeletePractice(tl.id, p.id) }}
+                                className="text-slate-300 hover:text-red-400 p-1" title="Delete practice">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                              <svg className={`w-3.5 h-3.5 text-slate-300 transition-transform ${isPExpanded ? 'rotate-180' : ''}`}
+                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </div>
+                            {isPExpanded && (
+                              <div className="ml-2 pl-3 border-l-2 border-slate-100 py-2 space-y-1 mb-2">
+                                {hasElements ? p.elements!.map(el => (
+                                  <div key={el.element_type} className="flex items-baseline gap-2 text-xs">
+                                    <span className="text-slate-500 min-w-[140px] shrink-0">{el.label}:</span>
+                                    <span className="text-slate-800 font-medium min-w-0">
+                                      {el.display_value || <span className="text-slate-300 italic">—</span>}
+                                    </span>
+                                  </div>
+                                )) : (
+                                  <p className="text-xs text-slate-400 italic">No elements on this Practice.</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
                     )}
-                    <button onClick={() => { setShowAddPractice(tl.id); setPracticeError('') }}
+                    <button onClick={() => { setEditingPractice(null); setShowAddPractice(tl.id) }}
                       className="text-xs font-medium mt-2"
                       style={{ color: colour }}>
                       + Add Practice
@@ -840,68 +961,140 @@ export default function PackageDetailPage() {
         </div>
       )}
 
-      {/* Add Practice Modal */}
-      {showAddPractice && (
+      {/* Add / Edit Practice — shared modal with full element form
+          (Phase 2 of CA-portal parity, 2026-05-17). Same component
+          SA-portal CCA + PG use; mode flips by editingPractice. */}
+      <PracticeFormModal
+        open={!!showAddPractice && !!pkg}
+        mode={editingPractice ? 'edit' : 'create'}
+        timelineId={showAddPractice || ''}
+        cropCoshId={pkg?.crop_cosh_id || ''}
+        existingPractice={editingPractice?.practice as ExistingPractice | undefined}
+        contextSubtitle={(() => {
+          if (!showAddPractice) return undefined
+          const tl = timelines.find(t => t.id === showAddPractice)
+          if (!tl || !pkg) return undefined
+          return `${pkg.package_type} · ${tl.from_type} · ${tl.name}`
+        })()}
+        pipe={{ pipe: 'CCA_CLIENT', clientId: clientId || '', parentId: packageId }}
+        onClose={() => {
+          setShowAddPractice(null)
+          setEditingPractice(null)
+        }}
+        onSaved={() => {
+          const tlId = showAddPractice
+          if (tlId) loadPractices(tlId)
+          loadReadiness()
+        }}
+      />
+
+      {/* Edit Timeline Modal */}
+      {showEditTL && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="p-6 border-b border-slate-100">
-              <h2 className="font-bold text-slate-900">Add Practice</h2>
-              <p className="text-slate-500 text-sm mt-0.5">Define what the farmer should do in this timeline window</p>
+              <h2 className="font-bold text-slate-900">Edit Timeline</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Reference Type is locked: <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{showEditTL.from_type}</span>
+              </p>
             </div>
-            <form onSubmit={handleAddPractice} className="p-6 space-y-4">
+            <form onSubmit={handleEditTimeline} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Practice Type (L0)</label>
-                <select value={practiceForm.l0_type}
-                  onChange={e => setPracticeForm(f => ({ ...f, l0_type: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="INPUT">INPUT — Apply an agri-input (fertiliser, pesticide, etc.)</option>
-                  <option value="NON_INPUT">NON_INPUT — Crop operation (weeding, irrigation, etc.)</option>
-                  <option value="INSTRUCTION">INSTRUCTION — Advisory text message</option>
-                  <option value="MEDIA">MEDIA — Image or video</option>
-                </select>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
+                <input value={editTLForm.name}
+                  onChange={e => setEditTLForm(f => ({ ...f, name: e.target.value }))}
+                  required
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">L1 Sub-type</label>
-                  <input value={practiceForm.l1_type}
-                    onChange={e => setPracticeForm(f => ({ ...f, l1_type: e.target.value }))}
-                    placeholder="e.g. FERTILISER"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+
+              {showEditTL.from_type === 'CALENDAR' ? (
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-slate-700">Window (calendar date)</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">From</label>
+                      <div className="flex gap-1.5">
+                        <select value={editTLForm.from_month}
+                          onChange={e => setEditTLForm(f => ({ ...f, from_month: e.target.value }))}
+                          className="flex-1 border border-slate-200 rounded-xl px-2 py-2 text-sm bg-white">
+                          {MONTH_NAMES.map((n, i) => <option key={i} value={i + 1}>{n}</option>)}
+                        </select>
+                        <input type="number" min="1" max={MONTH_DAYS[parseInt(editTLForm.from_month) - 1]}
+                          value={editTLForm.from_day}
+                          onChange={e => setEditTLForm(f => ({ ...f, from_day: e.target.value }))}
+                          className="w-16 border border-slate-200 rounded-xl px-2 py-2 text-sm text-center" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">To</label>
+                      <div className="flex gap-1.5">
+                        <select value={editTLForm.to_month}
+                          onChange={e => setEditTLForm(f => ({ ...f, to_month: e.target.value }))}
+                          className="flex-1 border border-slate-200 rounded-xl px-2 py-2 text-sm bg-white">
+                          {MONTH_NAMES.map((n, i) => <option key={i} value={i + 1}>{n}</option>)}
+                        </select>
+                        <input type="number" min="1" max={MONTH_DAYS[parseInt(editTLForm.to_month) - 1]}
+                          value={editTLForm.to_day}
+                          onChange={e => setEditTLForm(f => ({ ...f, to_day: e.target.value }))}
+                          className="w-16 border border-slate-200 rounded-xl px-2 py-2 text-sm text-center" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">L2 Sub-type</label>
-                  <input value={practiceForm.l2_type}
-                    onChange={e => setPracticeForm(f => ({ ...f, l2_type: e.target.value }))}
-                    placeholder="e.g. NPK"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">From (Day)</label>
+                    <input type="number" value={editTLForm.from_value}
+                      onChange={e => setEditTLForm(f => ({ ...f, from_value: e.target.value }))}
+                      required
+                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">To (Day)</label>
+                    <input type="number" value={editTLForm.to_value}
+                      onChange={e => setEditTLForm(f => ({ ...f, to_value: e.target.value }))}
+                      required
+                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                  {showEditTL.from_type === 'DBS' && (
+                    <p className="col-span-2 text-[11px] text-slate-500 -mt-1">
+                      Use <span className="font-medium">To = 0</span> to close at the sowing moment (continuous with a DAS timeline starting at 0).
+                    </p>
+                  )}
                 </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Status</label>
+                <div className="flex gap-2">
+                  {(['ACTIVE', 'INACTIVE'] as const).map(s => (
+                    <button key={s} type="button"
+                      onClick={() => setEditTLForm(f => ({ ...f, status: s }))}
+                      className={`flex-1 py-2 rounded-xl text-sm font-medium border ${
+                        editTLForm.status === s
+                          ? (s === 'ACTIVE'
+                              ? 'bg-green-50 border-green-300 text-green-700'
+                              : 'bg-slate-100 border-slate-300 text-slate-700')
+                          : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                      }`}>
+                      {s.charAt(0) + s.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Inactive timelines stay visible on this page with a badge but are excluded from the farmer&apos;s daily advisory.
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Display Order</label>
-                  <input type="number" min="0" value={practiceForm.display_order}
-                    onChange={e => setPracticeForm(f => ({ ...f, display_order: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                </div>
-                <div className="flex items-end pb-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={practiceForm.is_special_input}
-                      onChange={e => setPracticeForm(f => ({ ...f, is_special_input: e.target.checked }))}
-                      className="w-4 h-4 rounded" />
-                    <span className="text-sm text-slate-700">Special input</span>
-                  </label>
-                </div>
-              </div>
-              {practiceError && <p className="text-sm text-red-600">{practiceError}</p>}
+
+              {editTLError && <p className="text-sm text-red-600">{editTLError}</p>}
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowAddPractice(null); setPracticeError('') }}
-                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
-                  Cancel
-                </button>
-                <button type="submit" disabled={addingPractice}
+                <button type="button" onClick={() => { setShowEditTL(null); setEditTLError('') }}
+                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={editingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                   style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                  {addingPractice ? 'Adding…' : 'Add Practice'}
+                  {editingTL ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
             </form>
