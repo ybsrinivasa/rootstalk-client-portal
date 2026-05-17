@@ -5,60 +5,54 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
+import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
+import { practiceShortLabel } from '@/lib/practice-label'
 
 // Standard Q&A — advisory body editor (UCAT pipe-3, spec §14.9).
-// Forks the structure of /cha and /advisory/[packageId]: a list of
-// Timelines with nested Practices, expandable per timeline. Add/
-// Delete supported at both the Timeline and Practice levels.
-//
-// Element-level authoring (the leaf field-set on a Practice — e.g.
-// pesticide name, dose, frequency) is NOT in this editor yet.
-// Neither CCA nor CHA expose element editing in the CA portal
-// today — elements come from Cosh imports there. Q&A matches that
-// V1 ceiling. Element authoring is a cross-cutting V1.1 feature
-// that affects all three pipes uniformly.
+// Phase 4 of CA-portal parity (2026-05-17) brought this in line
+// with the CA-CCA / CA-PG / CA-SP editors: shared PracticeFormModal,
+// click-to-expand element detail, Edit Timeline modal with Status.
 
-interface ElementOut {
-  id: string; element_type: string; cosh_ref: string | null
-  value: string | null; unit_cosh_id: string | null
+interface PracticeElement {
+  id?: string
+  element_type: string
+  label?: string
+  cosh_ref: string | null
+  value: string | null
+  unit_cosh_id: string | null
+  display_value: string | null
   display_order: number
 }
-interface PracticeOut {
+interface Practice {
   id: string; timeline_id: string
-  l0_type: string; l1_type: string | null; l2_type: string | null
+  l0_type: 'INPUT' | 'NON_INPUT' | 'INSTRUCTION' | 'MEDIA'
+  l1_type: string | null; l2_type: string | null
   display_order: number; is_special_input: boolean
+  is_brand_locked?: boolean
   frequency_days: number | null
-  elements: ElementOut[]
+  elements: PracticeElement[]
 }
-interface TimelineOut {
+interface Timeline {
   id: string; standard_response_id: string; parent_kind: string
   name: string; from_type: string; from_value: number; to_value: number
-  practices: PracticeOut[]
+  status?: 'ACTIVE' | 'INACTIVE'
+  practices: Practice[]
 }
 interface SR {
   id: string; question_text: string; crop_cosh_id: string | null
 }
 
-const L0_OPTIONS = ['INPUT', 'NON_INPUT', 'INSTRUCTION', 'MEDIA']
 const L0_COLOUR: Record<string, string> = {
-  INPUT: 'bg-emerald-100 text-emerald-700',
-  NON_INPUT: 'bg-blue-100 text-blue-700',
+  INPUT: 'bg-blue-100 text-blue-700',
+  NON_INPUT: 'bg-purple-100 text-purple-700',
   INSTRUCTION: 'bg-amber-100 text-amber-700',
-  MEDIA: 'bg-purple-100 text-purple-700',
+  MEDIA: 'bg-pink-100 text-pink-700',
 }
 
 const emptyTLForm = {
   name: '',
   from_value: '0',
   to_value: '7',
-}
-const emptyPracticeForm = {
-  l0_type: 'INPUT',
-  l1_type: '',
-  l2_type: '',
-  display_order: '0',
-  is_special_input: false,
-  frequency_days: '',
 }
 
 export default function StandardResponseDetailPage() {
@@ -69,36 +63,64 @@ export default function StandardResponseDetailPage() {
   const colour = client?.primary_colour || '#1A5C2A'
 
   const [sr, setSr] = useState<SR | null>(null)
-  const [timelines, setTimelines] = useState<TimelineOut[]>([])
+  const [timelines, setTimelines] = useState<Timeline[]>([])
+  const [practiceMap, setPracticeMap] = useState<Record<string, Practice[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [expandedPractice, setExpandedPractice] = useState<string | null>(null)
 
   const [showAddTL, setShowAddTL] = useState(false)
   const [tlForm, setTlForm] = useState(emptyTLForm)
   const [savingTL, setSavingTL] = useState(false)
 
+  // Edit timeline (Phase 4 of CA-portal parity, 2026-05-17). QA
+  // Reference Type is fixed to DAYS_AFTER_RESPONSE — locked.
+  const [showEditTL, setShowEditTL] = useState<Timeline | null>(null)
+  const [editingTL, setEditingTL] = useState(false)
+  const [editTLError, setEditTLError] = useState('')
+  const [editTLForm, setEditTLForm] = useState({
+    name: '', from_value: '0', to_value: '7', status: 'ACTIVE',
+  })
+
+  // Practice authoring goes through <PracticeFormModal>; mode flips
+  // by editingPractice.
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
-  const [practiceForm, setPracticeForm] = useState(emptyPracticeForm)
-  const [savingPractice, setSavingPractice] = useState(false)
+  const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
 
   async function load() {
     if (!clientId || !srId) return
     setLoading(true); setError('')
     try {
-      // The list endpoint returns metadata only — pull the parent
-      // entry separately so the header can render before the
-      // timelines fetch.
       const [allRes, tlsRes] = await Promise.all([
         api.get<SR[]>(`/client/${clientId}/standard-responses`),
-        api.get<TimelineOut[]>(`/client/${clientId}/standard-responses/${srId}/timelines`),
+        api.get<Timeline[]>(`/client/${clientId}/standard-responses/${srId}/timelines`),
       ])
       const found = (allRes.data as SR[]).find(s => s.id === srId)
       if (!found) { setError('Entry not found'); return }
       setSr(found)
-      setTimelines(tlsRes.data)
+      const sorted = tlsRes.data.slice().sort((a, b) => a.from_value - b.from_value)
+      setTimelines(sorted)
+      const seed: Record<string, Practice[]> = {}
+      for (const tl of sorted) {
+        if (tl.practices) seed[tl.id] = tl.practices
+      }
+      setPracticeMap(seed)
     } catch (err: unknown) {
       setError(extractErrorMessage(err, 'Failed to load.'))
     } finally { setLoading(false) }
+  }
+
+  // Per-timeline practices with elements + server-resolved labels.
+  // Polymorphic endpoint serves any pipe (CCA / PG / SP / QA).
+  const loadPractices = async (tlId: string) => {
+    if (!clientId) return
+    try {
+      const { data } = await api.get<Practice[]>(
+        `/client/${clientId}/timelines/${tlId}/practices`,
+      )
+      setPracticeMap(m => ({ ...m, [tlId]: data.sort((a, b) => a.display_order - b.display_order) }))
+    } catch { /* leave existing entry alone */ }
   }
 
   useEffect(() => { load() }, [clientId, srId])
@@ -122,7 +144,7 @@ export default function StandardResponseDetailPage() {
     } finally { setSavingTL(false) }
   }
 
-  async function deleteTimeline(tl: TimelineOut) {
+  async function deleteTimeline(tl: Timeline) {
     if (!confirm(`Delete timeline "${tl.name}" and all its practices?`)) return
     try {
       await api.delete(`/client/${clientId}/standard-responses/${srId}/timelines/${tl.id}`)
@@ -132,42 +154,57 @@ export default function StandardResponseDetailPage() {
     }
   }
 
-  async function addPractice(e: FormEvent) {
-    e.preventDefault()
-    if (!showAddPractice) return
-    setSavingPractice(true)
-    try {
-      await api.post(
-        `/client/${clientId}/standard-responses/${srId}/timelines/${showAddPractice}/practices`,
-        {
-          l0_type: practiceForm.l0_type,
-          l1_type: practiceForm.l1_type.trim() || null,
-          l2_type: practiceForm.l2_type.trim() || null,
-          display_order: parseInt(practiceForm.display_order || '0'),
-          is_special_input: practiceForm.is_special_input,
-          frequency_days: practiceForm.frequency_days ? parseInt(practiceForm.frequency_days) : null,
-          elements: [],
-        },
-      )
-      setShowAddPractice(null)
-      setPracticeForm(emptyPracticeForm)
-      load()
-    } catch (err: unknown) {
-      alert(extractErrorMessage(err, 'Failed to add practice.'))
-    } finally { setSavingPractice(false) }
-  }
-
-  async function deletePractice(tl: TimelineOut, p: PracticeOut) {
-    const label = [p.l1_type, p.l2_type].filter(Boolean).join(' › ') || p.l0_type
-    if (!confirm(`Delete practice "${label}"?`)) return
+  async function deletePractice(tlId: string, practiceId: string) {
+    if (!confirm('Delete this practice?')) return
     try {
       await api.delete(
-        `/client/${clientId}/standard-responses/${srId}/timelines/${tl.id}/practices/${p.id}`,
+        `/client/${clientId}/standard-responses/${srId}/timelines/${tlId}/practices/${practiceId}`,
       )
-      load()
+      await loadPractices(tlId)
     } catch (err: unknown) {
       alert(extractErrorMessage(err, 'Failed to delete.'))
     }
+  }
+
+  function openEditTimeline(tl: Timeline) {
+    setEditTLForm({
+      name: tl.name,
+      from_value: String(tl.from_value),
+      to_value: String(tl.to_value),
+      status: tl.status || 'ACTIVE',
+    })
+    setEditTLError('')
+    setShowEditTL(tl)
+  }
+
+  async function handleEditTimeline(e: FormEvent) {
+    e.preventDefault()
+    if (!showEditTL) return
+    setEditTLError('')
+    const fromVal = parseInt(editTLForm.from_value, 10)
+    const toVal = parseInt(editTLForm.to_value, 10)
+    if (Number.isNaN(fromVal) || Number.isNaN(toVal)) {
+      setEditTLError('FROM and TO must be whole numbers.'); return
+    }
+    if (fromVal > toVal) {
+      setEditTLError('FROM must be ≤ TO (the window cannot run backwards).'); return
+    }
+    setEditingTL(true)
+    try {
+      const { data } = await api.put<Timeline>(
+        `/client/${clientId}/standard-responses/${srId}/timelines/${showEditTL.id}`,
+        {
+          name: editTLForm.name,
+          from_value: fromVal,
+          to_value: toVal,
+          status: editTLForm.status,
+        },
+      )
+      setTimelines(tls => tls.map(t => t.id === data.id ? { ...t, ...data, practices: t.practices } : t))
+      setShowEditTL(null)
+    } catch (err: unknown) {
+      setEditTLError(extractErrorMessage(err, 'Failed to save timeline.'))
+    } finally { setEditingTL(false) }
   }
 
   if (loading) {
@@ -224,48 +261,116 @@ export default function StandardResponseDetailPage() {
         ) : (
           timelines.map(tl => (
             <div key={tl.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="px-5 py-4 flex items-center justify-between border-b border-slate-100">
-                <div>
-                  <p className="font-semibold text-slate-800">{tl.name}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {tl.from_type === 'DAYS_AFTER_RESPONSE' ? 'Days after response' : tl.from_type}
-                    {' · '}
-                    Day {tl.from_value} → {tl.to_value}
+              <button onClick={() => {
+                  const next = expanded === tl.id ? null : tl.id
+                  setExpanded(next)
+                  if (next === tl.id) loadPractices(tl.id)
+                }}
+                className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50">
+                <div className="text-left">
+                  <p className="font-semibold text-slate-800">
+                    {tl.name}
+                    {tl.status === 'INACTIVE' && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">Inactive</span>
+                    )}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5 font-mono">
+                    Day {tl.from_value} → {tl.to_value} after response · {(practiceMap[tl.id] || tl.practices).length} practice{(practiceMap[tl.id] || tl.practices).length === 1 ? '' : 's'}
                   </p>
                 </div>
-                <button onClick={() => deleteTimeline(tl)}
-                  className="text-xs px-2.5 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
-                  Delete timeline
-                </button>
-              </div>
-              <div className="px-5 py-4 space-y-2">
-                {tl.practices.length === 0 ? (
-                  <p className="text-xs text-slate-400">No practices yet.</p>
-                ) : tl.practices.map(p => (
-                  <div key={p.id} className="flex items-center gap-2 py-1">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${L0_COLOUR[p.l0_type] || 'bg-slate-100'}`}>
-                      {p.l0_type}
-                    </span>
-                    <span className="text-sm text-slate-700 flex-1">
-                      {[p.l1_type, p.l2_type].filter(Boolean).join(' › ') || '—'}
-                      {p.is_special_input && (
-                        <span className="ml-2 text-xs bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full">special</span>
-                      )}
-                      {p.frequency_days && (
-                        <span className="ml-2 text-xs text-slate-400">every {p.frequency_days}d</span>
-                      )}
-                    </span>
-                    <button onClick={() => deletePractice(tl, p)}
-                      className="text-xs text-red-400 hover:text-red-600">×</button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => { setShowAddPractice(tl.id); setPracticeForm(emptyPracticeForm) }}
-                  className="text-xs font-medium mt-2"
-                  style={{ color: colour }}>
-                  + Add Practice
-                </button>
-              </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={e => { e.stopPropagation(); openEditTimeline(tl) }}
+                    className="text-slate-300 hover:text-blue-500 p-1.5"
+                    title="Edit timeline">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                  <button onClick={e => { e.stopPropagation(); deleteTimeline(tl) }}
+                    className="text-slate-300 hover:text-red-400 p-1.5"
+                    title="Delete timeline">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                  <span className="text-slate-400 text-sm ml-1">
+                    {expanded === tl.id ? '▾' : '▸'}
+                  </span>
+                </div>
+              </button>
+
+              {expanded === tl.id && (
+                <div className="px-5 pb-4 pt-1 border-t border-slate-50 space-y-2">
+                  {!practiceMap[tl.id] ? (
+                    <p className="text-xs text-slate-400 py-3">Loading practices…</p>
+                  ) : practiceMap[tl.id].length === 0 ? (
+                    <p className="text-xs text-slate-400 py-3">No practices yet.</p>
+                  ) : (
+                    practiceMap[tl.id].map(p => {
+                      const isPExpanded = expandedPractice === p.id
+                      const hasElements = (p.elements?.length || 0) > 0
+                      return (
+                        <div key={p.id} className="border-b border-slate-50 last:border-0">
+                          <div
+                            className="flex items-center gap-3 py-2 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
+                            onClick={() => setExpandedPractice(isPExpanded ? null : p.id)}>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${L0_COLOUR[p.l0_type] || 'bg-slate-100'}`}>{p.l0_type}</span>
+                            <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">
+                              {p.l2_type ? practiceShortLabel(p) : <span className="text-slate-400 italic">No sub-type</span>}
+                            </span>
+                            {p.is_special_input && <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">special</span>}
+                            {p.is_brand_locked && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full" title="Locked brand">🔒 locked</span>}
+                            {p.frequency_days != null && <span className="text-[10px] text-slate-500 px-1.5 py-0.5 bg-slate-50 rounded-full">every {p.frequency_days}d</span>}
+                            <span className="text-[11px] text-slate-400">
+                              {hasElements ? `${p.elements!.length} element${p.elements!.length === 1 ? '' : 's'}` : 'no elements'}
+                            </span>
+                            <button onClick={e => {
+                              e.stopPropagation()
+                              setEditingPractice({ timelineId: tl.id, practice: p })
+                              setShowAddPractice(tl.id)
+                            }}
+                              className="text-slate-300 hover:text-blue-500 p-1" title="Edit practice">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button onClick={e => { e.stopPropagation(); deletePractice(tl.id, p.id) }}
+                              className="text-slate-300 hover:text-red-400 p-1" title="Delete practice">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                            <svg className={`w-3.5 h-3.5 text-slate-300 transition-transform ${isPExpanded ? 'rotate-180' : ''}`}
+                              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
+                          {isPExpanded && (
+                            <div className="ml-2 pl-3 border-l-2 border-slate-100 py-2 space-y-1 mb-2">
+                              {hasElements ? p.elements!.map(el => (
+                                <div key={el.element_type} className="flex items-baseline gap-2 text-xs">
+                                  <span className="text-slate-500 min-w-[140px] shrink-0">{el.label || el.element_type}:</span>
+                                  <span className="text-slate-800 font-medium min-w-0">
+                                    {el.display_value || el.value || <span className="text-slate-300 italic">—</span>}
+                                  </span>
+                                </div>
+                              )) : (
+                                <p className="text-xs text-slate-400 italic">No elements on this Practice.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                  <button
+                    onClick={() => { setEditingPractice(null); setShowAddPractice(tl.id) }}
+                    className="text-xs font-medium mt-2"
+                    style={{ color: colour }}>
+                    + Add Practice
+                  </button>
+                </div>
+              )}
             </div>
           ))
         )}
@@ -275,13 +380,6 @@ export default function StandardResponseDetailPage() {
           style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
           + Add Timeline
         </button>
-      </div>
-
-      {/* Notes the SE will see — calls out what's not yet authored
-          here so they don't think it's missing. */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 leading-relaxed">
-        <strong>Note:</strong> Element-level fields (specific pesticide / dose / unit) are not yet authored in the CA portal —
-        same V1 ceiling as the CCA and CHA editors. When element authoring lands (V1.1 cross-cutting), Q&A entries pick it up automatically.
       </div>
 
       {/* Add Timeline Modal */}
@@ -333,69 +431,96 @@ export default function StandardResponseDetailPage() {
         </div>
       )}
 
-      {/* Add Practice Modal */}
-      {showAddPractice && (
+      {/* Add / Edit Practice — shared modal (Phase 4 of CA-portal
+          parity, 2026-05-17). cropCoshId comes from the SR row;
+          empty when the question is crop-agnostic. */}
+      <PracticeFormModal
+        open={!!showAddPractice}
+        mode={editingPractice ? 'edit' : 'create'}
+        timelineId={showAddPractice || ''}
+        cropCoshId={sr?.crop_cosh_id || ''}
+        existingPractice={editingPractice?.practice as ExistingPractice | undefined}
+        contextSubtitle={(() => {
+          if (!showAddPractice) return undefined
+          const tl = timelines.find(t => t.id === showAddPractice)
+          if (!tl) return undefined
+          return `${tl.name} · Day ${tl.from_value} → ${tl.to_value} after response`
+        })()}
+        pipe={{ pipe: 'QA_CLIENT', clientId: clientId || '', parentId: srId || '' }}
+        onClose={() => {
+          setShowAddPractice(null)
+          setEditingPractice(null)
+        }}
+        onSaved={() => {
+          const tlId = showAddPractice
+          if (tlId) loadPractices(tlId)
+        }}
+      />
+
+      {/* Edit Timeline modal */}
+      {showEditTL && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="p-6 border-b border-slate-100">
-              <h2 className="font-bold text-slate-900">Add Practice</h2>
+              <h2 className="font-bold text-slate-900">Edit Timeline</h2>
               <p className="text-slate-500 text-sm mt-0.5">
-                A single recommendation under this timeline. Element-level details are added later.
+                Reference Type: <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">Days After Response</span>
+                <span className="ml-2 text-xs text-slate-400">(locked — QA timelines anchor on response delivery)</span>
               </p>
             </div>
-            <form onSubmit={addPractice} className="p-6 space-y-4">
+            <form onSubmit={handleEditTimeline} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Type</label>
-                <select value={practiceForm.l0_type}
-                  onChange={e => setPracticeForm(f => ({ ...f, l0_type: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none">
-                  {L0_OPTIONS.map(o => <option key={o} value={o}>{o.replace('_', ' ')}</option>)}
-                </select>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
+                <input value={editTLForm.name}
+                  onChange={e => setEditTLForm(f => ({ ...f, name: e.target.value }))}
+                  required
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Category (L1)</label>
-                  <input value={practiceForm.l1_type}
-                    onChange={e => setPracticeForm(f => ({ ...f, l1_type: e.target.value }))}
-                    placeholder="e.g. PESTICIDE"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none font-mono" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">From (Day)</label>
+                  <input type="number" min="0" value={editTLForm.from_value}
+                    onChange={e => setEditTLForm(f => ({ ...f, from_value: e.target.value }))}
+                    required
+                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Sub-category (L2)</label>
-                  <input value={practiceForm.l2_type}
-                    onChange={e => setPracticeForm(f => ({ ...f, l2_type: e.target.value }))}
-                    placeholder="e.g. INSECTICIDE"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none font-mono" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">To (Day)</label>
+                  <input type="number" min="0" value={editTLForm.to_value}
+                    onChange={e => setEditTLForm(f => ({ ...f, to_value: e.target.value }))}
+                    required
+                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Display order</label>
-                  <input type="number" min="0" value={practiceForm.display_order}
-                    onChange={e => setPracticeForm(f => ({ ...f, display_order: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none" />
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Status</label>
+                <div className="flex gap-2">
+                  {(['ACTIVE', 'INACTIVE'] as const).map(s => (
+                    <button key={s} type="button"
+                      onClick={() => setEditTLForm(f => ({ ...f, status: s }))}
+                      className={`flex-1 py-2 rounded-xl text-sm font-medium border ${
+                        editTLForm.status === s
+                          ? (s === 'ACTIVE'
+                              ? 'bg-green-50 border-green-300 text-green-700'
+                              : 'bg-slate-100 border-slate-300 text-slate-700')
+                          : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                      }`}>
+                      {s.charAt(0) + s.slice(1).toLowerCase()}
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Frequency (days)</label>
-                  <input type="number" min="0" value={practiceForm.frequency_days}
-                    onChange={e => setPracticeForm(f => ({ ...f, frequency_days: e.target.value }))}
-                    placeholder="optional"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none" />
-                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Inactive timelines stay visible on this page with a badge but are excluded from the farmer&apos;s advisory when a Pundit picks this SR.
+                </p>
               </div>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" checked={practiceForm.is_special_input}
-                  onChange={e => setPracticeForm(f => ({ ...f, is_special_input: e.target.checked }))}
-                  className="w-4 h-4" />
-                Special input (CDI / restricted)
-              </label>
+              {editTLError && <p className="text-sm text-red-600">{editTLError}</p>}
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowAddPractice(null); setPracticeForm(emptyPracticeForm) }}
-                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
-                <button type="submit" disabled={savingPractice}
+                <button type="button" onClick={() => { setShowEditTL(null); setEditTLError('') }}
+                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={editingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                   style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                  {savingPractice ? 'Adding…' : 'Add Practice'}
+                  {editingTL ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
             </form>
