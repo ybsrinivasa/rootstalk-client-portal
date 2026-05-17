@@ -187,9 +187,16 @@ export default function StandardResponseDetailPage() {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
-        <Link href="/standard-responses" className="text-xs text-slate-400 hover:text-slate-600">
-          ← Back to library
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link href="/standard-responses" className="text-xs text-slate-400 hover:text-slate-600">
+            ← Back to library
+          </Link>
+          <Link href={`/standard-responses/${srId}/preview`}
+            className="text-sm font-medium px-3 py-1.5 rounded-xl border"
+            style={{ borderColor: colour, color: colour }}>
+            👁 Preview
+          </Link>
+        </div>
         <div className="flex items-start gap-3 flex-wrap mt-2">
           <h1 className="text-xl font-bold text-slate-900 flex-1">{sr.question_text}</h1>
           {sr.crop_cosh_id ? (
