@@ -13,6 +13,7 @@ interface Package {
   package_type: 'ANNUAL' | 'PERENNIAL'
   status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
   duration_days: number; version: number; description: string | null
+  start_date_label_cosh_id: string | null
   parent_global_id: string | null
 }
 interface LineageRow {
@@ -83,6 +84,14 @@ interface PublishReadiness {
 }
 
 const FROM_TYPE_LABEL = { DBS: 'Days Before Sowing', DAS: 'Days After Sowing', CALENDAR: 'Calendar' }
+
+// Mirror of SA Global CCA's START_DATE_LABELS — kept in sync as
+// the canonical list of recognised package start-date anchors.
+const START_DATE_LABELS = [
+  { cosh_id: 'label:sowing_date',   name: 'Sowing Date' },
+  { cosh_id: 'label:planting_date', name: 'Planting Date' },
+  { cosh_id: 'label:pruning_date',  name: 'Pruning Date' },
+]
 
 // Reference Type constrained by package_type (matches SA portal):
 //   Annual    → DAS / DBS only
@@ -213,6 +222,19 @@ export default function PackageDetailPage() {
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
   const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
   const [expandedPractice, setExpandedPractice] = useState<string | null>(null)
+
+  // Edit Package details — mirror of SA Global CCA (2026-05-17).
+  // 5-field form: Name, Start Date Label, Duration, Description,
+  // Status. Crop + Type stay immutable.
+  const [showEdit, setShowEdit] = useState(false)
+  const [editForm, setEditForm] = useState({
+    name: '', duration_days: '120',
+    start_date_label_cosh_id: 'label:sowing_date',
+    description: '',
+    status: 'DRAFT' as 'DRAFT' | 'ACTIVE' | 'INACTIVE',
+  })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editError, setEditError] = useState('')
 
   // Edit Timeline (Batch 28 parity). `showEditTL` carries the
   // Timeline being edited; from_type stays read-only (locked at
@@ -504,6 +526,43 @@ export default function PackageDetailPage() {
       // last rendered, surfacing a different blocker.
       await loadReadiness()
     } finally { setPublishing(false) }
+  }
+
+  function openEdit() {
+    if (!pkg) return
+    setEditForm({
+      name: pkg.name,
+      duration_days: String(pkg.duration_days),
+      start_date_label_cosh_id: pkg.start_date_label_cosh_id || 'label:sowing_date',
+      description: pkg.description || '',
+      status: pkg.status,
+    })
+    setEditError('')
+    setShowEdit(true)
+  }
+
+  async function handleSaveEdit(e: FormEvent) {
+    e.preventDefault()
+    if (!pkg) return
+    setSavingEdit(true); setEditError('')
+    try {
+      const body: Record<string, unknown> = {
+        name: editForm.name.trim() || undefined,
+        duration_days: parseInt(editForm.duration_days),
+        start_date_label_cosh_id: editForm.start_date_label_cosh_id,
+        description: editForm.description.trim() || null,
+      }
+      // Only send status when SE actually toggled it. DRAFT → ACTIVE
+      // is server-side blocked (must go through Publish).
+      if (editForm.status !== pkg.status) {
+        body.status = editForm.status
+      }
+      const { data } = await api.put<Package>(`/client/${clientId}/packages/${packageId}`, body)
+      setPkg(data)
+      setShowEdit(false)
+    } catch (err: unknown) {
+      setEditError(extractErrorMessage(err, 'Failed to save changes.'))
+    } finally { setSavingEdit(false) }
   }
 
   async function openImport() {
@@ -811,6 +870,11 @@ export default function PackageDetailPage() {
             className="text-center border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
             👁 Preview
           </a>
+          <button
+            onClick={openEdit}
+            className="border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
+            ✎ Edit details
+          </button>
           <button
             onClick={() => { setShowSignature(true); setPvSaveError('') }}
             className="border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
@@ -1197,6 +1261,112 @@ export default function PackageDetailPage() {
                 {savingLocations ? 'Saving…' : 'Save Locations'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Package Details Modal — mirror of SA Global CCA. */}
+      {showEdit && pkg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Edit Package Details</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Crop and type are locked — changing them would break content semantics
+                on already-published versions.
+              </p>
+            </div>
+            <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Package Name</label>
+                <input value={editForm.name}
+                  onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                  required
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Start Date Label</label>
+                <select value={editForm.start_date_label_cosh_id}
+                  onChange={e => setEditForm(f => ({ ...f, start_date_label_cosh_id: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white">
+                  {START_DATE_LABELS.map(l => (
+                    <option key={l.cosh_id} value={l.cosh_id}>{l.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Duration (days)
+                  {pkg.package_type === 'PERENNIAL' && (
+                    <span className="text-xs text-slate-400 font-normal ml-2">(locked at 365 for Perennial)</span>
+                  )}
+                </label>
+                <input type="number" min="1" max="365"
+                  value={editForm.duration_days}
+                  disabled={pkg.package_type === 'PERENNIAL'}
+                  onChange={e => setEditForm(f => ({ ...f, duration_days: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 disabled:bg-slate-50 disabled:text-slate-400" />
+                {pkg.package_type === 'ANNUAL' && (
+                  <p className="text-[11px] text-slate-400 mt-1">1 – 365 days.</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
+                <textarea value={editForm.description}
+                  onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                  rows={3}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 resize-none" />
+              </div>
+
+              {/* Status toggle. DRAFT → INACTIVE allowed (discards
+                  the draft); DRAFT → ACTIVE blocked server-side
+                  (goes through Publish). */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Status</label>
+                <div className="flex gap-2">
+                  {(['DRAFT', 'ACTIVE', 'INACTIVE'] as const).map(s => {
+                    const isCurrent = editForm.status === s
+                    const disabled = s === 'DRAFT'
+                      || (s === 'ACTIVE' && pkg.status === 'DRAFT')
+                    return (
+                      <button key={s} type="button"
+                        onClick={() => !disabled && setEditForm(f => ({ ...f, status: s }))}
+                        disabled={disabled}
+                        className={`flex-1 py-2 rounded-xl text-sm font-medium border ${
+                          isCurrent
+                            ? (s === 'ACTIVE'
+                                ? 'bg-green-50 border-green-300 text-green-700'
+                                : s === 'DRAFT'
+                                  ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                  : 'bg-slate-100 border-slate-300 text-slate-700')
+                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white'
+                        }`}>
+                        {s.charAt(0) + s.slice(1).toLowerCase()}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {pkg.status === 'DRAFT'
+                    ? 'Use Publish to promote DRAFT → ACTIVE. You can also discard a draft by switching it to Inactive.'
+                    : 'Toggle between Active and Inactive. Inactive packages exit the farmer advisory feed.'}
+                </p>
+              </div>
+
+              {editError && <p className="text-sm text-red-600">{editError}</p>}
+              <div className="flex gap-3 pt-2">
+                <button type="button"
+                  onClick={() => { setShowEdit(false); setEditError('') }}
+                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingEdit}
+                  className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  {savingEdit ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
