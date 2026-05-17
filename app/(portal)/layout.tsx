@@ -119,29 +119,22 @@ interface NavItem {
 }
 
 const ALL_NAV: NavItem[] = [
-  { href: '/dashboard',          label: 'Dashboard',         Icon: IconHome,         group: 'PORTAL' },
-  { href: '/cca/crops',          label: 'CCA · Crops',       Icon: IconAdvisory,     group: 'CCA' },
-  { href: '/cca/packages',       label: 'CCA · Packages',    Icon: IconAdvisory,     group: 'CCA' },
-  { href: '/cca/timelines',      label: 'CCA · Timelines',   Icon: IconAdvisory,     group: 'CCA' },
-  { href: '/cca/practices',      label: 'CCA · Practices',   Icon: IconAdvisory,     group: 'CCA' },
-  { href: '/cha/problems',          label: 'CHA · PG · Problems',         Icon: IconCHA, group: 'CHA' },
-  { href: '/cha/recommendations',   label: 'CHA · PG · Recommendations',  Icon: IconCHA, group: 'CHA' },
-  { href: '/cha/timelines',         label: 'CHA · PG · Timelines',        Icon: IconCHA, group: 'CHA' },
-  { href: '/cha/practices',         label: 'CHA · PG · Practices',        Icon: IconCHA, group: 'CHA' },
-  { href: '/cha/sp/crops',          label: 'CHA · SP · Crops',            Icon: IconCHA, group: 'CHA' },
-  { href: '/cha/sp/specific-problems', label: 'CHA · SP · Specific Problems', Icon: IconCHA, group: 'CHA' },
-  { href: '/cha/sp/timelines',      label: 'CHA · SP · Timelines',        Icon: IconCHA, group: 'CHA' },
-  { href: '/cha/sp/practices',      label: 'CHA · SP · Practices',        Icon: IconCHA, group: 'CHA' },
+  { href: '/dashboard',          label: 'Dashboard',                Icon: IconHome,         group: 'PORTAL' },
+  // 2026-05-17 — one entry per pipe (mirror of SA Global CCA's
+  // single "CCA · Crops" entry pattern). Each entry is the
+  // drill-down entry point; deeper pages (packages / timelines /
+  // practices / recommendations / SR detail) are reached by
+  // clicking through, not from the sidebar.
+  { href: '/cca/crops',          label: 'Crop Cycle Advisories',    Icon: IconAdvisory,     group: 'CCA' },
+  { href: '/cha/problems',       label: 'Problem Groups',           Icon: IconCHA,          group: 'CHA' },
+  { href: '/cha/sp/crops',       label: 'Specific Problems',        Icon: IconCHA,          group: 'CHA' },
+  { href: '/qa/crops',           label: 'Q&A',                      Icon: IconCHA,          group: 'QA' },
   { href: '/custom-parameters',  label: 'Custom Parameters', Icon: IconCustomParams, group: 'CONTENT' },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
   { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA' },
   { href: '/farm-pundits',       label: 'FarmPundits',       Icon: IconFarmPundits,  group: 'PORTAL', caOnly: true },
-  { href: '/qa/crops',              label: 'Q&A · Crops',              Icon: IconCHA, group: 'QA' },
-  { href: '/qa/standard-responses', label: 'Q&A · Standard Responses', Icon: IconCHA, group: 'QA' },
-  { href: '/qa/timelines',          label: 'Q&A · Timelines',          Icon: IconCHA, group: 'QA' },
-  { href: '/qa/practices',          label: 'Q&A · Practices',          Icon: IconCHA, group: 'QA' },
   { href: '/users',              label: 'Users',             Icon: IconUsers,        group: 'PORTAL' },
   { href: '/setup',              label: 'Setup',             Icon: IconSetup,        group: 'PORTAL' },
   { href: '/profile',            label: 'Company Profile',   Icon: IconBuilding,     group: 'PORTAL', caOnly: true },
@@ -150,7 +143,7 @@ const ALL_NAV: NavItem[] = [
 ]
 
 const ROLE_NAV: Record<string, string[]> = {
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cca/packages', '/cca/timelines', '/cca/practices', '/cha/problems', '/cha/recommendations', '/cha/timelines', '/cha/practices', '/cha/sp/crops', '/cha/sp/specific-problems', '/cha/sp/timelines', '/cha/sp/practices', '/qa/crops', '/qa/standard-responses', '/qa/timelines', '/qa/practices', '/custom-parameters', '/alerts'],
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/custom-parameters', '/alerts'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager', '/alerts'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
