@@ -458,6 +458,11 @@ export default function PackageDetailPage() {
           {pkg.description && <p className="text-slate-600 text-sm mt-1">{pkg.description}</p>}
         </div>
         <div className="flex flex-col gap-2 shrink-0">
+          <a
+            href={`/advisory/${packageId}/preview`}
+            className="text-center border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
+            👁 Preview
+          </a>
           {pkg.status === 'DRAFT' && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}
