@@ -6,6 +6,7 @@ import { getClient } from '@/lib/auth'
 import PackageCalendar from '@/components/cca/PackageCalendar'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { practiceShortLabel } from '@/lib/practice-label'
+import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
 
 interface Package {
   id: string; name: string; crop_cosh_id: string
@@ -133,11 +134,13 @@ export default function PackageDetailPage() {
   const [practiceCounts, setPracticeCounts] = useState<Record<string, number>>({})
 
   // Package locations — state/district pairs that scope the
-  // package to specific geographies (Phase 3 add 2026-05-17).
-  // Backend GET added in same batch; PUT was already present.
+  // package to specific geographies. Rebuilt 2026-05-17 (step 3)
+  // to use the shared <LocationPicker>. Universe is bounded to
+  // the company's ClientLocation footprint.
   const [locations, setLocations] = useState<{ id: string; state_cosh_id: string; district_cosh_id: string }[]>([])
+  const [locationOptions, setLocationOptions] = useState<LocationUniverse>({ states: [] })
   const [showEditLocations, setShowEditLocations] = useState(false)
-  const [locationsForm, setLocationsForm] = useState<{ state_cosh_id: string; district_cosh_id: string }[]>([])
+  const [locationsSelected, setLocationsSelected] = useState<Set<string>>(new Set())
   const [savingLocations, setSavingLocations] = useState(false)
   const [locationsError, setLocationsError] = useState('')
 
@@ -241,26 +244,33 @@ export default function PackageDetailPage() {
     }
   }
 
+  const loadLocationOptions = async () => {
+    if (!clientId) return
+    try {
+      const { data } = await api.get<LocationUniverse>(
+        `/client/${clientId}/location-options-for-package`,
+      )
+      setLocationOptions(data)
+    } catch {
+      setLocationOptions({ states: [] })
+    }
+  }
+
   function openEditLocations() {
-    setLocationsForm(locations.map(l => ({
-      state_cosh_id: l.state_cosh_id,
-      district_cosh_id: l.district_cosh_id,
-    })))
+    const sel = new Set<string>()
+    for (const l of locations) sel.add(pairKey(l.state_cosh_id, l.district_cosh_id))
+    setLocationsSelected(sel)
     setLocationsError('')
     setShowEditLocations(true)
   }
 
-  async function handleSaveLocations(e: FormEvent) {
-    e.preventDefault()
+  async function handleSaveLocations() {
     setSavingLocations(true); setLocationsError('')
-    // Drop blank rows so the SE can leave trailing empties.
-    const cleaned = locationsForm.filter(
-      l => l.state_cosh_id.trim() && l.district_cosh_id.trim(),
-    )
+    const pairs = Array.from(locationsSelected).map(k => unpairKey(k))
     try {
       await api.put(
         `/client/${clientId}/packages/${packageId}/locations`,
-        cleaned,
+        pairs,
       )
       setShowEditLocations(false)
       await loadLocations()
@@ -280,6 +290,7 @@ export default function PackageDetailPage() {
     loadTimelines()
     loadReadiness()
     loadLocations()
+    loadLocationOptions()
   }, [clientId, packageId])
 
   const toggleTimeline = (id: string) => {
@@ -687,12 +698,24 @@ export default function PackageDetailPage() {
           </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {locations.map(loc => (
-              <span key={loc.id}
-                className="text-xs bg-slate-50 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200 font-mono">
-                {loc.state_cosh_id} · {loc.district_cosh_id}
-              </span>
-            ))}
+            {(() => {
+              // Resolve friendly names from the universe; fall back
+              // to raw cosh_id if the universe hasn't loaded or the
+              // pair has fallen out of the company footprint.
+              const stateName: Record<string, string> = {}
+              const districtName: Record<string, string> = {}
+              for (const s of locationOptions.states) {
+                if (s.name) stateName[s.cosh_id] = s.name
+                for (const d of s.districts) if (d.name) districtName[d.cosh_id] = d.name
+              }
+              return locations.map(loc => (
+                <span key={loc.id}
+                  className="text-xs bg-slate-50 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200">
+                  {districtName[loc.district_cosh_id] || loc.district_cosh_id}
+                  <span className="text-slate-400"> · {stateName[loc.state_cosh_id] || loc.state_cosh_id}</span>
+                </span>
+              ))
+            })()}
           </div>
         )}
       </div>
@@ -922,68 +945,37 @@ export default function PackageDetailPage() {
         </div>
       )}
 
-      {/* Edit Locations modal — V1 takes raw state_cosh_id +
-          district_cosh_id strings. A future iteration should
-          surface a Cosh-backed cascading picker (state → district)
-          once the lookup endpoints land. */}
+      {/* Edit Locations modal — state-grouped picker shared with
+          Setup → Locations (components/locations/LocationPicker).
+          Universe is bounded to the company's footprint by the
+          backend; empty-state nudges the SE to ask the CA. */}
       {showEditLocations && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div className="p-6 border-b border-slate-100">
               <h2 className="font-bold text-slate-900">Edit Locations</h2>
               <p className="text-slate-500 text-sm mt-0.5">
-                One row per district. Saved set replaces the current set.
+                Pick the districts this package should serve. The list below is bounded by your company&apos;s footprint (managed in Setup &rarr; Locations).
               </p>
             </div>
-            <form onSubmit={handleSaveLocations} className="flex flex-col flex-1 min-h-0">
-              <div className="flex-1 overflow-y-auto p-6 space-y-3">
-                {locationsForm.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">No rows yet — click <strong>+ Add Row</strong> below.</p>
-                ) : (
-                  locationsForm.map((row, idx) => (
-                    <div key={idx} className="flex gap-2 items-start">
-                      <div className="flex-1">
-                        <label className="block text-[11px] font-medium text-slate-500 mb-1">State Cosh ID</label>
-                        <input value={row.state_cosh_id}
-                          onChange={e => setLocationsForm(prev => prev.map((r, i) => i === idx ? { ...r, state_cosh_id: e.target.value } : r))}
-                          required placeholder="e.g. state_karnataka"
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500/30" />
-                      </div>
-                      <div className="flex-1">
-                        <label className="block text-[11px] font-medium text-slate-500 mb-1">District Cosh ID</label>
-                        <input value={row.district_cosh_id}
-                          onChange={e => setLocationsForm(prev => prev.map((r, i) => i === idx ? { ...r, district_cosh_id: e.target.value } : r))}
-                          required placeholder="e.g. district_mysuru"
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500/30" />
-                      </div>
-                      <button type="button"
-                        onClick={() => setLocationsForm(prev => prev.filter((_, i) => i !== idx))}
-                        className="mt-6 text-slate-300 hover:text-red-400 p-1.5"
-                        title="Remove row">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))
-                )}
-                <button type="button"
-                  onClick={() => setLocationsForm(prev => [...prev, { state_cosh_id: '', district_cosh_id: '' }])}
-                  className="w-full text-sm py-2 rounded-xl border border-dashed border-slate-200 text-slate-500 hover:bg-slate-50">
-                  + Add Row
-                </button>
-                {locationsError && <p className="text-sm text-red-600">{locationsError}</p>}
-              </div>
-              <div className="p-4 border-t border-slate-100 flex gap-3">
-                <button type="button" onClick={() => { setShowEditLocations(false); setLocationsError('') }}
-                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={savingLocations}
-                  className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                  {savingLocations ? 'Saving…' : 'Save Locations'}
-                </button>
-              </div>
-            </form>
+            <div className="flex-1 overflow-y-auto p-6">
+              <LocationPicker
+                universe={locationOptions}
+                selected={locationsSelected}
+                onChange={setLocationsSelected}
+                accentColour={colour}
+                emptyMessage="Your company hasn't set up any districts yet. Ask the CA to enable districts in Setup → Locations before configuring package targeting." />
+              {locationsError && <p className="text-sm text-red-600 mt-3">{locationsError}</p>}
+            </div>
+            <div className="p-4 border-t border-slate-100 flex gap-3">
+              <button type="button" onClick={() => { setShowEditLocations(false); setLocationsError('') }}
+                className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
+              <button type="button" onClick={handleSaveLocations} disabled={savingLocations}
+                className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {savingLocations ? 'Saving…' : 'Save Locations'}
+              </button>
+            </div>
           </div>
         </div>
       )}
