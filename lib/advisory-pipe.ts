@@ -57,16 +57,25 @@ export interface PracticeEndpoints {
 }
 
 export function practiceEndpoints(ctx: PipeContext): PracticeEndpoints {
-  // CCA-CA is the odd one out: practices live under
-  // /client/{cid}/timelines/{tl}/... regardless of which package owns
-  // the timeline. PG/SP/QA scope through the parent segment.
+  // CCA-CA is the odd one out for writes: practices live under
+  // /client/{cid}/timelines/{tl}/... regardless of which package
+  // owns the timeline. PG/SP/QA scope writes through the parent
+  // segment so the backend handler can run parent-aware checks.
+  //
+  // `list` is always the polymorphic timeline-agnostic endpoint —
+  // /client/{cid}/timelines/{tl}/practices returns
+  // PracticeWithElementsOut for any timeline regardless of pipe.
+  // Avoids needing a per-parent practices-GET on every backend.
+  const polymorphicList = (tl: string) =>
+    `/client/${ctx.clientId}/timelines/${tl}/practices`
+
   if (ctx.pipe === 'CCA_CLIENT') {
     const base = `/client/${ctx.clientId}`
     return {
       create: (tl) => `${base}/timelines/${tl}/practices`,
       update: (tl, p) => `${base}/timelines/${tl}/practices/${p}`,
       delete: (tl, p) => `${base}/timelines/${tl}/practices/${p}`,
-      list: (tl) => `${base}/timelines/${tl}/practices`,
+      list: polymorphicList,
     }
   }
   const base = parentSegment(ctx)
@@ -74,7 +83,7 @@ export function practiceEndpoints(ctx: PipeContext): PracticeEndpoints {
     create: (tl) => `${base}/timelines/${tl}/practices`,
     update: (tl, p) => `${base}/timelines/${tl}/practices/${p}`,
     delete: (tl, p) => `${base}/timelines/${tl}/practices/${p}`,
-    list: (tl) => `${base}/timelines/${tl}/practices`,
+    list: polymorphicList,
   }
 }
 
