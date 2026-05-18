@@ -140,7 +140,14 @@ function ChaRecsContent() {
     setShowImport(true); setImportError(''); setLoadingGlobals(true)
     try {
       const { data } = await api.get<GlobalPG[]>('/advisory/global/pg-recommendations')
-      setGlobals(data.filter(g => g.status === 'ACTIVE'))
+      // When in PG-context (came from /cha/problems → a PG), only
+      // show globals for that PG. Otherwise show every active global.
+      setGlobals(
+        data.filter(g =>
+          g.status === 'ACTIVE'
+          && (!pgFilter || g.problem_group_cosh_id === pgFilter)
+        )
+      )
     } catch {
       setGlobals([])
     } finally {
@@ -479,7 +486,9 @@ function ChaRecsContent() {
                 <p className="text-center text-slate-400 text-sm py-8">Loading global library…</p>
               ) : globals.length === 0 ? (
                 <p className="text-center text-slate-400 text-sm py-8">
-                  No active global PG recommendations yet. Ask your RootsTalk admin to publish some.
+                  {pgFilter
+                    ? `No active global recommendations for ${problemNameById[pgFilter] || pgFilter} yet. Ask your RootsTalk admin to publish one.`
+                    : 'No active global PG recommendations yet. Ask your RootsTalk admin to publish some.'}
                 </p>
               ) : (
                 globals.map(g => {
