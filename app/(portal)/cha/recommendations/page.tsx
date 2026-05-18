@@ -132,10 +132,13 @@ function ChaRecsContent() {
     return problems.find(p => p.cosh_id === pgFilter)?.name_en || ''
   }, [pgFilter, problems])
 
-  const openCreate = () => {
+  const openCreate = (preselectBundle?: 'AREA_WISE' | 'PLANT_WISE') => {
     setForm({
       problem_group_cosh_id: pgFilter || '',
-      area_or_plant: (apFilter as 'AREA_WISE' | 'PLANT_WISE') || 'AREA_WISE',
+      area_or_plant:
+        preselectBundle
+        || (apFilter as 'AREA_WISE' | 'PLANT_WISE')
+        || 'AREA_WISE',
     })
     setCreateError('')
     setShowCreate(true)
@@ -321,7 +324,7 @@ function ChaRecsContent() {
             style={{ borderColor: colour, color: colour }}>
             ↓ Import from Global
           </button>
-          <button onClick={openCreate}
+          <button onClick={() => openCreate()}
             className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
             style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
             + New Recommendation
@@ -329,10 +332,84 @@ function ChaRecsContent() {
         </div>
       </div>
 
-      <FilterChips chips={chips} />
+      {/* Filter chips are redundant when the page is already filtered
+          to a single PG — the heading above names it. Show chips only
+          on the unfiltered (admin / direct-URL) view. */}
+      {!pgFilter && <FilterChips chips={chips} />}
 
       {loading ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
+      ) : pgFilter ? (
+        // Batch T (2026-05-18) — bundle-cards layout for the
+        // single-PG view. Two side-by-side cards (Area-wise +
+        // Plant-wise) make the bifurcation obvious; filled bundles
+        // show metadata + Open link, empty bundles show a "Start"
+        // CTA. Publish is intentionally NOT on this page — it lives
+        // on the detail page next to Preview.
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {(['AREA_WISE', 'PLANT_WISE'] as const).map(bundle => {
+            const rec = collapsedRecs.find(r => r.area_or_plant === bundle)
+            const bundleLabel = bundle === 'AREA_WISE' ? 'Area-wise crops' : 'Plant-wise crops'
+            const bundleIcon = bundle === 'AREA_WISE' ? '🟧' : '🟪'
+            if (!rec) {
+              return (
+                <div key={bundle}
+                  className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 flex flex-col">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">{bundleIcon}</span>
+                    <h3 className="font-semibold text-slate-800">{bundleLabel}</h3>
+                  </div>
+                  <p className="text-slate-400 text-sm mb-6">Not started</p>
+                  <div className="mt-auto flex flex-col gap-2">
+                    <button onClick={() => openCreate(bundle)}
+                      className="text-sm font-semibold px-4 py-2.5 rounded-xl border text-white"
+                      style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                      + Add {bundleLabel.toLowerCase()} bundle
+                    </button>
+                    <button onClick={openImport}
+                      className="text-sm font-medium px-4 py-2 rounded-xl border"
+                      style={{ borderColor: colour, color: colour }}>
+                      ↓ Import from Global
+                    </button>
+                  </div>
+                </div>
+              )
+            }
+            return (
+              <Link key={bundle} href={`/cha/recommendations/${encodeURIComponent(rec.id)}`}
+                className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 hover:border-slate-300 hover:shadow-md transition group">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-2xl">{bundleIcon}</span>
+                  <h3 className="font-semibold text-slate-800">{bundleLabel}</h3>
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLOUR[rec.status]}`}>
+                    {rec.status}
+                  </span>
+                  <span className="text-xs text-slate-500">v{rec.version}</span>
+                </div>
+                <dl className="text-sm text-slate-600 space-y-1 mb-4">
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Source</dt>
+                    <dd>{rec.imported_from_global_at ? 'Imported from Global' : 'Authored from scratch'}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Timelines</dt>
+                    <dd>{rec.timeline_count}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Created</dt>
+                    <dd>{new Date(rec.created_at).toLocaleDateString()}</dd>
+                  </div>
+                </dl>
+                <div className="text-sm font-medium group-hover:underline"
+                  style={{ color: colour }}>
+                  Open this bundle →
+                </div>
+              </Link>
+            )
+          })}
+        </div>
       ) : collapsedRecs.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
           <p className="text-slate-400 text-4xl mb-3">📋</p>
@@ -356,7 +433,6 @@ function ChaRecsContent() {
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Source</th>
                 <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Timelines</th>
                 <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Created</th>
-                <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -391,15 +467,6 @@ function ChaRecsContent() {
                   </td>
                   <td className="px-5 py-3.5 text-right text-slate-400 hidden lg:table-cell text-xs">
                     {new Date(r.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    {r.status === 'DRAFT' && (
-                      <button onClick={() => openPublish(r)}
-                        className="text-xs font-medium px-2.5 py-1 rounded-lg border"
-                        style={{ borderColor: colour, color: colour }}>
-                        ✓ Publish
-                      </button>
-                    )}
                   </td>
                 </tr>
               ))}
