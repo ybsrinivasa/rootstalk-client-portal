@@ -87,7 +87,54 @@ export function practiceEndpoints(ctx: PipeContext): PracticeEndpoints {
   }
 }
 
-// Relations / CQ / Lifecycle endpoint builders deliberately omitted
-// for Phase 1 — the CA-side surfaces don't expose those features yet
-// (Phase 4 may bring them for CA-CCA). Add them here when needed,
-// mirroring rootstalk-frontend/lib/advisory-pipe.ts.
+// ── Relations + Conditional Questions (Batch N1, 2026-05-18) ─────────
+//
+// CA-side mirror of rootstalk-frontend/lib/advisory-pipe.ts. The
+// list / create URLs are timeline-scoped (pipe-agnostic per CA
+// convention — /client/{cid}/timelines/{tl}/... works for any
+// parent type since Timeline has FK to its parent). PUT / DELETE
+// on relations / CQs are by resource id with client_id in the
+// path so the request-level tenant guard catches cross-tenant
+// access at the gate.
+
+export interface RelationEndpoints {
+  /** GET — list relations on a timeline. */
+  list: (timelineId: string) => string
+  /** POST — create a relation on a timeline. */
+  create: (timelineId: string) => string
+  /** DELETE — drop a relation by id. */
+  delete: (relationId: string) => string
+}
+
+export function relationEndpoints(ctx: PipeContext): RelationEndpoints {
+  const cid = ctx.clientId
+  return {
+    list: (tl) => `/client/${cid}/timelines/${tl}/relations`,
+    create: (tl) => `/client/${cid}/timelines/${tl}/relations`,
+    delete: (rel) => `/client/${cid}/relations/${rel}`,
+  }
+}
+
+export interface CQEndpoints {
+  list: (timelineId: string) => string
+  create: (timelineId: string) => string
+  /** PUT — atomic replace of question text + YES/NO bindings. */
+  update: (cqId: string) => string
+  delete: (cqId: string) => string
+  /** POST — bind a Practice to a CQ (Path B). */
+  bindPractice: (practiceId: string) => string
+  /** POST — bind a Relation to a CQ (Path A). */
+  bindRelation: (relationId: string) => string
+}
+
+export function cqEndpoints(ctx: PipeContext): CQEndpoints {
+  const cid = ctx.clientId
+  return {
+    list: (tl) => `/client/${cid}/timelines/${tl}/conditional-questions`,
+    create: (tl) => `/client/${cid}/timelines/${tl}/conditional-questions`,
+    update: (cq) => `/client/${cid}/conditional-questions/${cq}`,
+    delete: (cq) => `/client/${cid}/conditional-questions/${cq}`,
+    bindPractice: (pId) => `/client/${cid}/practices/${pId}/conditionals`,
+    bindRelation: (rId) => `/client/${cid}/relations/${rId}/conditionals`,
+  }
+}

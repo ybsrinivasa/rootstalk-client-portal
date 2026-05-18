@@ -5,6 +5,8 @@ import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 import PackageCalendar from '@/components/cca/PackageCalendar'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
+import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
+import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import { practiceShortLabel } from '@/lib/practice-label'
 import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
 
@@ -235,6 +237,12 @@ export default function PackageDetailPage() {
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
   const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
   const [expandedPractice, setExpandedPractice] = useState<string | null>(null)
+
+  // Relations mirror — populated by RelationsSection's
+  // onRelationsChange callback so CQsSection can resolve relation
+  // labels + gate eligibility without a parallel fetch. Mirror of
+  // the SA Global CCA pattern (Batch 39P-b2/c).
+  const [relationsByTimeline, setRelationsByTimeline] = useState<Record<string, unknown[]>>({})
 
   // Package authors (Subject Experts of this company credited on
   // the package). Backend at PUT /packages/{pkg}/authors does the
@@ -1300,6 +1308,63 @@ export default function PackageDetailPage() {
                       style={{ color: colour }}>
                       + Add Practice
                     </button>
+
+                    {/* Relations — shared component with SA Global CCA
+                        (Batch N1, 2026-05-18). Same UX, only the
+                        endpoints URLs differ (/client/{cid}/... vs
+                        /advisory/global/...). Mounts once per
+                        expanded Timeline. */}
+                    <RelationsSection
+                      timelineId={tl.id}
+                      timelineName={tl.name}
+                      practices={(practiceMap[tl.id] || []).map(p => ({
+                        id: p.id,
+                        l0_type: p.l0_type,
+                        l1_type: p.l1_type,
+                        l2_type: p.l2_type,
+                        is_special_input: p.is_special_input,
+                        elements: p.elements?.map(e => ({
+                          element_type: e.element_type,
+                          value: e.value,
+                          display_value: e.display_value,
+                        })),
+                      }))}
+                      pipe={{
+                        pipe: 'CCA_CLIENT',
+                        clientId: clientId || '',
+                        parentId: packageId,
+                      }}
+                      onRelationsChange={(tid, rels) =>
+                        setRelationsByTimeline(m => ({ ...m, [tid]: rels }))
+                      }
+                    />
+
+                    {/* Conditional Questions — shared with SA. The
+                        relations mirror feeds attachment labels +
+                        gate eligibility. */}
+                    <CQsSection
+                      timelineId={tl.id}
+                      timelineName={tl.name}
+                      practices={(practiceMap[tl.id] || []).map(p => ({
+                        id: p.id,
+                        l0_type: p.l0_type,
+                        l1_type: p.l1_type,
+                        l2_type: p.l2_type,
+                        is_special_input: p.is_special_input,
+                        relation_id: p.relation_id,
+                        elements: p.elements?.map(e => ({
+                          element_type: e.element_type,
+                          value: e.value,
+                          display_value: e.display_value,
+                        })),
+                      }))}
+                      relations={(relationsByTimeline[tl.id] || []) as never}
+                      pipe={{
+                        pipe: 'CCA_CLIENT',
+                        clientId: clientId || '',
+                        parentId: packageId,
+                      }}
+                    />
                   </div>
                 )}
               </div>
