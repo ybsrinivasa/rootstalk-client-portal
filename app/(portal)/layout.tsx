@@ -142,8 +142,11 @@ const ALL_NAV: NavItem[] = [
 ]
 
 const ROLE_NAV: Record<string, string[]> = {
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/alerts'],
-  FIELD_MANAGER:    ['/dashboard', '/field-manager', '/alerts'],
+  // /alerts is the Relationship Manager's queue — restricted to CA
+  // + CLIENT_RM. Other roles drop it from their sidebar
+  // (2026-05-18 per user).
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops'],
+  FIELD_MANAGER:    ['/dashboard', '/field-manager'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
   PRODUCT_MANAGER:  ['/dashboard', '/qr'],
