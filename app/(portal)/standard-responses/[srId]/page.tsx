@@ -88,6 +88,15 @@ export default function StandardResponseDetailPage() {
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
   const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
 
+  // Inline-edit question_text (Task H, 2026-05-18). User-chosen UX:
+  // pencil under the heading → in-place textarea → save back via
+  // PUT /standard-responses/{id}. crop_cosh_id is preserved (the
+  // backend wipes-and-sets both fields on PUT).
+  const [editingQuestion, setEditingQuestion] = useState(false)
+  const [questionDraft, setQuestionDraft] = useState('')
+  const [savingQuestion, setSavingQuestion] = useState(false)
+  const [questionError, setQuestionError] = useState('')
+
   async function load() {
     if (!clientId || !srId) return
     setLoading(true); setError('')
@@ -207,6 +216,32 @@ export default function StandardResponseDetailPage() {
     } finally { setEditingTL(false) }
   }
 
+  function openQuestionEdit() {
+    if (!sr) return
+    setQuestionDraft(sr.question_text)
+    setQuestionError('')
+    setEditingQuestion(true)
+  }
+
+  async function saveQuestion() {
+    if (!sr || !clientId) return
+    const next = questionDraft.trim()
+    if (!next) { setQuestionError('Question text is required.'); return }
+    if (next === sr.question_text) { setEditingQuestion(false); return }
+    setSavingQuestion(true); setQuestionError('')
+    try {
+      // Backend PUT wipes-and-sets both fields, so preserve crop.
+      const { data } = await api.put<SR>(
+        `/client/${clientId}/standard-responses/${srId}`,
+        { question_text: next, crop_cosh_id: sr.crop_cosh_id },
+      )
+      setSr(data)
+      setEditingQuestion(false)
+    } catch (err: unknown) {
+      setQuestionError(extractErrorMessage(err, 'Failed to save question.'))
+    } finally { setSavingQuestion(false) }
+  }
+
   if (loading) {
     return <div className="py-20 text-center text-slate-400">Loading…</div>
   }
@@ -235,15 +270,57 @@ export default function StandardResponseDetailPage() {
           </Link>
         </div>
         <div className="flex items-start gap-3 flex-wrap mt-2">
-          <h1 className="text-xl font-bold text-slate-900 flex-1">{sr.question_text}</h1>
-          {sr.crop_cosh_id ? (
-            <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-mono">
-              {sr.crop_cosh_id}
-            </span>
+          {editingQuestion ? (
+            <div className="flex-1 space-y-2">
+              <textarea
+                value={questionDraft}
+                onChange={e => setQuestionDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { setEditingQuestion(false); setQuestionError('') }
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveQuestion()
+                }}
+                rows={2}
+                autoFocus
+                className="w-full text-xl font-bold text-slate-900 border border-blue-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={saveQuestion}
+                  disabled={savingQuestion || !questionDraft.trim()}
+                  className="text-sm font-semibold text-white px-4 py-1.5 rounded-lg disabled:opacity-50"
+                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  {savingQuestion ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button"
+                  onClick={() => { setEditingQuestion(false); setQuestionError('') }}
+                  className="text-sm font-medium text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-100">
+                  Cancel
+                </button>
+                <span className="text-[11px] text-slate-400 ml-1">⌘+Enter to save, Esc to cancel</span>
+              </div>
+              {questionError && <p className="text-sm text-red-600">{questionError}</p>}
+            </div>
           ) : (
-            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-              Crop-agnostic
-            </span>
+            <>
+              <h1 className="text-xl font-bold text-slate-900 flex-1">
+                {sr.question_text}
+                <button type="button"
+                  onClick={openQuestionEdit}
+                  className="ml-2 text-slate-300 hover:text-blue-500 align-middle"
+                  title="Edit question">
+                  <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+              </h1>
+              {sr.crop_cosh_id ? (
+                <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-mono">
+                  {sr.crop_cosh_id}
+                </span>
+              ) : (
+                <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                  Crop-agnostic
+                </span>
+              )}
+            </>
           )}
         </div>
         <p className="text-slate-500 text-sm mt-2">
