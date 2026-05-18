@@ -15,11 +15,26 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (r) => r,
   (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('rt_cp_token')
-      localStorage.removeItem('rt_cp_user')
-      localStorage.removeItem('rt_cp_client')
-      window.location.href = '/login'
+    if (typeof window !== 'undefined') {
+      const status = error.response?.status
+      const code = error.response?.data?.detail?.code
+      if (status === 401) {
+        localStorage.removeItem('rt_cp_token')
+        localStorage.removeItem('rt_cp_user')
+        localStorage.removeItem('rt_cp_client')
+        window.location.href = '/login'
+      } else if (
+        status === 403
+        && (code === 'advisory_view_forbidden' || code === 'cross_client_forbidden')
+        // Don't loop if we're already on the access-denied page.
+        && !window.location.pathname.startsWith('/access-denied')
+      ) {
+        const wanted = encodeURIComponent(window.location.pathname)
+        const reason = encodeURIComponent(
+          error.response?.data?.detail?.message || ''
+        )
+        window.location.href = `/access-denied?from=${wanted}&reason=${reason}`
+      }
     }
     return Promise.reject(error)
   }

@@ -153,28 +153,38 @@ const ROLE_NAV: Record<string, string[]> = {
 
 const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
 
-function getNavForRole(role: string | null, client: CPClient | null): NavItem[] {
+function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   const isSeedClient = client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
 
-  if (!role || role === 'CA') {
+  // CA is exclusive — server-side guarantee (Batch K). When CA is
+  // among the user's roles it's the only one, and CA sees every
+  // sidebar item except SEED items at non-seed clients.
+  if (roles.includes('CA')) {
     return ALL_NAV.filter(item => {
       if (item.seedOnly && !isSeedClient) return false
       return true
     })
   }
 
-  const allowed = ROLE_NAV[role]
-  if (!allowed) {
-    return ALL_NAV.filter(item => {
-      if (item.seedOnly && !isSeedClient) return false
-      if (item.caOnly) return false
-      return true
-    })
+  // For multi-role users (e.g. FIELD_MANAGER + SUBJECT_EXPERT), the
+  // sidebar shows the UNION of per-role allowed-hrefs. A user with
+  // no recognised role sees nothing past the dashboard.
+  const allowedSet = new Set<string>()
+  for (const role of roles) {
+    const list = ROLE_NAV[role]
+    if (list) {
+      for (const href of list) allowedSet.add(href)
+    }
+  }
+  if (allowedSet.size === 0) {
+    // Fallback: at least show the dashboard.
+    allowedSet.add('/dashboard')
   }
 
   return ALL_NAV.filter(item => {
-    if (!allowed.includes(item.href)) return false
+    if (!allowedSet.has(item.href)) return false
     if (item.seedOnly && !isSeedClient) return false
+    if (item.caOnly) return false
     return true
   })
 }
@@ -202,7 +212,13 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
     setUser(getUser())
   }, [router])
 
-  const nav = getNavForRole(user?.portal_role ?? null, client)
+  // Prefer portal_roles (Batch K); fall back to portal_role list for
+  // cached payloads from older sessions.
+  const userRoles: string[] =
+    user?.portal_roles?.length
+      ? user.portal_roles
+      : (user?.portal_role ? [user.portal_role] : [])
+  const nav = getNavForRoles(userRoles, client)
 
   // Group nav items
   const grouped = GROUP_ORDER.map(group => ({

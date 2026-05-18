@@ -3,7 +3,29 @@ import api from './api'
 export interface CPUser {
   id: string; email: string; name: string | null
   roles: { role_type: string; status: string }[]
+  /** @deprecated — use portal_roles. Kept for backward compat with
+   *  cached objects from pre-Batch-K sessions. New code should read
+   *  portal_roles. */
   portal_role: string | null
+  /** Batch K (2026-05-18) — all ACTIVE ClientUser roles for this
+   *  user at the JWT-bound client. Multi-role is supported for every
+   *  role except CA (which is mutually exclusive — enforced server-
+   *  side). The sidebar shows the UNION of items across these roles.
+   *  Empty when the user has no ClientUser at the bound client
+   *  (e.g. SA / CM logins). */
+  portal_roles?: string[]
+}
+
+/** Convenience helper — true when the user's portal_roles include the
+ *  given role. Use this in pages that need to gate UI on a specific
+ *  role membership. */
+export function hasPortalRole(user: CPUser | null, role: string): boolean {
+  if (!user) return false
+  // Prefer the new portal_roles list; fall back to legacy portal_role
+  // for users whose cached /auth/me payload predates Batch K.
+  const list = user.portal_roles
+  if (Array.isArray(list)) return list.includes(role)
+  return user.portal_role === role
 }
 
 export interface CPClient {
