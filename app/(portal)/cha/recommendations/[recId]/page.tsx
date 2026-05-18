@@ -296,19 +296,11 @@ export default function RecDetailPage() {
   }
 
   async function handleCloneToDraft() {
-    // Same confirm-on-existing-DRAFT prompt as Make-editable so the
-    // user can intentionally abandon the imported DRAFT and start
-    // fresh from the ACTIVE row. Single-DRAFT invariant means the
-    // existing draft becomes INACTIVE on clone.
-    const existing = lineage.find(r => r.status === 'DRAFT' && r.id !== rec?.id)
-    if (existing) {
-      const ok = confirm(
-        `A v${existing.version} DRAFT already exists in this lineage. ` +
-        `Starting a fresh draft from v${rec?.version} will replace it (the ` +
-        `existing draft becomes INACTIVE). Continue?`,
-      )
-      if (!ok) return
-    }
+    // Batch T (2026-05-18): clone-to-draft is now find-or-create —
+    // if a DRAFT already exists in the lineage, the backend returns
+    // it (no new row, no demotion). So no confirm dialog needed;
+    // the SE just lands on the existing DRAFT or a freshly cloned
+    // one. Only Publish creates new rows.
     setCloning(true); setCloneError('')
     try {
       const { data } = await api.post<Rec>(
@@ -396,7 +388,14 @@ export default function RecDetailPage() {
         }}
       />
       <div className="flex items-start gap-4">
-        <Link href="/cha/recommendations" className="mt-1 text-slate-400 hover:text-slate-600">
+        {/* Back link preserves the PG filter so the SE returns to the
+            same single-PG view they entered from (Batch T, 2026-05-18).
+            Falls back to the unfiltered list only if no problem_group
+            is set on the row. */}
+        <Link href={rec.problem_group_cosh_id
+            ? `/cha/recommendations?pg=${encodeURIComponent(rec.problem_group_cosh_id)}`
+            : '/cha/recommendations'}
+          className="mt-1 text-slate-400 hover:text-slate-600">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>

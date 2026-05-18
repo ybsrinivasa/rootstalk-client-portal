@@ -99,6 +99,39 @@ function ChaRecsContent() {
 
   useEffect(() => { load() }, [clientId, pgFilter, apFilter, statusFilter])
 
+  // Batch T (2026-05-18) — collapse the list to one row per
+  // (problem_group × bundle) lineage. Head precedence: DRAFT > ACTIVE
+  // > most recent INACTIVE. Hides historical INACTIVE rows from the
+  // list entirely (they're accessible from the detail page's Version
+  // History disclosure). Net effect: at most two rows per PG —
+  // one for Area-wise, one for Plant-wise.
+  const collapsedRecs = useMemo(() => {
+    const STATUS_RANK: Record<string, number> = { DRAFT: 0, ACTIVE: 1, INACTIVE: 2 }
+    const byLineage = new Map<string, ChaRec>()
+    for (const r of recs) {
+      const key = `${r.problem_group_cosh_id}::${r.area_or_plant ?? ''}`
+      const cur = byLineage.get(key)
+      if (!cur) { byLineage.set(key, r); continue }
+      const a = STATUS_RANK[r.status] ?? 99
+      const b = STATUS_RANK[cur.status] ?? 99
+      if (a < b) { byLineage.set(key, r); continue }
+      if (a === b) {
+        // Same status — pick the most recently created.
+        if (new Date(r.created_at) > new Date(cur.created_at)) {
+          byLineage.set(key, r)
+        }
+      }
+    }
+    return Array.from(byLineage.values())
+  }, [recs])
+
+  // When filtered to a single PG, the title at the top should name
+  // it clearly so the SE knows which PG's bundles they're seeing.
+  const filteredPgName = useMemo(() => {
+    if (!pgFilter) return ''
+    return problems.find(p => p.cosh_id === pgFilter)?.name_en || ''
+  }, [pgFilter, problems])
+
   const openCreate = () => {
     setForm({
       problem_group_cosh_id: pgFilter || '',
@@ -163,7 +196,31 @@ function ChaRecsContent() {
       setShowImport(false)
       await load()
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const res = (err as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+      const detail = res?.data?.detail as { code?: string; message?: string } | string | undefined
+      // Batch T (2026-05-18) — backend 409s with `draft_exists_confirm_overwrite`
+      // when a DRAFT is already in flight. Ask SE whether to replace
+      // and retry with overwrite=true.
+      if (res?.status === 409 && typeof detail === 'object' && detail.code === 'draft_exists_confirm_overwrite') {
+        const ok = confirm(
+          'A draft already exists for this problem group and bundle. ' +
+          'Importing again will replace the draft\'s contents with the ' +
+          'imported version. Continue?',
+        )
+        if (!ok) { setImporting(null); return }
+        try {
+          await api.post(`/client/${clientId}/pg-recommendations/import/${globalId}?overwrite=true`)
+          setShowImport(false)
+          await load()
+        } catch (err2: unknown) {
+          const d2 = (err2 as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+          const m2 = typeof d2 === 'string' ? d2 : (d2 as { message?: string })?.message
+          setImportError(m2 || 'Failed to import.')
+        } finally {
+          setImporting(null)
+        }
+        return
+      }
       const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
       setImportError(msg || 'Failed to import.')
     } finally {
@@ -233,10 +290,30 @@ function ChaRecsContent() {
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Recommendations</h1>
-          <p className="text-slate-500 text-sm mt-0.5">
-            One row per (Problem × bundle). Each is its own DRAFT/ACTIVE lifecycle.
-          </p>
+          {filteredPgName ? (
+            <>
+              <div className="flex items-center gap-3 mb-1">
+                <Link href="/cha/problems"
+                  className="text-slate-400 hover:text-slate-600"
+                  title="Back to Problems">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </Link>
+                <h1 className="text-2xl font-bold text-slate-900">{filteredPgName}</h1>
+              </div>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Up to two bundles — one for Area-wise crops, one for Plant-wise.
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="text-2xl font-bold text-slate-900">Recommendations</h1>
+              <p className="text-slate-500 text-sm mt-0.5">
+                One row per (Problem × bundle). Each is its own DRAFT/ACTIVE lifecycle.
+              </p>
+            </>
+          )}
         </div>
         <div className="flex gap-2">
           <button onClick={openImport}
@@ -256,7 +333,7 @@ function ChaRecsContent() {
 
       {loading ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
-      ) : recs.length === 0 ? (
+      ) : collapsedRecs.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
           <p className="text-slate-400 text-4xl mb-3">📋</p>
           <p className="text-slate-600 font-medium">
@@ -283,7 +360,7 @@ function ChaRecsContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {recs.map(r => (
+              {collapsedRecs.map(r => (
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="px-5 py-3.5">
                     <Link
