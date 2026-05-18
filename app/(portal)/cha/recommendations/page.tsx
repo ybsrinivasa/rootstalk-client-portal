@@ -349,7 +349,9 @@ function ChaRecsContent() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {(['AREA_WISE', 'PLANT_WISE'] as const).map(bundle => {
             const rec = collapsedRecs.find(r => r.area_or_plant === bundle)
-            const bundleLabel = bundle === 'AREA_WISE' ? 'Area-wise crops' : 'Plant-wise crops'
+            const bundleLabel = bundle === 'AREA_WISE'
+              ? 'Recommendations for Area-wise Crops'
+              : 'Recommendations for Plant-wise Crops'
             const bundleIcon = bundle === 'AREA_WISE' ? '🟧' : '🟪'
             if (!rec) {
               return (
@@ -364,7 +366,7 @@ function ChaRecsContent() {
                     <button onClick={() => openCreate(bundle)}
                       className="text-sm font-semibold px-4 py-2.5 rounded-xl border text-white"
                       style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                      + Add {bundleLabel.toLowerCase()} bundle
+                      + Add Recommendations
                     </button>
                     <button onClick={openImport}
                       className="text-sm font-medium px-4 py-2 rounded-xl border"
@@ -404,7 +406,7 @@ function ChaRecsContent() {
                 </dl>
                 <div className="text-sm font-medium group-hover:underline"
                   style={{ color: colour }}>
-                  Open this bundle →
+                  Open Recommendations →
                 </div>
               </Link>
             )
