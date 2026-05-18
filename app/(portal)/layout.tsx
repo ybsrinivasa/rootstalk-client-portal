@@ -129,7 +129,6 @@ const ALL_NAV: NavItem[] = [
   { href: '/cha/problems',       label: 'Problem Groups',           Icon: IconCHA,          group: 'CHA' },
   { href: '/cha/sp/crops',       label: 'Specific Problems',        Icon: IconCHA,          group: 'CHA' },
   { href: '/qa/crops',           label: 'Q&A',                      Icon: IconCHA,          group: 'QA' },
-  { href: '/custom-parameters',  label: 'Custom Parameters', Icon: IconCustomParams, group: 'CONTENT' },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
@@ -143,7 +142,7 @@ const ALL_NAV: NavItem[] = [
 ]
 
 const ROLE_NAV: Record<string, string[]> = {
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/custom-parameters', '/alerts'],
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/alerts'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager', '/alerts'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
