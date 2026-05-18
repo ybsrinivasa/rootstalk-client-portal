@@ -19,10 +19,17 @@ api.interceptors.response.use(
       const status = error.response?.status
       const code = error.response?.data?.detail?.code
       if (status === 401) {
+        // Preserve the company-branded login URL on session expiry,
+        // mirroring the explicit logout flow in lib/auth.ts.
+        let target = '/login'
+        try {
+          const cached = JSON.parse(localStorage.getItem('rt_cp_client') || 'null') as { short_name?: string } | null
+          if (cached?.short_name) target = `/login/${cached.short_name}`
+        } catch { /* fall through to generic /login */ }
         localStorage.removeItem('rt_cp_token')
         localStorage.removeItem('rt_cp_user')
         localStorage.removeItem('rt_cp_client')
-        window.location.href = '/login'
+        window.location.href = target
       } else if (
         status === 403
         && (code === 'advisory_view_forbidden' || code === 'cross_client_forbidden')

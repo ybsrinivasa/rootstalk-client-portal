@@ -71,10 +71,23 @@ export async function login(email: string, password: string, clientShortName?: s
 }
 
 export function logout(): void {
+  // Capture the bound short_name BEFORE clearing localStorage so we
+  // can land the user back on their company-branded login URL
+  // (/login/<short>) instead of the generic /login. Per user
+  // 2026-05-18: "When a Client User signs out, he doesn't stay
+  // with his company URL. It helps to stay with his company URL
+  // only."
+  let target = '/login'
+  try {
+    const cached = JSON.parse(localStorage.getItem('rt_cp_client') || 'null') as { short_name?: string } | null
+    if (cached?.short_name) {
+      target = `/login/${cached.short_name}`
+    }
+  } catch { /* fall through to generic /login */ }
   localStorage.removeItem('rt_cp_token')
   localStorage.removeItem('rt_cp_user')
   localStorage.removeItem('rt_cp_client')
-  window.location.href = '/login'
+  window.location.href = target
 }
 
 export function getToken(): string | null {
