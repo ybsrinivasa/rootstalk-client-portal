@@ -8,7 +8,7 @@ import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import {
-  ReadOnlyBanner, VersionHistorySection,
+  VersionHistorySection,
   type LineageRow,
 } from '@/components/advisory-authoring/LineageSection'
 import { practiceShortLabel } from '@/lib/practice-label'
@@ -367,38 +367,33 @@ export default function RecDetailPage() {
     <div className="max-w-4xl mx-auto pt-20 text-center text-slate-400">Loading recommendation…</div>
   )
 
-  // Lineage helpers (Batch R, 2026-05-18) — mirror SA-PG. Existing-
-  // DRAFT detection excludes the row being viewed so the banner
-  // redirects to a sibling DRAFT (not back to itself). Next-version
-  // computes max(lineage.version) + 1 because publish bumps to
-  // max + 1; first-time, that's just 1.
-  const existingDraft = lineage.find(r => r.status === 'DRAFT' && r.id !== rec.id) || null
-  const nextVersion = rec.status === 'DRAFT'
-    ? rec.version
-    : Math.max(...lineage.map(r => r.version), rec.version) + 1
-  // Batch S (2026-05-18) — non-DRAFT rows are read-only. ACTIVE rows
-  // are what farmers read live; editing them would leak unreviewed
-  // changes. INACTIVE rows are historical record. Gate all edit
-  // affordances on isDraft.
+  // Batch S/T (2026-05-18) — non-DRAFT rows are read-only. ACTIVE
+  // rows are what farmers read live; editing them would leak
+  // unreviewed changes. INACTIVE rows are historical record. Gate
+  // all edit affordances on isDraft. The "Edit this version" button
+  // (Batch T) wraps clone-to-draft so the SE can transition out of
+  // read-only state with one click.
   const isDraft = rec.status === 'DRAFT'
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <ReadOnlyBanner
-        status={rec.status}
-        currentVersion={rec.version}
-        nextVersion={nextVersion}
-        existingDraft={existingDraft}
-        continueDraftHref={(draft) => `/cha/recommendations/${draft.id}`}
-        cloning={cloning}
-        cloneError={cloneError}
-        onCloneToDraft={handleCloneToDraft}
-      />
       <VersionHistorySection
         lineage={lineage}
         rowDetailUrl={(row) => `/cha/recommendations/${row.id}`}
         makingEditable={makingEditable}
         onMakeEditable={handleMakeEditable}
+        // Display DRAFT rows as "v{nextVersion} (draft)" so two-v1
+        // rows don't read as a duplicate. Batch T (2026-05-18).
+        versionLabel={(row) => {
+          if (row.status === 'DRAFT') {
+            const otherMax = Math.max(
+              0,
+              ...lineage.filter(r => r.id !== row.id).map(r => r.version),
+            )
+            return `v${otherMax + 1} (draft)`
+          }
+          return `v${row.version}`
+        }}
       />
       <div className="flex items-start gap-4">
         <Link href="/cha/recommendations" className="mt-1 text-slate-400 hover:text-slate-600">
@@ -422,11 +417,27 @@ export default function RecDetailPage() {
           </p>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-2">
-          <Link href={`/cha/recommendations/${recId}/preview`}
-            className="text-sm font-medium px-4 py-2 rounded-xl border"
-            style={{ borderColor: colour, color: colour }}>
-            👁 Preview
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href={`/cha/recommendations/${recId}/preview`}
+              className="text-sm font-medium px-4 py-2 rounded-xl border"
+              style={{ borderColor: colour, color: colour }}>
+              👁 Preview
+            </Link>
+            {/* Batch T (2026-05-18): single Edit button on non-DRAFT
+                rows replaces the big read-only banner. ACTIVE → start
+                a fresh draft; INACTIVE → revert from this history. */}
+            {!isDraft && (
+              <button onClick={handleCloneToDraft} disabled={cloning}
+                className="text-sm font-medium px-4 py-2 rounded-xl border disabled:opacity-50"
+                style={{ borderColor: colour, color: colour }}>
+                {cloning ? 'Starting…' :
+                  rec.status === 'ACTIVE' ? '✏ Edit this version' : '✏ Make editable'}
+              </button>
+            )}
+          </div>
+          {!isDraft && cloneError && (
+            <p className="text-xs text-red-600">{cloneError}</p>
+          )}
           {rec.status === 'DRAFT' && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}

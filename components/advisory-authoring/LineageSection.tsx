@@ -108,22 +108,28 @@ interface VersionHistoryProps {
    *  don't carry published_at; CCA Packages do. Returns ReactNode to
    *  let callers render dates or just blank. */
   publishedAtChip?: (row: LineageRow) => ReactNode
+  /** Optional version-label override. Callers can use this to display
+   *  DRAFT rows as "v(N+1)" — the version the draft will carry on
+   *  publish — so a list of "DRAFT v1 / ACTIVE v1" reads cleanly as
+   *  "v2 (draft) / v1" instead. Defaults to `v{row.version}`. */
+  versionLabel?: (row: LineageRow) => string
 }
 
 export function VersionHistorySection({
   lineage, rowDetailUrl, makingEditable, onMakeEditable,
-  publishedAtChip,
+  publishedAtChip, versionLabel,
 }: VersionHistoryProps) {
   if (lineage.length <= 1) return null
+  const label = versionLabel || ((r: LineageRow) => `v${r.version}`)
   return (
-    <details className="bg-white border border-slate-200 rounded-2xl" open={lineage.length <= 5}>
+    <details className="bg-white border border-slate-200 rounded-2xl">
       <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-2xl">
-        Version history ({lineage.length} versions)
+        📜 Version history ({lineage.length} versions)
       </summary>
       <ul className="divide-y divide-slate-100 border-t border-slate-100">
         {lineage.map(row => (
           <li key={row.id} className="px-4 py-3 flex items-center gap-3 flex-wrap text-sm">
-            <span className="font-semibold text-slate-900 min-w-[2.5rem]">v{row.version}</span>
+            <span className="font-semibold text-slate-900 min-w-[2.5rem]">{label(row)}</span>
             <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLOUR[row.status] || 'bg-slate-100 text-slate-600'}`}>
               {row.status}
             </span>
