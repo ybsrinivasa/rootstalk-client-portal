@@ -91,6 +91,10 @@ export default function StandardResponseDetailPage() {
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
   // Relations mirror — feeds CQsSection (Batch N2).
   const [relationsByTimeline, setRelationsByTimeline] = useState<Record<string, unknown[]>>({})
+
+  // Crop friendly name — fetched once for crop_cosh_id so the UI
+  // shows "Tomato" instead of a raw Cosh UUID.
+  const [cropName, setCropName] = useState<string>('')
   const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
 
   // Inline-edit question_text (Task H, 2026-05-18). User-chosen UX:
@@ -138,6 +142,18 @@ export default function StandardResponseDetailPage() {
   }
 
   useEffect(() => { load() }, [clientId, srId])
+
+  // Resolve crop_cosh_id → friendly name. Runs after `load` has
+  // populated `sr`. No-op for crop-agnostic responses.
+  useEffect(() => {
+    if (!clientId || !sr?.crop_cosh_id) { setCropName(''); return }
+    api.get<{ crop_cosh_id: string; crop_name_en?: string | null }[]>(
+      `/client/${clientId}/crops`,
+    ).then(r => {
+      const match = r.data.find(c => c.crop_cosh_id === sr.crop_cosh_id)
+      if (match?.crop_name_en) setCropName(match.crop_name_en)
+    }).catch(() => { /* fallback handled in UI */ })
+  }, [clientId, sr?.crop_cosh_id])
 
   async function addTimeline(e: FormEvent) {
     e.preventDefault()
@@ -317,8 +333,8 @@ export default function StandardResponseDetailPage() {
                 </button>
               </h1>
               {sr.crop_cosh_id ? (
-                <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-mono">
-                  {sr.crop_cosh_id}
+                <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
+                  {cropName || '(loading crop…)'}
                 </span>
               ) : (
                 <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">

@@ -382,14 +382,14 @@ export default function SpDetailPage() {
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-slate-900">
-              {problemName || sp.specific_problem_cosh_id}
+              {problemName || '(loading…)'}
             </h1>
             <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLOUR[sp.status]}`}>
               {sp.status}
             </span>
           </div>
           <p className="text-slate-500 text-sm mt-1">
-            {cropName || sp.crop_cosh_id || '(no crop set)'} · v{sp.version}
+            {cropName || '(loading crop…)'} · v{sp.version}
           </p>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-2">
@@ -674,7 +674,7 @@ export default function SpDetailPage() {
                   <p className="text-center text-slate-400 text-sm py-8">Loading PGs…</p>
                 ) : !sp?.crop_measure ? (
                   <p className="text-center text-slate-400 text-sm py-8 px-4">
-                    This crop hasn&apos;t been classified as area-wise or plant-wise by Cosh yet — without that, we can&apos;t filter PGs correctly. Ask your RootsTalk admin to check Cosh&apos;s <code className="font-mono">crop_area_plant_wise</code> Connect for {cropName || sp?.crop_cosh_id}.
+                    {cropName || 'This crop'} isn&apos;t classified as area-wise or plant-wise yet, so we can&apos;t pick matching PGs. Contact RootsTalk support.
                   </p>
                 ) : importablePGs.length === 0 ? (
                   <p className="text-center text-slate-400 text-sm py-8 px-4">
@@ -887,10 +887,10 @@ export default function SpDetailPage() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="p-6 border-b border-slate-100">
               <h2 className="font-bold text-slate-900">
-                Publish {problemName || sp.specific_problem_cosh_id}?
+                Publish {problemName || '(loading…)'}?
               </h2>
               <p className="text-slate-500 text-sm mt-1.5">
-                {cropName || sp.crop_cosh_id} · {sp.version > 0 ? `will become v${sp.version + 1}` : 'first publication'}.
+                {cropName || '—'} · {sp.version > 0 ? `will become v${sp.version + 1}` : 'first publication'}.
               </p>
             </div>
             <div className="p-6 space-y-3">

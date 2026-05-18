@@ -50,7 +50,6 @@ export default function QaCropsPage() {
               href={`/qa/standard-responses?crop=${encodeURIComponent(c.crop_cosh_id)}`}
               className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm hover:border-green-200 hover:shadow-md transition-all">
               <p className="font-semibold text-slate-900">{c.name_en}</p>
-              <p className="text-xs text-slate-400 mt-0.5 font-mono">{c.crop_cosh_id}</p>
             </Link>
           ))}
 

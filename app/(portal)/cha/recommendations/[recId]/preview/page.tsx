@@ -189,7 +189,7 @@ export default function PGPreviewPage() {
       {/* PG header */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold text-slate-900">{problemName || rec.problem_group_cosh_id}</h1>
+          <h1 className="text-2xl font-bold text-slate-900">{problemName || '(loading…)'}</h1>
           <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLOUR[rec.status] || 'bg-slate-100 text-slate-600'}`}>
             {rec.status}
           </span>

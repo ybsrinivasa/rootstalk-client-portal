@@ -145,7 +145,7 @@ export default function QAPreviewPage() {
           <h1 className="text-xl font-bold text-slate-900 flex-1">{sr.question_text}</h1>
           {sr.crop_cosh_id ? (
             <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">
-              {sr.crop_name_en || sr.crop_cosh_id}
+              {sr.crop_name_en || '(crop)'}
             </span>
           ) : (
             <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">

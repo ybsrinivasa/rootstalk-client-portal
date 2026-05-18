@@ -304,7 +304,7 @@ export default function RecDetailPage() {
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-slate-900">
-              {problemName || rec.problem_group_cosh_id}
+              {problemName || '(loading…)'}
             </h1>
             <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLOUR[rec.status]}`}>
               {rec.status}
@@ -715,7 +715,7 @@ export default function RecDetailPage() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="p-6 border-b border-slate-100">
               <h2 className="font-bold text-slate-900">
-                Publish {problemName || rec.problem_group_cosh_id}?
+                Publish {problemName || '(loading…)'}?
               </h2>
               <p className="text-slate-500 text-sm mt-1.5">
                 {rec.area_or_plant === 'AREA_WISE' ? 'Area-wise' : 'Plant-wise'} bundle

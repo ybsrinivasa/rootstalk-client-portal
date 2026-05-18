@@ -188,7 +188,7 @@ export default function SPPreviewPage() {
       {/* SP header */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-2">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold text-slate-900">{problemName || sp.specific_problem_cosh_id}</h1>
+          <h1 className="text-2xl font-bold text-slate-900">{problemName || '(loading…)'}</h1>
           <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLOUR[sp.status] || 'bg-slate-100 text-slate-600'}`}>
             {sp.status}
           </span>
@@ -196,7 +196,7 @@ export default function SPPreviewPage() {
             v{sp.version}
           </span>
           <span className="text-xs text-slate-500 px-2 py-0.5 bg-slate-100 rounded-full">
-            {cropName || sp.crop_cosh_id || '(no crop set)'}
+            {cropName || '(no crop set)'}
           </span>
         </div>
       </div>

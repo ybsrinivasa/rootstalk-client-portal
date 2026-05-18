@@ -40,6 +40,9 @@ export default function DashboardPage() {
   const [balance, setBalance] = useState<number | null>(null)
   const [alertCount, setAlertCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+  // Crop friendly-name lookup so the Recent Packages row shows
+  // "Tomato" instead of the raw Cosh UUID.
+  const [cropNameByCoshId, setCropNameByCoshId] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!clientId) return
@@ -47,10 +50,14 @@ export default function DashboardPage() {
       api.get<Package[]>(`/client/${clientId}/packages`),
       api.get<PoolBalance>(`/client/${clientId}/subscription-pool/balance`),
       api.get<Alert[]>(`/client/${clientId}/alerts`).catch(() => ({ data: [] })),
-    ]).then(([pkgRes, poolRes, alertRes]) => {
+      api.get<{ crop_cosh_id: string; crop_name_en?: string | null }[]>(`/client/${clientId}/crops`).catch(() => ({ data: [] })),
+    ]).then(([pkgRes, poolRes, alertRes, cropRes]) => {
       setPackages(pkgRes.data.slice(0, 6))
       setBalance(poolRes.data.balance)
       setAlertCount(Array.isArray(alertRes.data) ? alertRes.data.length : 0)
+      const m: Record<string, string> = {}
+      for (const c of cropRes.data) if (c.crop_name_en) m[c.crop_cosh_id] = c.crop_name_en
+      setCropNameByCoshId(m)
     }).catch(() => {}).finally(() => setLoading(false))
   }, [clientId])
 
@@ -115,7 +122,7 @@ export default function DashboardPage() {
               <thead className="bg-stone-50 border-b border-stone-100">
                 <tr>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-stone-400 uppercase tracking-wider">Package</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-stone-400 uppercase tracking-wider hidden sm:table-cell">Crop ID</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-stone-400 uppercase tracking-wider hidden sm:table-cell">Crop</th>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-stone-400 uppercase tracking-wider">Status</th>
                   <th className="text-right px-5 py-3 text-xs font-semibold text-stone-400 uppercase tracking-wider">Ver</th>
                 </tr>
@@ -128,7 +135,7 @@ export default function DashboardPage() {
                         {pkg.name}
                       </Link>
                     </td>
-                    <td className="px-5 py-3 text-stone-500 hidden sm:table-cell font-mono text-xs">{pkg.crop_cosh_id}</td>
+                    <td className="px-5 py-3 text-stone-500 hidden sm:table-cell text-xs">{cropNameByCoshId[pkg.crop_cosh_id] || '—'}</td>
                     <td className="px-5 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOUR[pkg.status]}`}>{pkg.status}</span>
                     </td>

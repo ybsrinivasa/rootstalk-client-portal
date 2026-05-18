@@ -58,12 +58,6 @@ export default function ChaProblemsPage() {
         </p>
       </div>
 
-      <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-xs text-amber-800">
-        V1 stopgap: this list is hardcoded (12 PGs covering common pilot scenarios). When Cosh ships the
-        <code className="mx-1 px-1.5 py-0.5 bg-amber-100 rounded font-mono">problem_group</code>
-        Connect, the list backfills from there with no UI changes.
-      </div>
-
       {loading ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
       ) : problems.length === 0 ? (

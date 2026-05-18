@@ -156,7 +156,7 @@ export default function SetupPage() {
               selected={selectedKeys}
               onChange={setSelectedKeys}
               accentColour={colour}
-              emptyMessage="Cosh hasn't synced India locations to this server yet. Ask your RootsTalk admin to run a sync." />
+              emptyMessage="Locations aren't available yet. Contact RootsTalk support." />
             {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
             {savedHint && <p className="text-sm text-green-700 mt-3">{savedHint}</p>}
           </div>

@@ -165,6 +165,10 @@ export default function PackageDetailPage() {
   const colour = client?.primary_colour || '#1A5C2A'
 
   const [pkg, setPkg] = useState<Package | null>(null)
+  // Crop friendly name lookup — fetched once from /client/{cid}/crops
+  // so the header / publish confirm / signature empty state show
+  // "Tomato" instead of the raw Cosh UUID.
+  const [cropName, setCropName] = useState<string>('')
   const [timelines, setTimelines] = useState<Timeline[]>([])
   const [practiceMap, setPracticeMap] = useState<Record<string, Practice[]>>({})
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -597,6 +601,15 @@ export default function PackageDetailPage() {
     if (!pkg) return
     loadParameters(pkg.crop_cosh_id)
     loadPackageVariables()
+    // Resolve crop_cosh_id → friendly name so the UI never shows a UUID.
+    if (clientId && pkg.crop_cosh_id) {
+      api.get<{ crop_cosh_id: string; crop_name_en?: string | null }[]>(
+        `/client/${clientId}/crops`,
+      ).then(r => {
+        const match = r.data.find(c => c.crop_cosh_id === pkg.crop_cosh_id)
+        if (match?.crop_name_en) setCropName(match.crop_name_en)
+      }).catch(() => { /* leave cropName empty; UI handles fallback */ })
+    }
   }, [pkg?.crop_cosh_id])
 
   useEffect(() => {
@@ -946,7 +959,7 @@ export default function PackageDetailPage() {
             }`}>{pkg.status}</span>
           </div>
           <p className="text-slate-500 text-sm mt-1">
-            {pkg.crop_cosh_id} · {pkg.package_type.toLowerCase()} · {pkg.duration_days} days · v{pkg.version}
+            {cropName || '—'} · {pkg.package_type.toLowerCase()} · {pkg.duration_days} days · v{pkg.version}
             {readiness?.published_at && (
               <> · last published {new Date(readiness.published_at).toLocaleDateString()}</>
             )}
@@ -1108,8 +1121,8 @@ export default function PackageDetailPage() {
               return locations.map(loc => (
                 <span key={loc.id}
                   className="text-xs bg-slate-50 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200">
-                  {districtName[loc.district_cosh_id] || loc.district_cosh_id}
-                  <span className="text-slate-400"> · {stateName[loc.state_cosh_id] || loc.state_cosh_id}</span>
+                  {districtName[loc.district_cosh_id] || '(unnamed district)'}
+                  <span className="text-slate-400"> · {stateName[loc.state_cosh_id] || '(unnamed state)'}</span>
                 </span>
               ))
             })()}
@@ -1704,7 +1717,7 @@ export default function PackageDetailPage() {
             <div className="flex-1 overflow-y-auto p-6 space-y-3">
               {parameters.length === 0 ? (
                 <p className="text-sm text-slate-400 italic">
-                  No parameters yet for <span className="font-mono">{pkg.crop_cosh_id}</span>.
+                  No parameters yet for {cropName || 'this crop'}.
                   Add one below (e.g. Irrigation) and give it a couple of variables
                   (e.g. Drip, Flood).
                 </p>
@@ -2332,7 +2345,7 @@ export default function PackageDetailPage() {
             </div>
             <div className="p-6 space-y-3">
               <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
-                <p><strong>Crop:</strong> {pkg.crop_cosh_id}</p>
+                <p><strong>Crop:</strong> {cropName || '—'}</p>
                 <p><strong>Type:</strong> {pkg.package_type.toLowerCase()} · {pkg.duration_days} days</p>
                 <p><strong>Timelines:</strong> {timelines.length}</p>
                 {readiness?.published_at && (

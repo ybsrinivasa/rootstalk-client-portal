@@ -117,10 +117,6 @@ function SpProblemsContent() {
         <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
           <p className="text-slate-400 text-4xl mb-3">🩺</p>
           <p className="text-slate-600 font-medium">No specific problems for {cropName} yet</p>
-          <p className="text-slate-400 text-sm mt-1">
-            V1 stopgap list: ~5 problems each for Tomato, Paddy, Onion, Chilli, Cotton. More will arrive when Cosh ships the
-            <code className="mx-1 px-1.5 py-0.5 bg-slate-100 rounded font-mono text-[11px]">specific_problem</code> Connect.
-          </p>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -145,7 +141,6 @@ function SpProblemsContent() {
                     ) : (
                       <span className="text-slate-700">{p.name_en}</span>
                     )}
-                    <p className="text-[11px] text-slate-400 mt-0.5 font-mono">{p.cosh_id}</p>
                   </td>
                   <td className="px-5 py-3.5">
                     {p.existing ? (
