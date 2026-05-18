@@ -158,10 +158,13 @@ const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', '
 function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   const isSeedClient = client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
 
-  // CA is exclusive — server-side guarantee (Batch K). When CA is
-  // among the user's roles it's the only one, and CA sees every
-  // sidebar item except SEED items at non-seed clients.
-  if (roles.includes('CA')) {
+  // CA is exclusive (Batch K) — sees everything. CONTENT_MANAGER
+  // (Batch Q, 2026-05-18) is the synthesised role for a CM who
+  // SSO'd into the CA Portal via /cm-login; they get full
+  // CA-equivalent access per user rule: "The CM will have all the
+  // privileges inside the Client — that of the CA, Subject Experts,
+  // and all other roles."
+  if (roles.includes('CA') || roles.includes('CONTENT_MANAGER')) {
     return ALL_NAV.filter(item => {
       if (item.seedOnly && !isSeedClient) return false
       return true

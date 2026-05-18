@@ -12,8 +12,16 @@ export interface CPUser {
    *  role except CA (which is mutually exclusive — enforced server-
    *  side). The sidebar shows the UNION of items across these roles.
    *  Empty when the user has no ClientUser at the bound client
-   *  (e.g. SA / CM logins). */
+   *  (e.g. SA / CM logins). When a CM SSOs in via /cm-login, the
+   *  backend synthesises 'CONTENT_MANAGER' into this list — the
+   *  sidebar treats CONTENT_MANAGER as catch-all (full CA-equivalent
+   *  visibility). */
   portal_roles?: string[]
+  /** Batch Q (2026-05-18) — true when the bound user is a CM with
+   *  ACTIVE EDIT assignment for the bound client (CM SSO via
+   *  /admin/cm/clients/{cid}/login-as). Drives the "CM badge" UI
+   *  and unlocks every feature on the client. */
+  is_cm_for_this_client?: boolean
 }
 
 /** Convenience helper — true when the user's portal_roles include the
