@@ -164,18 +164,8 @@ function ChaRecsContent() {
       await load()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-      const msg =
-        typeof detail === 'string'
-          ? detail
-          : (detail as { message?: string })?.message
-      const code = (detail as { code?: string })?.code
-      if (code === 'import_would_overwrite') {
-        setImportError(
-          `${msg} (V1 doesn't surface a 'force overwrite' button — open the existing local copy and edit it instead.)`,
-        )
-      } else {
-        setImportError(msg || 'Failed to import.')
-      }
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setImportError(msg || 'Failed to import.')
     } finally {
       setImporting(null)
     }
@@ -477,11 +467,22 @@ function ChaRecsContent() {
             <div className="p-6 border-b border-slate-100">
               <h2 className="font-bold text-slate-900">Import from Global CHA Library</h2>
               <p className="text-slate-500 text-sm mt-0.5">
-                Get a copy of an ACTIVE global PG recommendation. Each bundle
-                (area-wise / plant-wise) imports into its own local row.
+                Pick a Global PG to bring into your company. Each import creates
+                a new draft version for you to review.
               </p>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {/* Multi-version explainer — shown above the picker so the
+                  SE knows what happens. Per user 2026-05-18. */}
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-900 leading-relaxed">
+                <strong>How import works:</strong> Each import creates a new draft version.
+                Review it carefully, then publish it to make it live. Farmers
+                continue seeing the currently-published version until you publish
+                the new one. You can revert to any older version whenever you
+                wish — open it from the version history and click <em>Make editable</em>.
+                If a draft already exists from an earlier import, this new import
+                will replace it (the earlier draft moves to <em>inactive</em>).
+              </div>
               {loadingGlobals ? (
                 <p className="text-center text-slate-400 text-sm py-8">Loading global library…</p>
               ) : globals.length === 0 ? (
@@ -508,16 +509,16 @@ function ChaRecsContent() {
                           v{g.version} · {g.status.toLowerCase()}
                         </p>
                       </div>
-                      {alreadyImported ? (
-                        <span className="text-xs text-green-600 font-medium">✓ Imported</span>
-                      ) : (
-                        <button onClick={() => doImport(g.id)}
-                          disabled={importing === g.id}
-                          className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
-                          style={{ background: colour }}>
-                          {importing === g.id ? 'Importing…' : 'Import'}
-                        </button>
-                      )}
+                      {/* "✓ Imported" badge removed — re-import always
+                          creates a new draft now, so showing "already
+                          imported" is misleading. The Import button stays
+                          enabled on every row. */}
+                      <button onClick={() => doImport(g.id)}
+                        disabled={importing === g.id}
+                        className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+                        style={{ background: colour }}>
+                        {importing === g.id ? 'Importing…' : alreadyImported ? 'Import (new version)' : 'Import'}
+                      </button>
                     </div>
                   )
                 })

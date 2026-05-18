@@ -7,6 +7,10 @@ import { getClient } from '@/lib/auth'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
+import {
+  ReadOnlyBanner, VersionHistorySection,
+  type LineageRow,
+} from '@/components/advisory-authoring/LineageSection'
 import { practiceShortLabel } from '@/lib/practice-label'
 
 interface Rec {
@@ -121,6 +125,15 @@ export default function RecDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [pubError, setPubError] = useState('')
 
+  // Lineage (Batch R, 2026-05-18) — mirrors SA-PG. Each re-import or
+  // clone-to-draft creates a new row sharing
+  // (client_id, problem_group_cosh_id, area_or_plant). Single-DRAFT
+  // invariant enforced server-side.
+  const [lineage, setLineage] = useState<LineageRow[]>([])
+  const [cloning, setCloning] = useState(false)
+  const [cloneError, setCloneError] = useState('')
+  const [makingEditable, setMakingEditable] = useState<string | null>(null)
+
   const loadRec = async () => {
     if (!clientId || !recId) return
     try {
@@ -171,6 +184,15 @@ export default function RecDetailPage() {
       setReadiness(null)
     }
   }
+  const loadLineage = async () => {
+    if (!clientId || !recId) return
+    try {
+      const { data } = await api.get<LineageRow[]>(
+        `/client/${clientId}/pg-recommendations/${recId}/lineage`,
+      )
+      setLineage(data)
+    } catch { setLineage([]) }
+  }
   const loadProblemName = async () => {
     if (!clientId) return
     try {
@@ -186,6 +208,7 @@ export default function RecDetailPage() {
     loadRec()
     loadTimelines()
     loadReadiness()
+    loadLineage()
   }, [clientId, recId])
 
   useEffect(() => { loadProblemName() }, [rec, clientId])
@@ -272,6 +295,43 @@ export default function RecDetailPage() {
     await loadTimelines()
   }
 
+  async function handleCloneToDraft() {
+    setCloning(true); setCloneError('')
+    try {
+      const { data } = await api.post<Rec>(
+        `/client/${clientId}/pg-recommendations/${recId}/clone-to-draft`,
+      )
+      router.push(`/cha/recommendations/${data.id}`)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setCloneError(msg || 'Failed to start a new draft.')
+    } finally { setCloning(false) }
+  }
+
+  async function handleMakeEditable(srcId: string, srcVersion: number) {
+    const existing = lineage.find(r => r.status === 'DRAFT')
+    if (existing && existing.id !== srcId) {
+      const ok = confirm(
+        `A v${existing.version} DRAFT already exists in this lineage. ` +
+        `Making v${srcVersion} editable will replace it (the existing ` +
+        `draft becomes INACTIVE). Continue?`,
+      )
+      if (!ok) return
+    }
+    setMakingEditable(srcId); setCloneError('')
+    try {
+      const { data } = await api.post<Rec>(
+        `/client/${clientId}/pg-recommendations/${srcId}/clone-to-draft`,
+      )
+      router.push(`/cha/recommendations/${data.id}`)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setCloneError(msg || 'Failed to make this version editable.')
+    } finally { setMakingEditable(null) }
+  }
+
   async function handlePublish() {
     setPublishing(true); setPubError('')
     try {
@@ -279,6 +339,7 @@ export default function RecDetailPage() {
       setShowPublishConfirm(false)
       await loadRec()
       await loadReadiness()
+      await loadLineage()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
@@ -293,8 +354,34 @@ export default function RecDetailPage() {
     <div className="max-w-4xl mx-auto pt-20 text-center text-slate-400">Loading recommendation…</div>
   )
 
+  // Lineage helpers (Batch R, 2026-05-18) — mirror SA-PG. Existing-
+  // DRAFT detection excludes the row being viewed so the banner
+  // redirects to a sibling DRAFT (not back to itself). Next-version
+  // computes max(lineage.version) + 1 because publish bumps to
+  // max + 1; first-time, that's just 1.
+  const existingDraft = lineage.find(r => r.status === 'DRAFT' && r.id !== rec.id) || null
+  const nextVersion = rec.status === 'DRAFT'
+    ? rec.version
+    : Math.max(...lineage.map(r => r.version), rec.version) + 1
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      <ReadOnlyBanner
+        status={rec.status}
+        currentVersion={rec.version}
+        nextVersion={nextVersion}
+        existingDraft={existingDraft}
+        continueDraftHref={(draft) => `/cha/recommendations/${draft.id}`}
+        cloning={cloning}
+        cloneError={cloneError}
+        onCloneToDraft={handleCloneToDraft}
+      />
+      <VersionHistorySection
+        lineage={lineage}
+        rowDetailUrl={(row) => `/cha/recommendations/${row.id}`}
+        makingEditable={makingEditable}
+        onMakeEditable={handleMakeEditable}
+      />
       <div className="flex items-start gap-4">
         <Link href="/cha/recommendations" className="mt-1 text-slate-400 hover:text-slate-600">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
