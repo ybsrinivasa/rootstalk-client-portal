@@ -248,7 +248,17 @@ export default function UsersPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Role</label>
                 <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  {ROLES
+                    // Seed Data Manager is offered only on clients
+                    // onboarded as Seed Companies (Batch O, 2026-05-18).
+                    // Existing SDM rows on a non-seed client (shouldn't
+                    // happen post-fix) still render correctly in the
+                    // table via ROLE_COLOUR.
+                    .filter(r => {
+                      if (r.value !== 'SEED_DATA_MANAGER') return true
+                      return client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
+                    })
+                    .map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
               <div>
