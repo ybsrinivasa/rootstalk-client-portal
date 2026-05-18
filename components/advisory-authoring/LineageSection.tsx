@@ -64,28 +64,32 @@ export function ReadOnlyBanner({
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-amber-900">
           {status === 'ACTIVE'
-            ? `v${currentVersion} is the published version.`
-            : `v${currentVersion} is a previous (INACTIVE) version.`}
+            ? `v${currentVersion} is the published version — read-only.`
+            : `v${currentVersion} is a previous (INACTIVE) version — read-only.`}
         </p>
         <p className="text-xs text-amber-800 mt-0.5">
-          To make changes, start a new draft.
+          To make changes, start a new draft from this version.
           {existingDraft && (
-            <> A v{existingDraft.version} DRAFT already exists in this lineage.</>
+            <> A v{existingDraft.version} DRAFT already exists in this lineage —
+            you can continue that draft, or start a fresh draft from this
+            version (which replaces the existing draft).</>
           )}
         </p>
         {cloneError && <p className="text-xs text-red-600 mt-1">{cloneError}</p>}
       </div>
-      <div className="flex gap-2 shrink-0">
-        {existingDraft ? (
+      <div className="flex flex-col gap-2 shrink-0 items-end">
+        {/* Primary CTA: always Start-fresh-draft from THIS version. When
+            a sibling DRAFT exists, the page-side handler asks the user
+            to confirm that the existing draft will become INACTIVE. */}
+        <button onClick={onCloneToDraft} disabled={cloning}
+          className="bg-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-amber-700 disabled:opacity-50">
+          {cloning ? 'Starting…' : `Start fresh v${nextVersion} draft`}
+        </button>
+        {existingDraft && (
           <Link href={continueDraftHref(existingDraft)}
-            className="bg-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-amber-700">
-            Continue v{existingDraft.version} draft →
+            className="text-xs font-medium text-amber-800 hover:underline">
+            or continue v{existingDraft.version} draft →
           </Link>
-        ) : (
-          <button onClick={onCloneToDraft} disabled={cloning}
-            className="bg-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-amber-700 disabled:opacity-50">
-            {cloning ? 'Starting…' : `Start v${nextVersion} draft`}
-          </button>
         )}
       </div>
     </div>

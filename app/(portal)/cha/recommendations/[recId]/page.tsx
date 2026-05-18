@@ -296,6 +296,19 @@ export default function RecDetailPage() {
   }
 
   async function handleCloneToDraft() {
+    // Same confirm-on-existing-DRAFT prompt as Make-editable so the
+    // user can intentionally abandon the imported DRAFT and start
+    // fresh from the ACTIVE row. Single-DRAFT invariant means the
+    // existing draft becomes INACTIVE on clone.
+    const existing = lineage.find(r => r.status === 'DRAFT' && r.id !== rec?.id)
+    if (existing) {
+      const ok = confirm(
+        `A v${existing.version} DRAFT already exists in this lineage. ` +
+        `Starting a fresh draft from v${rec?.version} will replace it (the ` +
+        `existing draft becomes INACTIVE). Continue?`,
+      )
+      if (!ok) return
+    }
     setCloning(true); setCloneError('')
     try {
       const { data } = await api.post<Rec>(
@@ -363,6 +376,11 @@ export default function RecDetailPage() {
   const nextVersion = rec.status === 'DRAFT'
     ? rec.version
     : Math.max(...lineage.map(r => r.version), rec.version) + 1
+  // Batch S (2026-05-18) — non-DRAFT rows are read-only. ACTIVE rows
+  // are what farmers read live; editing them would leak unreviewed
+  // changes. INACTIVE rows are historical record. Gate all edit
+  // affordances on isDraft.
+  const isDraft = rec.status === 'DRAFT'
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -463,11 +481,13 @@ export default function RecDetailPage() {
           <h2 className="font-semibold text-slate-800">
             Timelines <span className="text-slate-400 font-normal text-sm">({timelines.length})</span>
           </h2>
-          <button onClick={() => setShowAddTL(true)}
-            className="text-sm font-medium px-3 py-1.5 rounded-xl border"
-            style={{ borderColor: colour, color: colour }}>
-            + Add Timeline
-          </button>
+          {isDraft && (
+            <button onClick={() => setShowAddTL(true)}
+              className="text-sm font-medium px-3 py-1.5 rounded-xl border"
+              style={{ borderColor: colour, color: colour }}>
+              + Add Timeline
+            </button>
+          )}
         </div>
 
         {timelines.length === 0 ? (
@@ -500,20 +520,24 @@ export default function RecDetailPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={e => { e.stopPropagation(); openEditTimeline(tl) }}
-                      className="text-slate-300 hover:text-blue-500 p-1.5"
-                      title="Edit timeline">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); deleteTimeline(tl) }}
-                      className="text-slate-300 hover:text-red-400 p-1.5"
-                      title="Delete timeline">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                    {isDraft && (
+                      <>
+                        <button onClick={e => { e.stopPropagation(); openEditTimeline(tl) }}
+                          className="text-slate-300 hover:text-blue-500 p-1.5"
+                          title="Edit timeline">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); deleteTimeline(tl) }}
+                          className="text-slate-300 hover:text-red-400 p-1.5"
+                          title="Delete timeline">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </>
+                    )}
                     <span className="text-slate-400 text-sm ml-1">
                       {expanded === tl.id ? '▾' : '▸'}
                     </span>
@@ -544,22 +568,26 @@ export default function RecDetailPage() {
                               <span className="text-[11px] text-slate-400">
                                 {hasElements ? `${p.elements!.length} element${p.elements!.length === 1 ? '' : 's'}` : 'no elements'}
                               </span>
-                              <button onClick={e => {
-                                e.stopPropagation()
-                                setEditingPractice({ timelineId: tl.id, practice: p })
-                                setShowAddPractice(tl.id)
-                              }}
-                                className="text-slate-300 hover:text-blue-500 p-1" title="Edit practice">
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              <button onClick={e => { e.stopPropagation(); deletePractice(tl.id, p.id) }}
-                                className="text-slate-300 hover:text-red-400 p-1" title="Delete practice">
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
+                              {isDraft && (
+                                <>
+                                  <button onClick={e => {
+                                    e.stopPropagation()
+                                    setEditingPractice({ timelineId: tl.id, practice: p })
+                                    setShowAddPractice(tl.id)
+                                  }}
+                                    className="text-slate-300 hover:text-blue-500 p-1" title="Edit practice">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                  </button>
+                                  <button onClick={e => { e.stopPropagation(); deletePractice(tl.id, p.id) }}
+                                    className="text-slate-300 hover:text-red-400 p-1" title="Delete practice">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                </>
+                              )}
                               <svg className={`w-3.5 h-3.5 text-slate-300 transition-transform ${isPExpanded ? 'rotate-180' : ''}`}
                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -583,13 +611,22 @@ export default function RecDetailPage() {
                         )
                       })
                     )}
-                    <button onClick={() => { setEditingPractice(null); setShowAddPractice(tl.id) }}
-                      className="w-full mt-2 text-sm py-2 rounded-xl border border-dashed border-slate-200 text-slate-500 hover:bg-slate-50">
-                      + Add Practice
-                    </button>
+                    {isDraft && (
+                      <button onClick={() => { setEditingPractice(null); setShowAddPractice(tl.id) }}
+                        className="w-full mt-2 text-sm py-2 rounded-xl border border-dashed border-slate-200 text-slate-500 hover:bg-slate-50">
+                        + Add Practice
+                      </button>
+                    )}
 
                     {/* Relations + CQs — shared with SA Global CCA
-                        + CA-CCA. Batch N2 (2026-05-18). */}
+                        + CA-CCA. Batch N2 (2026-05-18). Hidden on
+                        non-DRAFT rows (Batch S, 2026-05-18) — they
+                        are always-editable widgets and would let the
+                        user mutate live ACTIVE state. Use the
+                        Preview page to inspect relations/CQs on
+                        ACTIVE / INACTIVE versions. */}
+                    {isDraft && (
+                      <>
                     <RelationsSection
                       timelineId={tl.id}
                       timelineName={tl.name}
@@ -637,6 +674,8 @@ export default function RecDetailPage() {
                         parentId: recId,
                       }}
                     />
+                      </>
+                    )}
                   </div>
                 )}
               </div>
