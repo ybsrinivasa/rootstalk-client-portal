@@ -5,6 +5,8 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
+import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
+import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import { practiceShortLabel } from '@/lib/practice-label'
 
 interface Rec {
@@ -34,6 +36,7 @@ interface Practice {
   is_special_input: boolean
   is_brand_locked?: boolean
   frequency_days?: number | null
+  relation_id?: string | null
   elements?: PracticeElement[]
 }
 
@@ -106,6 +109,11 @@ export default function RecDetailPage() {
   // Practice authoring goes through <PracticeFormModal> — same
   // component the SA-portal PG editor uses. mode flips by editingPractice.
   const [showAddPractice, setShowAddPractice] = useState<string | null>(null)
+
+  // Relations mirror — populated by RelationsSection's
+  // onRelationsChange so CQsSection can resolve relation labels +
+  // gate eligibility. Same pattern as CA-CCA (Batch N1).
+  const [relationsByTimeline, setRelationsByTimeline] = useState<Record<string, unknown[]>>({})
   const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
 
   // Publish
@@ -492,6 +500,56 @@ export default function RecDetailPage() {
                       className="w-full mt-2 text-sm py-2 rounded-xl border border-dashed border-slate-200 text-slate-500 hover:bg-slate-50">
                       + Add Practice
                     </button>
+
+                    {/* Relations + CQs — shared with SA Global CCA
+                        + CA-CCA. Batch N2 (2026-05-18). */}
+                    <RelationsSection
+                      timelineId={tl.id}
+                      timelineName={tl.name}
+                      practices={(practiceMap[tl.id] || []).map(p => ({
+                        id: p.id,
+                        l0_type: p.l0_type,
+                        l1_type: p.l1_type,
+                        l2_type: p.l2_type,
+                        is_special_input: p.is_special_input,
+                        elements: p.elements?.map(e => ({
+                          element_type: e.element_type,
+                          value: e.value,
+                          display_value: e.display_value,
+                        })),
+                      }))}
+                      pipe={{
+                        pipe: 'PG_CLIENT',
+                        clientId: clientId || '',
+                        parentId: recId,
+                      }}
+                      onRelationsChange={(tid, rels) =>
+                        setRelationsByTimeline(m => ({ ...m, [tid]: rels }))
+                      }
+                    />
+                    <CQsSection
+                      timelineId={tl.id}
+                      timelineName={tl.name}
+                      practices={(practiceMap[tl.id] || []).map(p => ({
+                        id: p.id,
+                        l0_type: p.l0_type,
+                        l1_type: p.l1_type,
+                        l2_type: p.l2_type,
+                        is_special_input: p.is_special_input,
+                        relation_id: p.relation_id ?? null,
+                        elements: p.elements?.map(e => ({
+                          element_type: e.element_type,
+                          value: e.value,
+                          display_value: e.display_value,
+                        })),
+                      }))}
+                      relations={(relationsByTimeline[tl.id] || []) as never}
+                      pipe={{
+                        pipe: 'PG_CLIENT',
+                        clientId: clientId || '',
+                        parentId: recId,
+                      }}
+                    />
                   </div>
                 )}
               </div>
