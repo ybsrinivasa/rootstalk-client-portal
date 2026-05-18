@@ -12,8 +12,22 @@ interface SP {
   specific_problem_cosh_id: string
   client_id: string
   crop_cosh_id: string | null
+  // Resolved by backend from Cosh's crop_area_plant_wise Connect.
+  // Drives the Import-from-PG filter — only same-measure CA-PGs are
+  // offered as import sources.
+  crop_measure: 'AREA_WISE' | 'PLANT_WISE' | null
   status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
   version: number
+}
+
+interface ImportablePG {
+  id: string
+  problem_group_cosh_id: string
+  problem_group_name_en: string
+  area_or_plant: 'AREA_WISE' | 'PLANT_WISE' | null
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
+  version: number
+  timeline_count: number
 }
 
 interface PracticeElement {
@@ -115,6 +129,18 @@ export default function SpDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [pubError, setPubError] = useState('')
 
+  // Import-from-PG (Task G, 2026-05-18). Picker lists this client's
+  // CA-PGs whose area_or_plant matches the SP's crop_measure. Backend
+  // POST /import-from-pg/{pg_id} either seeds the SP with content or
+  // refuses with 409 import_would_overwrite when the SP already has
+  // timelines — surfaced as a force-overwrite confirm step.
+  const [showImport, setShowImport] = useState(false)
+  const [importablePGs, setImportablePGs] = useState<ImportablePG[]>([])
+  const [loadingImportablePGs, setLoadingImportablePGs] = useState(false)
+  const [importing, setImporting] = useState<string | null>(null)
+  const [importError, setImportError] = useState('')
+  const [overwriteConfirmPg, setOverwriteConfirmPg] = useState<ImportablePG | null>(null)
+
   const loadSp = async () => {
     if (!clientId || !recId) return
     try {
@@ -177,6 +203,60 @@ export default function SpDetailPage() {
         if (cropMatch) setCropName(cropMatch.name_en)
       }
     } catch { /* non-fatal */ }
+  }
+
+  async function openImport() {
+    if (!sp || !clientId) return
+    setShowImport(true)
+    setImportError('')
+    setOverwriteConfirmPg(null)
+    setLoadingImportablePGs(true)
+    try {
+      const { data } = await api.get<ImportablePG[]>(
+        `/client/${clientId}/cha/recommendations`,
+      )
+      // Filter to same crop measure as this SP. If the SP's crop
+      // hasn't been classified by Cosh yet (crop_measure null), show
+      // nothing — the empty state surfaces a clearer message.
+      const filtered = sp.crop_measure
+        ? data.filter(pg => pg.area_or_plant === sp.crop_measure)
+        : []
+      setImportablePGs(filtered)
+    } catch {
+      setImportablePGs([])
+    } finally {
+      setLoadingImportablePGs(false)
+    }
+  }
+
+  async function doImport(pg: ImportablePG, force: boolean) {
+    if (!clientId || !recId) return
+    setImporting(pg.id); setImportError('')
+    try {
+      await api.post(
+        `/client/${clientId}/sp-recommendations/${recId}/import-from-pg/${pg.id}`
+          + (force ? '?force=true' : ''),
+      )
+      setShowImport(false)
+      setOverwriteConfirmPg(null)
+      await loadTimelines()
+      await loadReadiness()
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const code = typeof detail === 'object' ? (detail as { code?: string })?.code : undefined
+      const msg = typeof detail === 'string'
+        ? detail
+        : (detail as { message?: string })?.message || 'Failed to import.'
+      if (code === 'import_would_overwrite') {
+        // Drop into the confirm step — same modal, different body.
+        setOverwriteConfirmPg(pg)
+        setImportError('')
+      } else {
+        setImportError(msg)
+      }
+    } finally {
+      setImporting(null)
+    }
   }
 
   useEffect(() => {
@@ -313,6 +393,13 @@ export default function SpDetailPage() {
             style={{ borderColor: colour, color: colour }}>
             👁 Preview
           </Link>
+          {sp.status === 'DRAFT' && (
+            <button onClick={openImport}
+              className="text-sm font-medium px-4 py-2 rounded-xl border"
+              style={{ borderColor: colour, color: colour }}>
+              ↓ Import from PG
+            </button>
+          )}
           {sp.status === 'DRAFT' && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}
@@ -496,6 +583,99 @@ export default function SpDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Import-from-PG modal (Task G, 2026-05-18). Two states:
+            (1) Picker — pick a CA-PG of matching measure to seed this SP.
+            (2) Force-overwrite confirm — when SP already has content
+                and the user picked a PG (server returned 409). */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">
+                {overwriteConfirmPg ? 'Overwrite existing content?' : 'Import from a CA-PG'}
+              </h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                {overwriteConfirmPg
+                  ? `This SP already has timelines. Importing from ${overwriteConfirmPg.problem_group_name_en} will replace them with a fresh copy.`
+                  : sp?.crop_measure
+                    ? `Seed this SP with a copy of one of your ${sp.crop_measure === 'AREA_WISE' ? 'area-wise' : 'plant-wise'} CA-PGs. You can edit freely after.`
+                    : 'Pick a CA-PG to seed this SP.'}
+              </p>
+            </div>
+
+            {overwriteConfirmPg ? (
+              <div className="flex-1 overflow-y-auto p-6 space-y-3">
+                <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-900">
+                  <p className="font-medium mb-1">⚠ This action can't be undone in V1.</p>
+                  <p className="text-xs">
+                    Existing timelines + practices will be deleted and replaced with the {overwriteConfirmPg.problem_group_name_en} bundle.
+                  </p>
+                </div>
+                {importError && <p className="text-sm text-red-600">{importError}</p>}
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {loadingImportablePGs ? (
+                  <p className="text-center text-slate-400 text-sm py-8">Loading PGs…</p>
+                ) : !sp?.crop_measure ? (
+                  <p className="text-center text-slate-400 text-sm py-8 px-4">
+                    This crop hasn&apos;t been classified as area-wise or plant-wise by Cosh yet — without that, we can&apos;t filter PGs correctly. Ask your RootsTalk admin to check Cosh&apos;s <code className="font-mono">crop_area_plant_wise</code> Connect for {cropName || sp?.crop_cosh_id}.
+                  </p>
+                ) : importablePGs.length === 0 ? (
+                  <p className="text-center text-slate-400 text-sm py-8 px-4">
+                    No {sp.crop_measure === 'AREA_WISE' ? 'area-wise' : 'plant-wise'} CA-PGs to import from yet. Create one under <Link href="/cha/problems" className="text-green-700 hover:underline">Problem Groups</Link> first.
+                  </p>
+                ) : (
+                  importablePGs.map(pg => (
+                    <div key={pg.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm text-slate-800">{pg.problem_group_name_en}</p>
+                        <p className="text-xs text-slate-400">
+                          {pg.area_or_plant === 'AREA_WISE' ? 'Area-wise' : 'Plant-wise'} · v{pg.version} · {pg.status.toLowerCase()} · {pg.timeline_count} timeline{pg.timeline_count === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <button onClick={() => doImport(pg, false)}
+                        disabled={importing === pg.id}
+                        className="text-xs font-semibold text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+                        style={{ background: colour }}>
+                        {importing === pg.id ? 'Importing…' : 'Import'}
+                      </button>
+                    </div>
+                  ))
+                )}
+                {importError && <p className="text-sm text-red-600 px-2">{importError}</p>}
+              </div>
+            )}
+
+            <div className="p-4 border-t border-slate-100 flex gap-3">
+              {overwriteConfirmPg ? (
+                <>
+                  <button type="button"
+                    onClick={() => { setOverwriteConfirmPg(null); setImportError('') }}
+                    disabled={importing !== null}
+                    className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50 disabled:opacity-50">
+                    Back
+                  </button>
+                  <button type="button"
+                    onClick={() => doImport(overwriteConfirmPg, true)}
+                    disabled={importing !== null}
+                    className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #b45309cc, #b45309)' }}>
+                    {importing ? 'Overwriting…' : 'Yes, overwrite'}
+                  </button>
+                </>
+              ) : (
+                <button type="button"
+                  onClick={() => { setShowImport(false); setImportError('') }}
+                  className="w-full border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                  Close
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Timeline modal */}
       {showAddTL && (
