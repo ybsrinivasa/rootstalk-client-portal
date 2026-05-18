@@ -81,8 +81,29 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
     e.preventDefault()
     setError(''); setLoading(true)
     try {
-      await login(email, password, shortName.toLowerCase())
-      if (branding) setClient(branding)
+      const me = await login(email, password, shortName.toLowerCase())
+      // Tenant isolation (2026-05-18): the JWT-bound client_id from
+      // /auth/me is the authoritative tenant. If branding was pre-
+      // fetched, it just provides the visual fields (colours, logo,
+      // tagline); the id is overridden from the token claim so a
+      // stale or wrong-tenant branding object can't leak into
+      // rt_cp_client. Without branding, build a minimal CPClient
+      // from the /me claim alone — the next page-load can re-fetch
+      // branding by short_name if needed.
+      if (me.client_id) {
+        const authoritative: CPClient = branding
+          ? { ...branding, id: me.client_id, short_name: me.client_short_name || branding.short_name }
+          : {
+              id: me.client_id,
+              short_name: me.client_short_name || shortName.toLowerCase(),
+              display_name: me.client_short_name || shortName.toLowerCase(),
+              primary_colour: '#1A5C2A',
+              logo_url: null,
+              tagline: null,
+              org_type_cosh_ids: [],
+            }
+        setClient(authoritative)
+      }
       router.replace('/dashboard')
     } catch (err: unknown) {
       setError(extractErrorMessage(err, 'Invalid email or password.'))
@@ -105,13 +126,32 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
     e.preventDefault()
     setError(''); setLoading(true)
     try {
+      // Tenant isolation (2026-05-18): clear stale state up-front,
+      // same as the password login path.
+      localStorage.removeItem('rt_cp_token')
+      localStorage.removeItem('rt_cp_user')
+      localStorage.removeItem('rt_cp_client')
       const { data } = await api.post<{ access_token: string }>('/auth/admin/verify-email-otp', {
         email, otp_code: otpCode, client_short_name: shortName.toLowerCase(),
       })
       localStorage.setItem('rt_cp_token', data.access_token)
-      const me = await api.get('/auth/me')
-      localStorage.setItem('rt_cp_user', JSON.stringify((me as { data: unknown }).data))
-      if (branding) setClient(branding)
+      const meRes = await api.get<{ client_id?: string | null; client_short_name?: string | null }>('/auth/me')
+      const me = meRes.data
+      localStorage.setItem('rt_cp_user', JSON.stringify(me))
+      if (me.client_id) {
+        const authoritative: CPClient = branding
+          ? { ...branding, id: me.client_id, short_name: me.client_short_name || branding.short_name }
+          : {
+              id: me.client_id,
+              short_name: me.client_short_name || shortName.toLowerCase(),
+              display_name: me.client_short_name || shortName.toLowerCase(),
+              primary_colour: '#1A5C2A',
+              logo_url: null,
+              tagline: null,
+              org_type_cosh_ids: [],
+            }
+        setClient(authoritative)
+      }
       router.replace('/dashboard')
     } catch (err: unknown) {
       setError(extractErrorMessage(err, 'Invalid or expired code'))

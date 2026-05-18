@@ -17,13 +17,35 @@ export interface CPClient {
   payment_model?: 'COMPANY_PAYS' | 'FARMER_PAYS'
 }
 
-export async function login(email: string, password: string, clientShortName?: string): Promise<void> {
+export interface CPUserWithClient extends CPUser {
+  /** Tenant binding (2026-05-18). Set by backend `/auth/me` from
+   *  the JWT's client_id claim. Authoritative source for the
+   *  frontend's setClient call — pre-login branding fetches drift,
+   *  the token can't. */
+  client_id?: string | null
+  client_short_name?: string | null
+}
+
+export async function login(email: string, password: string, clientShortName?: string): Promise<CPUserWithClient> {
+  // Tenant isolation (2026-05-18): clear ANY stale state from a prior
+  // session before authenticating. Without this, a partial UI failure
+  // path (e.g. pre-login branding fetch returns null) leaves rt_cp_client
+  // pointing at the previous tenant — and getClient() returns it, so the
+  // dashboard hits /client/{old_id}/packages and surfaces the prior
+  // tenant's data. Belt-and-suspenders with backend JWT.client_id claim:
+  // even if this clearing is skipped, the backend's cross_client_forbidden
+  // guard in get_current_user refuses the cross-tenant call (403).
+  localStorage.removeItem('rt_cp_token')
+  localStorage.removeItem('rt_cp_user')
+  localStorage.removeItem('rt_cp_client')
+
   const { data } = await api.post('/auth/admin/login', {
     email, password, ...(clientShortName ? { client_short_name: clientShortName } : {}),
   })
   localStorage.setItem('rt_cp_token', data.access_token)
-  const me = await api.get<CPUser>('/auth/me')
+  const me = await api.get<CPUserWithClient>('/auth/me')
   localStorage.setItem('rt_cp_user', JSON.stringify(me.data))
+  return me.data
 }
 
 export function logout(): void {
