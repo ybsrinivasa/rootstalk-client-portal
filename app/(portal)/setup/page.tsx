@@ -16,6 +16,22 @@ interface AvailableCrop {
   cosh_id: string; name_en: string; status: string
 }
 
+// Batch FF/GG (2026-05-19) — backend returns this payload as a 422
+// when narrowing the footprint would affect existing packages. The
+// CA must confirm; we resend the same PUT with ?force=true.
+interface CascadeImpactPackage {
+  package_id: string
+  package_name: string
+  status_before: string
+  removed_locations: { state_cosh_id: string; district_cosh_id: string }[]
+  remaining_locations: number
+}
+interface CascadeImpact {
+  removed_pairs: { state_cosh_id: string; district_cosh_id: string }[]
+  will_shrink: CascadeImpactPackage[]
+  will_inactivate: CascadeImpactPackage[]
+}
+
 export default function SetupPage() {
   const client = getClient()
   const clientId = client?.id
@@ -39,6 +55,13 @@ export default function SetupPage() {
 
   const [cropForm, setCropForm] = useState({ crop_cosh_id: '' })
 
+  // Footprint cascade confirmation (Batch GG). When the PUT 422s
+  // with `footprint_cascade_confirmation_required` we hold the
+  // impact payload + the pairs we tried to save so the dialog can
+  // render the summary and re-submit with ?force=true.
+  const [pendingImpact, setPendingImpact] = useState<CascadeImpact | null>(null)
+  const [pendingPairs, setPendingPairs] = useState<{ state_cosh_id: string; district_cosh_id: string }[]>([])
+
   useEffect(() => {
     if (!clientId) return
     Promise.all([
@@ -58,16 +81,54 @@ export default function SetupPage() {
     }).finally(() => setLoading(false))
   }, [clientId])
 
-  async function saveLocations() {
+  async function saveLocations(force = false) {
     if (!clientId) return
     setSaving(true); setError(''); setSavedHint('')
+    // First submission reads the current picker state; the
+    // confirmation retry reuses the snapshot stored alongside the
+    // impact so a Confirm always matches the impact the user saw.
+    const pairs = force && pendingPairs.length > 0
+      ? pendingPairs
+      : Array.from(selectedKeys).map(k => unpairKey(k))
     try {
-      const pairs = Array.from(selectedKeys).map(k => unpairKey(k))
-      await api.put(`/client/${clientId}/locations`, pairs)
+      await api.put(
+        `/client/${clientId}/locations${force ? '?force=true' : ''}`,
+        pairs,
+      )
       setSavedHint(`Saved ${pairs.length} district${pairs.length === 1 ? '' : 's'}.`)
+      setPendingImpact(null)
+      setPendingPairs([])
     } catch (err: unknown) {
-      setError(extractErrorMessage(err, 'Failed to save locations.'))
+      const detail = (err as { response?: { data?: { detail?: unknown } } })
+        ?.response?.data?.detail
+      const code = (detail as { code?: string })?.code
+      const impact = (detail as { impact?: CascadeImpact })?.impact
+      if (code === 'footprint_cascade_confirmation_required' && impact) {
+        // Surface the cascade dialog. Keep the pairs so Confirm
+        // can re-submit them unchanged with force=true even if the
+        // SE touches the picker while the dialog is open.
+        setPendingImpact(impact)
+        setPendingPairs(pairs)
+      } else {
+        setError(extractErrorMessage(err, 'Failed to save locations.'))
+      }
     } finally { setSaving(false) }
+  }
+
+  function cancelCascade() {
+    setPendingImpact(null)
+    setPendingPairs([])
+  }
+
+  // Resolve state/district cosh_ids to names from the loaded universe
+  // so the dialog renders "Bagalkot · Karnataka" instead of UUIDs.
+  // Falls back to "(unnamed …)" if the universe hasn't loaded the pair.
+  function resolveLocationName(state_cosh_id: string, district_cosh_id: string): string {
+    const state = universe.states.find(s => s.cosh_id === state_cosh_id)
+    const stateName = state?.name || '(unnamed state)'
+    const districtName = state?.districts.find(d => d.cosh_id === district_cosh_id)?.name
+      || '(unnamed district)'
+    return `${districtName} · ${stateName}`
   }
 
   async function addCrop(e: FormEvent) {
@@ -145,7 +206,7 @@ export default function SetupPage() {
                   Districts {client?.display_name || 'this company'} operates in. Packages can only target districts you&apos;ve enabled here.
                 </p>
               </div>
-              <button onClick={saveLocations} disabled={saving}
+              <button onClick={() => saveLocations(false)} disabled={saving}
                 className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
                 style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                 {saving ? 'Saving…' : '✓ Save Locations'}
@@ -161,7 +222,7 @@ export default function SetupPage() {
             {savedHint && <p className="text-sm text-green-700 mt-3">{savedHint}</p>}
           </div>
         </div>
-      ) : (
+      ) : tab === 'crops' ? (
         <div className="space-y-4">
           {/* Add Crop Form */}
           <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
@@ -233,6 +294,86 @@ export default function SetupPage() {
               </table>
             </div>
           )}
+        </div>
+      ) : null}
+
+      {/* Footprint cascade confirmation dialog (Batch GG). Mounted at
+          page root so it overlays both tabs. Triggered by the
+          backend's 422 footprint_cascade_confirmation_required. */}
+      {pendingImpact && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto shadow-xl">
+            <div className="p-5 border-b border-slate-100">
+              <h2 className="text-lg font-semibold text-slate-900">Confirm footprint change</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                You&apos;re removing {pendingImpact.removed_pairs.length} district{pendingImpact.removed_pairs.length === 1 ? '' : 's'} from the company footprint.
+                Existing packages that reference {pendingImpact.removed_pairs.length === 1 ? 'that district' : 'those districts'} will be updated.
+              </p>
+            </div>
+            <div className="p-5 space-y-5">
+              {pendingImpact.will_shrink.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-amber-700 mb-2">
+                    {pendingImpact.will_shrink.length} package{pendingImpact.will_shrink.length === 1 ? '' : 's'} will shrink
+                  </h3>
+                  <ul className="space-y-1.5 text-sm">
+                    {pendingImpact.will_shrink.map(p => (
+                      <li key={p.package_id} className="flex items-start gap-2">
+                        <span className="text-amber-500 mt-0.5">•</span>
+                        <span>
+                          <span className="font-medium text-slate-800">{p.package_name}</span>
+                          <span className="text-slate-500"> — loses {p.removed_locations.length} district{p.removed_locations.length === 1 ? '' : 's'}; {p.remaining_locations} remaining</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {pendingImpact.will_inactivate.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-red-700 mb-2">
+                    {pendingImpact.will_inactivate.length} package{pendingImpact.will_inactivate.length === 1 ? '' : 's'} will be deactivated
+                  </h3>
+                  <p className="text-xs text-slate-500 mb-2">
+                    These packages lose every district they were assigned to. They become INACTIVE until a Subject Expert adds new districts and republishes.
+                  </p>
+                  <ul className="space-y-1.5 text-sm">
+                    {pendingImpact.will_inactivate.map(p => (
+                      <li key={p.package_id} className="flex items-start gap-2">
+                        <span className="text-red-500 mt-0.5">•</span>
+                        <span>
+                          <span className="font-medium text-slate-800">{p.package_name}</span>
+                          <span className="text-slate-500"> — loses all {p.removed_locations.length} district{p.removed_locations.length === 1 ? '' : 's'} → INACTIVE</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <details className="text-xs text-slate-500">
+                <summary className="cursor-pointer hover:text-slate-700">
+                  Districts being removed ({pendingImpact.removed_pairs.length})
+                </summary>
+                <ul className="mt-2 space-y-0.5 pl-4">
+                  {pendingImpact.removed_pairs.map((p, i) => (
+                    <li key={i}>{resolveLocationName(p.state_cosh_id, p.district_cosh_id)}</li>
+                  ))}
+                </ul>
+              </details>
+            </div>
+            <div className="p-5 border-t border-slate-100 flex justify-end gap-3">
+              <button onClick={cancelCascade} disabled={saving}
+                className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                Cancel
+              </button>
+              <button onClick={() => saveLocations(true)} disabled={saving}
+                className="text-white text-sm font-semibold px-4 py-2 rounded-xl disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                {saving ? 'Applying…' : 'Confirm — apply changes'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
