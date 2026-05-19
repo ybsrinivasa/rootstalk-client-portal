@@ -374,8 +374,14 @@ function SeedVarietiesContent() {
   }
 
   async function deactivate(id: string) {
-    if (!clientId || !confirm('Deactivate this variety?')) return
+    if (!clientId || !confirm('Deactivate this variety? It will stay visible in the list with an INACTIVE badge — you can reactivate it any time.')) return
     await api.delete(`/client/${clientId}/varieties/${id}`)
+    load()
+  }
+
+  async function reactivate(id: string) {
+    if (!clientId) return
+    await api.put(`/client/${clientId}/varieties/${id}/reactivate`, {})
     load()
   }
 
@@ -458,11 +464,16 @@ function SeedVarietiesContent() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {varieties.map(v => (
-            <div key={v.id} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+          {varieties.map(v => {
+            const isInactive = v.status === 'INACTIVE'
+            return (
+            <div key={v.id}
+              className={`bg-white rounded-xl border shadow-sm overflow-hidden ${
+                isInactive ? 'border-slate-200 opacity-60' : 'border-slate-100'
+              }`}>
               {v.photos.length > 0 ? (
                 <img src={v.photos[0]} alt={v.name}
-                  className="w-full h-36 object-cover" />
+                  className={`w-full h-36 object-cover ${isInactive ? 'grayscale' : ''}`} />
               ) : (
                 <div className="w-full h-24 bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center">
                   <span className="text-4xl">🌾</span>
@@ -533,14 +544,22 @@ function SeedVarietiesContent() {
                     className="flex-1 text-xs font-medium text-slate-600 bg-slate-50 rounded-lg py-2 hover:bg-slate-100">
                     Edit
                   </button>
-                  <button onClick={() => deactivate(v.id)}
-                    className="flex-1 text-xs font-medium text-red-500 bg-red-50 rounded-lg py-2 hover:bg-red-100">
-                    Deactivate
-                  </button>
+                  {isInactive ? (
+                    <button onClick={() => reactivate(v.id)}
+                      className="flex-1 text-xs font-medium text-green-600 bg-green-50 rounded-lg py-2 hover:bg-green-100">
+                      Reactivate
+                    </button>
+                  ) : (
+                    <button onClick={() => deactivate(v.id)}
+                      className="flex-1 text-xs font-medium text-red-500 bg-red-50 rounded-lg py-2 hover:bg-red-100">
+                      Deactivate
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -763,50 +782,78 @@ function SeedVarietiesContent() {
                     </p>
                   ) : (
                     <>
-                      {/* District filter chips. Built from the union
-                          of all districts across packages. */}
+                      {/* District filter chips grouped by state.
+                          Batch Z (2026-05-19): without grouping, 100+
+                          districts across many states became visually
+                          overwhelming. Each state gets its own row of
+                          chips with the state name as a left-side
+                          label. Sticky rule from Batch Y still holds —
+                          assigned-but-outside-filter cards stay
+                          visible with a tag. */}
                       {(() => {
-                        const allDistricts = new Map<string, string>()
+                        // Walk packages once, group districts by state.
+                        const byState = new Map<string, {
+                          name: string
+                          districts: Map<string, string>
+                        }>()
                         for (const p of assignablePkgs) {
                           for (const l of p.locations) {
-                            if (l.district_cosh_id && l.district_name_en) {
-                              allDistricts.set(l.district_cosh_id, l.district_name_en)
-                            }
+                            if (!l.district_cosh_id || !l.district_name_en) continue
+                            const sid = l.state_cosh_id || '__nostate__'
+                            const sname = l.state_name_en || '(no state)'
+                            const slot = byState.get(sid) || { name: sname, districts: new Map() }
+                            slot.districts.set(l.district_cosh_id, l.district_name_en)
+                            byState.set(sid, slot)
                           }
                         }
-                        const districts = Array.from(allDistricts.entries())
-                          .sort((a, b) => a[1].localeCompare(b[1]))
-                        if (districts.length === 0) return null
+                        if (byState.size === 0) return null
+                        const states = Array.from(byState.entries())
+                          .sort((a, b) => a[1].name.localeCompare(b[1].name))
                         return (
                           <div className="mb-3">
-                            <p className="text-[11px] text-slate-500 mb-1">
-                              Filter by district where you sell:
-                            </p>
-                            <div className="flex flex-wrap gap-1">
-                              {districts.map(([id, name]) => {
-                                const active = districtFilter.has(id)
-                                return (
-                                  <button key={id}
-                                    onClick={() => setDistrictFilter(s => {
-                                      const n = new Set(s)
-                                      if (active) n.delete(id); else n.add(id)
-                                      return n
-                                    })}
-                                    className={`text-xs px-2 py-1 rounded-full border ${
-                                      active
-                                        ? 'bg-green-100 border-green-300 text-green-700'
-                                        : 'bg-white border-slate-200 text-slate-500 hover:border-green-300'
-                                    }`}>
-                                    {name}
-                                  </button>
-                                )
-                              })}
+                            <div className="flex items-baseline justify-between mb-1">
+                              <p className="text-[11px] text-slate-500">
+                                Filter by district where you sell:
+                              </p>
                               {districtFilter.size > 0 && (
                                 <button onClick={() => setDistrictFilter(new Set())}
-                                  className="text-xs px-2 py-1 text-slate-400 hover:text-slate-600 underline">
-                                  Clear filter
+                                  className="text-xs text-slate-400 hover:text-slate-600 underline">
+                                  Clear filter ({districtFilter.size})
                                 </button>
                               )}
+                            </div>
+                            <div className="space-y-1.5 border border-slate-100 rounded-lg p-2 bg-slate-50/60 max-h-48 overflow-y-auto">
+                              {states.map(([sid, s]) => {
+                                const districts = Array.from(s.districts.entries())
+                                  .sort((a, b) => a[1].localeCompare(b[1]))
+                                return (
+                                  <div key={sid} className="flex items-start gap-2">
+                                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide min-w-[6rem] pt-1 shrink-0">
+                                      {s.name}
+                                    </span>
+                                    <div className="flex flex-wrap gap-1 flex-1">
+                                      {districts.map(([id, name]) => {
+                                        const active = districtFilter.has(id)
+                                        return (
+                                          <button key={id}
+                                            onClick={() => setDistrictFilter(set => {
+                                              const n = new Set(set)
+                                              if (active) n.delete(id); else n.add(id)
+                                              return n
+                                            })}
+                                            className={`text-xs px-2 py-0.5 rounded-full border ${
+                                              active
+                                                ? 'bg-green-100 border-green-300 text-green-700'
+                                                : 'bg-white border-slate-200 text-slate-500 hover:border-green-300'
+                                            }`}>
+                                            {name}
+                                          </button>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )
+                              })}
                             </div>
                           </div>
                         )
@@ -934,13 +981,23 @@ function SeedVarietiesContent() {
                     onChange={handleImageUpload}
                     className="hidden"
                     id="photo-upload"
+                    disabled={form.photos.length >= 4}
                   />
-                  <label
-                    htmlFor="photo-upload"
-                    className={`inline-flex items-center gap-2 text-xs font-medium text-slate-600 border border-dashed border-slate-300 rounded-lg px-4 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
-                    {uploading ? 'Uploading…' : '+ Upload Photo'}
-                  </label>
-                  <p className="text-xs text-slate-400 mt-1">First photo will appear as thumbnail in the variety list.</p>
+                  {form.photos.length < 4 ? (
+                    <label
+                      htmlFor="photo-upload"
+                      className={`inline-flex items-center gap-2 text-xs font-medium text-slate-600 border border-dashed border-slate-300 rounded-lg px-4 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                      {uploading ? 'Uploading…' : '+ Upload Photo'}
+                    </label>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-400 border border-dashed border-slate-200 rounded-lg px-4 py-2.5 cursor-not-allowed">
+                      Maximum 4 photos reached
+                    </span>
+                  )}
+                  <p className="text-xs text-slate-400 mt-1">
+                    First photo will appear as thumbnail in the variety
+                    list. Up to 4 photos per variety ({form.photos.length} of 4 used).
+                  </p>
                 </div>
 
                 {saveError && (
