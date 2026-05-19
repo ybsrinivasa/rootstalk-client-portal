@@ -68,6 +68,28 @@ interface Variety {
 
 interface Package { id: string; name: string; crop_cosh_id?: string }
 
+// Batch Y (2026-05-19) — "Sold via Packages" picker types.
+interface PkgLocation {
+  state_cosh_id: string | null
+  state_name_en: string | null
+  district_cosh_id: string | null
+  district_name_en: string | null
+}
+interface PkgParameter {
+  parameter_id: string
+  parameter_name_en: string
+  variables: { variable_id: string; variable_name_en: string }[]
+}
+interface AssignablePackage {
+  id: string
+  name: string
+  status: string
+  package_type: string
+  duration_days: number
+  locations: PkgLocation[]
+  parameters: PkgParameter[]
+}
+
 interface ClientCrop {
   crop_cosh_id: string
   crop_name_en?: string | null
@@ -104,18 +126,31 @@ function SeedVarietiesContent() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   // DUS taxonomy tree for the current crop — fetched once per crop.
   const [dusOptions, setDusOptions] = useState<DusOptionPart[]>([])
+  // Batch Y (2026-05-19) — packages assignable to varieties of this
+  // crop, with location + P-V detail inline so the picker can render
+  // cards + district filter without extra fetches.
+  const [assignablePkgs, setAssignablePkgs] = useState<AssignablePackage[]>([])
+  // Set of package_id selected for this variety in the form.
+  const [pkgAssignments, setPkgAssignments] = useState<Set<string>>(new Set())
+  // Set of district_cosh_id chosen as filters.
+  const [districtFilter, setDistrictFilter] = useState<Set<string>>(new Set())
+  // Per-package "show details" disclosure state.
+  const [expandedPkg, setExpandedPkg] = useState<string | null>(null)
 
   const load = async () => {
     if (!clientId || !cropCoshId) return
-    const [vrRes, pkgRes, cropsRes, dusRes] = await Promise.all([
+    const [vrRes, pkgRes, cropsRes, dusRes, apRes] = await Promise.all([
       api.get<Variety[]>(`/client/${clientId}/varieties?crop_cosh_id=${encodeURIComponent(cropCoshId)}`),
       api.get<Package[]>(`/client/${clientId}/packages`).catch(() => ({ data: [] as Package[] })),
       api.get<ClientCrop[]>(`/client/${clientId}/crops`).catch(() => ({ data: [] as ClientCrop[] })),
       api.get<DusOptionPart[]>(`/client/${clientId}/seed/dus-options?crop_cosh_id=${encodeURIComponent(cropCoshId)}`)
         .catch(() => ({ data: [] as DusOptionPart[] })),
+      api.get<AssignablePackage[]>(`/client/${clientId}/seed/assignable-packages?crop_cosh_id=${encodeURIComponent(cropCoshId)}`)
+        .catch(() => ({ data: [] as AssignablePackage[] })),
     ])
     setVarieties(vrRes.data)
     setPackages(pkgRes.data.filter(p => p.crop_cosh_id === cropCoshId))
+    setAssignablePkgs(apRes.data)
     const matched = cropsRes.data.find(c => c.crop_cosh_id === cropCoshId)
     setCropName(matched?.crop_name_en || '')
     setDusOptions(dusRes.data)
@@ -279,14 +314,44 @@ function SeedVarietiesContent() {
           || ((d.part?.trim() && d.character?.trim())),
         ),
       }
+      let varietyId: string
       if (selected) {
         await api.put(`/client/${clientId}/varieties/${selected.id}`, payload)
+        varietyId = selected.id
       } else {
-        await api.post(`/client/${clientId}/varieties`, payload)
+        const { data } = await api.post<{ id: string }>(
+          `/client/${clientId}/varieties`, payload,
+        )
+        varietyId = data.id
+      }
+      // Batch Y (2026-05-19) — diff the package picker selection
+      // against existing pop_assignments and POST / DELETE deltas.
+      // New variety: previousAssigned is empty so every checked
+      // package gets a POST.
+      const previousAssigned = new Set(
+        (selected?.pop_assignments || [])
+          .filter(a => a.status === 'ACTIVE')
+          .map(a => a.package_id),
+      )
+      const toAdd = [...pkgAssignments].filter(id => !previousAssigned.has(id))
+      const toRemove = [...previousAssigned].filter(id => !pkgAssignments.has(id))
+      for (const pid of toAdd) {
+        await api.post(
+          `/client/${clientId}/varieties/${varietyId}/pop-assignments`,
+          { package_id: pid },
+        )
+      }
+      for (const pid of toRemove) {
+        await api.delete(
+          `/client/${clientId}/varieties/${varietyId}/pop-assignments/${pid}`,
+        )
       }
       setShowCreate(false)
       setSelected(null)
       setForm(emptyForm(cropCoshId))
+      setPkgAssignments(new Set())
+      setDistrictFilter(new Set())
+      setExpandedPkg(null)
       load()
     } catch (e: unknown) {
       // Batch W-2 (2026-05-19) — surface backend errors. Common
@@ -335,6 +400,15 @@ function SeedVarietiesContent() {
       photos: v.photos,
       dus_characters: v.dus_characters || [],
     })
+    // Batch Y (2026-05-19) — pre-check the packages this variety is
+    // already assigned to so the picker shows current state.
+    setPkgAssignments(new Set(
+      (v.pop_assignments || [])
+        .filter(a => a.status === 'ACTIVE')
+        .map(a => a.package_id),
+    ))
+    setDistrictFilter(new Set())
+    setExpandedPkg(null)
     setSaveError('')
     setShowCreate(true)
   }
@@ -359,7 +433,12 @@ function SeedVarietiesContent() {
             </h1>
             <p className="text-slate-500 text-sm mt-0.5">Seed varieties available to farmers for this crop</p>
           </div>
-          <button onClick={() => { setShowCreate(true); setSelected(null); setForm(emptyForm(cropCoshId)); setSaveError('') }}
+          <button onClick={() => {
+              setShowCreate(true); setSelected(null);
+              setForm(emptyForm(cropCoshId));
+              setPkgAssignments(new Set()); setDistrictFilter(new Set());
+              setExpandedPkg(null); setSaveError('')
+            }}
             className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
             style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
             + Add Variety
@@ -417,26 +496,37 @@ function SeedVarietiesContent() {
                   <p className="text-xs text-blue-500 mt-1.5">{v.dus_characters.length} DUS character{v.dus_characters.length !== 1 ? 's' : ''}</p>
                 )}
 
-                {/* PoP assignments — same-crop packages only. */}
-                {packages.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-50">
-                    <p className="text-xs text-slate-400 mb-1.5">Assigned to PoPs:</p>
-                    <div className="flex flex-wrap gap-1">
-                      {packages.map(pkg => {
-                        const assigned = v.pop_assignments.find(a => a.package_id === pkg.id && a.status === 'ACTIVE')
-                        return (
-                          <button key={pkg.id}
-                            onClick={() => togglePop(v, pkg)}
-                            className={`text-xs px-2 py-1 rounded-md border transition-colors ${
-                              assigned ? 'bg-green-100 border-green-200 text-green-700' : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-green-300'
-                            }`}>
-                            {assigned ? '✓ ' : ''}{pkg.name}
-                          </button>
-                        )
-                      })}
+                {/* Assigned packages — read-only summary on the
+                    card. Batch Y (2026-05-19): real editing happens
+                    in the modal's "Sold via Packages" picker. */}
+                {(() => {
+                  const assignedNames = (v.pop_assignments || [])
+                    .filter(a => a.status === 'ACTIVE')
+                    .map(a => packages.find(p => p.id === a.package_id)?.name)
+                    .filter((n): n is string => !!n)
+                  if (assignedNames.length === 0) {
+                    return (
+                      <p className="text-xs text-slate-400 mt-2 italic">
+                        Not yet assigned to any package. Use Edit to assign.
+                      </p>
+                    )
+                  }
+                  return (
+                    <div className="mt-3 pt-3 border-t border-slate-50">
+                      <p className="text-xs text-slate-400 mb-1.5">
+                        Assigned to {assignedNames.length} package{assignedNames.length === 1 ? '' : 's'}:
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {assignedNames.map((n, i) => (
+                          <span key={i}
+                            className="text-xs px-2 py-1 rounded-md bg-green-50 border border-green-200 text-green-700">
+                            ✓ {n}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => editVariety(v)}
@@ -651,6 +741,171 @@ function SeedVarietiesContent() {
                         </tbody>
                       </table>
                     </div>
+                  )}
+                </div>
+
+                {/* Sold via Packages — Batch Y (2026-05-19).
+                    Cards for each Package on this crop; check to
+                    assign. District filter chips narrow the visible
+                    set when there are many packages. Currently-
+                    assigned packages outside the filter stay visible
+                    with a tag so the SE can't accidentally un-check
+                    by not seeing them. */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-2">
+                    Sold via Packages
+                  </label>
+                  {assignablePkgs.length === 0 ? (
+                    <p className="text-xs text-amber-600">
+                      No Crop Cycle Advisory packages for this crop yet.
+                      Create a package under CCA first; varieties can
+                      only be assigned to existing packages.
+                    </p>
+                  ) : (
+                    <>
+                      {/* District filter chips. Built from the union
+                          of all districts across packages. */}
+                      {(() => {
+                        const allDistricts = new Map<string, string>()
+                        for (const p of assignablePkgs) {
+                          for (const l of p.locations) {
+                            if (l.district_cosh_id && l.district_name_en) {
+                              allDistricts.set(l.district_cosh_id, l.district_name_en)
+                            }
+                          }
+                        }
+                        const districts = Array.from(allDistricts.entries())
+                          .sort((a, b) => a[1].localeCompare(b[1]))
+                        if (districts.length === 0) return null
+                        return (
+                          <div className="mb-3">
+                            <p className="text-[11px] text-slate-500 mb-1">
+                              Filter by district where you sell:
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {districts.map(([id, name]) => {
+                                const active = districtFilter.has(id)
+                                return (
+                                  <button key={id}
+                                    onClick={() => setDistrictFilter(s => {
+                                      const n = new Set(s)
+                                      if (active) n.delete(id); else n.add(id)
+                                      return n
+                                    })}
+                                    className={`text-xs px-2 py-1 rounded-full border ${
+                                      active
+                                        ? 'bg-green-100 border-green-300 text-green-700'
+                                        : 'bg-white border-slate-200 text-slate-500 hover:border-green-300'
+                                    }`}>
+                                    {name}
+                                  </button>
+                                )
+                              })}
+                              {districtFilter.size > 0 && (
+                                <button onClick={() => setDistrictFilter(new Set())}
+                                  className="text-xs px-2 py-1 text-slate-400 hover:text-slate-600 underline">
+                                  Clear filter
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })()}
+
+                      <div className="space-y-2">
+                        {assignablePkgs.map(p => {
+                          const isAssigned = pkgAssignments.has(p.id)
+                          // District filter: visible if any of the
+                          // package's districts is in the filter, OR
+                          // if filter is empty, OR if already assigned
+                          // (so we don't accidentally hide it).
+                          const matchesFilter = districtFilter.size === 0
+                            || p.locations.some(l =>
+                              l.district_cosh_id && districtFilter.has(l.district_cosh_id))
+                          if (!matchesFilter && !isAssigned) return null
+                          const isExpanded = expandedPkg === p.id
+                          const outOfFilter = !matchesFilter && isAssigned
+                          return (
+                            <div key={p.id}
+                              className={`rounded-xl border p-3 ${
+                                isAssigned ? 'bg-green-50/40 border-green-200' : 'bg-white border-slate-200'
+                              }`}>
+                              <div className="flex items-start gap-3">
+                                <input type="checkbox"
+                                  checked={isAssigned}
+                                  onChange={e => setPkgAssignments(s => {
+                                    const n = new Set(s)
+                                    if (e.target.checked) n.add(p.id)
+                                    else n.delete(p.id)
+                                    return n
+                                  })}
+                                  className="mt-1 w-4 h-4 accent-green-600" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-medium text-sm text-slate-800">{p.name}</p>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                      p.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                    }`}>
+                                      {p.status}
+                                    </span>
+                                    {outOfFilter && (
+                                      <span className="text-[10px] text-slate-400 italic">
+                                        currently assigned, outside filter
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    {p.duration_days} days
+                                    {' · '}{p.locations.length} location{p.locations.length === 1 ? '' : 's'}
+                                    {' · '}{p.parameters.length} parameter{p.parameters.length === 1 ? '' : 's'}
+                                  </p>
+                                  <button onClick={() => setExpandedPkg(isExpanded ? null : p.id)}
+                                    className="text-xs text-blue-600 mt-1 hover:underline">
+                                    {isExpanded ? '▾ Hide details' : '▸ Details'}
+                                  </button>
+                                  {isExpanded && (
+                                    <div className="mt-2 border-t border-slate-100 pt-2 space-y-2 text-xs">
+                                      <div>
+                                        <p className="font-medium text-slate-500 mb-0.5">Locations:</p>
+                                        {p.locations.length === 0 ? (
+                                          <p className="text-slate-400 italic">No locations set on this package.</p>
+                                        ) : (
+                                          <ul className="text-slate-600 space-y-0.5">
+                                            {p.locations.map((l, i) => (
+                                              <li key={i}>
+                                                {l.district_name_en}
+                                                {l.state_name_en && (
+                                                  <span className="text-slate-400"> · {l.state_name_en}</span>
+                                                )}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      </div>
+                                      <div>
+                                        <p className="font-medium text-slate-500 mb-0.5">Parameters &amp; values:</p>
+                                        {p.parameters.length === 0 ? (
+                                          <p className="text-slate-400 italic">No P-Vs set on this package.</p>
+                                        ) : (
+                                          <ul className="text-slate-600 space-y-0.5">
+                                            {p.parameters.map(pr => (
+                                              <li key={pr.parameter_id}>
+                                                <span className="font-medium">{pr.parameter_name_en}:</span>{' '}
+                                                {pr.variables.map(v => v.variable_name_en).join(', ')}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </>
                   )}
                 </div>
 
