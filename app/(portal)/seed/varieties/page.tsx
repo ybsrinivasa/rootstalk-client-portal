@@ -45,8 +45,12 @@ interface DusOptionCharacter {
   descriptors: DusOptionDescriptor[]
 }
 interface DusOptionSubpart {
-  subpart_cosh_id: string
-  subpart_name_en: string
+  // null cosh_id + null name = BLANK BOX in Cosh → "not applicable"
+  // at the subpart level for this branch (Batch W-1, 2026-05-19).
+  // Frontend skips the subpart dropdown when this is the only
+  // entry for a part; otherwise surfaces as "— not applicable —".
+  subpart_cosh_id: string | null
+  subpart_name_en: string | null
   characters: DusOptionCharacter[]
 }
 interface DusOptionPart {
@@ -139,18 +143,32 @@ function SeedVarietiesContent() {
   // that doesn't belong to the new Part. Persist cosh_id + name
   // snapshot so the row renders correctly even if Cosh later
   // changes the display name.
+  //
+  // Batch W-1: subpart can be null when Cosh's row has BLANK BOX at
+  // that position. If a part's only subpart is null, the picker
+  // auto-selects null and hides the subpart dropdown.
   function pickDusPart(i: number, partCoshId: string) {
     const part = dusOptions.find(p => p.part_cosh_id === partCoshId)
+    const onlySubpart = part && part.subparts.length === 1 ? part.subparts[0] : null
     setForm(f => {
       const chars = [...f.dus_characters]
       chars[i] = {
         part_cosh_id: partCoshId,
         part_name_en: part?.part_name_en,
+        // Auto-fill the subpart slot when the only option is the
+        // BLANK BOX "(not applicable)" entry. Otherwise leave the
+        // subpart unset so the SE has to pick.
+        ...(onlySubpart && onlySubpart.subpart_cosh_id === null
+          ? { subpart_cosh_id: undefined, subpart_name_en: undefined }
+          : {}),
       }
       return { ...f, dus_characters: chars }
     })
   }
-  function pickDusSubpart(i: number, subpartCoshId: string) {
+  function pickDusSubpart(i: number, subpartCoshIdOrEmpty: string) {
+    // The dropdown emits an empty string when the user picks
+    // "— not applicable —"; map that back to null in stored form.
+    const subpartCoshId = subpartCoshIdOrEmpty === '__NA__' ? null : subpartCoshIdOrEmpty
     setForm(f => {
       const chars = [...f.dus_characters]
       const cur = chars[i]
@@ -159,8 +177,8 @@ function SeedVarietiesContent() {
       chars[i] = {
         part_cosh_id: cur.part_cosh_id,
         part_name_en: cur.part_name_en,
-        subpart_cosh_id: subpartCoshId,
-        subpart_name_en: subpart?.subpart_name_en,
+        subpart_cosh_id: subpart?.subpart_cosh_id ?? undefined,
+        subpart_name_en: subpart?.subpart_name_en ?? undefined,
       }
       return { ...f, dus_characters: chars }
     })
@@ -170,7 +188,9 @@ function SeedVarietiesContent() {
       const chars = [...f.dus_characters]
       const cur = chars[i]
       const part = dusOptions.find(p => p.part_cosh_id === cur.part_cosh_id)
-      const subpart = part?.subparts.find(s => s.subpart_cosh_id === cur.subpart_cosh_id)
+      const subpart = part?.subparts.find(s =>
+        (s.subpart_cosh_id ?? null) === (cur.subpart_cosh_id ?? null),
+      )
       const character = subpart?.characters.find(c => c.character_cosh_id === characterCoshId)
       chars[i] = {
         part_cosh_id: cur.part_cosh_id,
@@ -188,7 +208,9 @@ function SeedVarietiesContent() {
       const chars = [...f.dus_characters]
       const cur = chars[i]
       const part = dusOptions.find(p => p.part_cosh_id === cur.part_cosh_id)
-      const subpart = part?.subparts.find(s => s.subpart_cosh_id === cur.subpart_cosh_id)
+      const subpart = part?.subparts.find(s =>
+        (s.subpart_cosh_id ?? null) === (cur.subpart_cosh_id ?? null),
+      )
       const character = subpart?.characters.find(c => c.character_cosh_id === cur.character_cosh_id)
       const descriptor = character?.descriptors.find(d => d.descriptor_cosh_id === descriptorCoshId)
       chars[i] = {
@@ -510,8 +532,24 @@ function SeedVarietiesContent() {
                               )
                             }
                             const partOpt = dusOptions.find(p => p.part_cosh_id === d.part_cosh_id)
-                            const subOpt = partOpt?.subparts.find(s => s.subpart_cosh_id === d.subpart_cosh_id)
-                            const charOpt = subOpt?.characters.find(c => c.character_cosh_id === d.character_cosh_id)
+                            // Batch W-1: a subpart entry may have
+                            // subpart_cosh_id=null (Cosh BLANK BOX).
+                            // Auto-pick semantics: if the part has
+                            // exactly one subpart and it's null, the
+                            // dropdown is omitted entirely; the row's
+                            // subpart slot stays undefined and the
+                            // character dropdown unlocks immediately.
+                            const subparts = partOpt?.subparts ?? []
+                            const onlySubpartIsNa = subparts.length === 1 && subparts[0].subpart_cosh_id === null
+                            const selectedSubpart = subparts.find(s =>
+                              (s.subpart_cosh_id ?? null) === (d.subpart_cosh_id ?? null),
+                            ) || (onlySubpartIsNa ? subparts[0] : undefined)
+                            const charOpt = selectedSubpart?.characters.find(c => c.character_cosh_id === d.character_cosh_id)
+                            // The character dropdown unlocks when
+                            // EITHER the SE has explicitly picked a
+                            // subpart OR the only subpart is the BLANK
+                            // BOX "(not applicable)" entry.
+                            const charDropdownReady = !!selectedSubpart
                             return (
                               <tr key={i}>
                                 <td className="px-1 py-1">
@@ -525,23 +563,38 @@ function SeedVarietiesContent() {
                                   </select>
                                 </td>
                                 <td className="px-1 py-1">
-                                  <select value={d.subpart_cosh_id || ''}
-                                    disabled={!partOpt}
-                                    onChange={e => pickDusSubpart(i, e.target.value)}
-                                    className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white disabled:bg-slate-50">
-                                    <option value="">— pick —</option>
-                                    {partOpt?.subparts.map(s => (
-                                      <option key={s.subpart_cosh_id} value={s.subpart_cosh_id}>{s.subpart_name_en}</option>
-                                    ))}
-                                  </select>
+                                  {onlySubpartIsNa ? (
+                                    <span className="text-xs text-slate-400 italic px-2">
+                                      not applicable
+                                    </span>
+                                  ) : (
+                                    <select
+                                      value={
+                                        d.subpart_cosh_id
+                                          ? d.subpart_cosh_id
+                                          : (selectedSubpart && selectedSubpart.subpart_cosh_id === null ? '__NA__' : '')
+                                      }
+                                      disabled={!partOpt}
+                                      onChange={e => pickDusSubpart(i, e.target.value)}
+                                      className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white disabled:bg-slate-50">
+                                      <option value="">— pick —</option>
+                                      {subparts.map(s => (
+                                        s.subpart_cosh_id === null ? (
+                                          <option key="__NA__" value="__NA__">— not applicable —</option>
+                                        ) : (
+                                          <option key={s.subpart_cosh_id} value={s.subpart_cosh_id}>{s.subpart_name_en}</option>
+                                        )
+                                      ))}
+                                    </select>
+                                  )}
                                 </td>
                                 <td className="px-1 py-1">
                                   <select value={d.character_cosh_id || ''}
-                                    disabled={!subOpt}
+                                    disabled={!charDropdownReady}
                                     onChange={e => pickDusCharacter(i, e.target.value)}
                                     className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white disabled:bg-slate-50">
                                     <option value="">— pick —</option>
-                                    {subOpt?.characters.map(c => (
+                                    {selectedSubpart?.characters.map(c => (
                                       <option key={c.character_cosh_id} value={c.character_cosh_id}>{c.character_name_en}</option>
                                     ))}
                                   </select>
