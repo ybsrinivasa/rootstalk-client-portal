@@ -182,7 +182,7 @@ export default function PackageDetailPage() {
   // package to specific geographies. Rebuilt 2026-05-17 (step 3)
   // to use the shared <LocationPicker>. Universe is bounded to
   // the company's ClientLocation footprint.
-  const [locations, setLocations] = useState<{ id: string; state_cosh_id: string; district_cosh_id: string }[]>([])
+  const [locations, setLocations] = useState<{ id: string; state_cosh_id: string; state_name: string | null; district_cosh_id: string; district_name: string | null }[]>([])
   const [locationOptions, setLocationOptions] = useState<LocationUniverse>({ states: [] })
   const [showEditLocations, setShowEditLocations] = useState(false)
   const [locationsSelected, setLocationsSelected] = useState<Set<string>>(new Set())
@@ -333,7 +333,7 @@ export default function PackageDetailPage() {
   const loadLocations = async () => {
     if (!clientId || !packageId) return
     try {
-      const { data } = await api.get<{ id: string; state_cosh_id: string; district_cosh_id: string }[]>(
+      const { data } = await api.get<{ id: string; state_cosh_id: string; state_name: string | null; district_cosh_id: string; district_name: string | null }[]>(
         `/client/${clientId}/packages/${packageId}/locations`,
       )
       setLocations(data)
@@ -1108,24 +1108,13 @@ export default function PackageDetailPage() {
           </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {(() => {
-              // Resolve friendly names from the universe; fall back
-              // to raw cosh_id if the universe hasn't loaded or the
-              // pair has fallen out of the company footprint.
-              const stateName: Record<string, string> = {}
-              const districtName: Record<string, string> = {}
-              for (const s of locationOptions.states) {
-                if (s.name) stateName[s.cosh_id] = s.name
-                for (const d of s.districts) if (d.name) districtName[d.cosh_id] = d.name
-              }
-              return locations.map(loc => (
-                <span key={loc.id}
-                  className="text-xs bg-slate-50 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200">
-                  {districtName[loc.district_cosh_id] || '(unnamed district)'}
-                  <span className="text-slate-400"> · {stateName[loc.state_cosh_id] || '(unnamed state)'}</span>
-                </span>
-              ))
-            })()}
+            {locations.map(loc => (
+              <span key={loc.id}
+                className="text-xs bg-slate-50 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200">
+                {loc.district_name || '(unnamed district)'}
+                <span className="text-slate-400"> · {loc.state_name || '(unnamed state)'}</span>
+              </span>
+            ))}
           </div>
         )}
       </div>
