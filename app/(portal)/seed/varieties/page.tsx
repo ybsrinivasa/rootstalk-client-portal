@@ -99,6 +99,7 @@ function SeedVarietiesContent() {
   const [selected, setSelected] = useState<Variety | null>(null)
   const [form, setForm] = useState(emptyForm(cropCoshId))
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // DUS taxonomy tree for the current crop — fetched once per crop.
@@ -253,7 +254,19 @@ function SeedVarietiesContent() {
   }
 
   async function save() {
-    if (!clientId || !form.name.trim() || !form.crop_cosh_id.trim()) return
+    setSaveError('')
+    if (!clientId) {
+      setSaveError('Client context missing — please reload the page.')
+      return
+    }
+    if (!form.name.trim()) {
+      setSaveError('Name is required.')
+      return
+    }
+    if (!form.crop_cosh_id.trim()) {
+      setSaveError('Crop is required. Open this page from /seed and pick a crop first.')
+      return
+    }
     setSaving(true)
     try {
       const payload = {
@@ -275,6 +288,23 @@ function SeedVarietiesContent() {
       setSelected(null)
       setForm(emptyForm(cropCoshId))
       load()
+    } catch (e: unknown) {
+      // Batch W-2 (2026-05-19) — surface backend errors. Common
+      // codes: `sdm_or_ca_only` (logged in as SE / FM / Report),
+      // `not_a_seed_company`, generic 4xx / 5xx.
+      const res = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+      const detail = res?.data?.detail as { code?: string; message?: string } | string | undefined
+      if (typeof detail === 'object' && detail?.code === 'sdm_or_ca_only') {
+        setSaveError(`${detail.message || 'Only the CA or a Seed Data Manager can add varieties.'} Ask the CA to assign you the Seed Data Manager role, or log in as the CA.`)
+      } else if (typeof detail === 'object' && detail?.code === 'not_a_seed_company') {
+        setSaveError(`${detail.message || 'This company is not onboarded as a Seed Company.'} Ask the SA to add the Seed Company organisation type to this client.`)
+      } else if (typeof detail === 'object' && detail?.message) {
+        setSaveError(detail.message)
+      } else if (typeof detail === 'string') {
+        setSaveError(detail)
+      } else {
+        setSaveError('Failed to save the variety. Please try again.')
+      }
     } finally { setSaving(false) }
   }
 
@@ -305,6 +335,7 @@ function SeedVarietiesContent() {
       photos: v.photos,
       dus_characters: v.dus_characters || [],
     })
+    setSaveError('')
     setShowCreate(true)
   }
 
@@ -328,7 +359,7 @@ function SeedVarietiesContent() {
             </h1>
             <p className="text-slate-500 text-sm mt-0.5">Seed varieties available to farmers for this crop</p>
           </div>
-          <button onClick={() => { setShowCreate(true); setSelected(null); setForm(emptyForm(cropCoshId)) }}
+          <button onClick={() => { setShowCreate(true); setSelected(null); setForm(emptyForm(cropCoshId)); setSaveError('') }}
             className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
             style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
             + Add Variety
@@ -657,13 +688,18 @@ function SeedVarietiesContent() {
                   <p className="text-xs text-slate-400 mt-1">First photo will appear as thumbnail in the variety list.</p>
                 </div>
 
+                {saveError && (
+                  <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                    {saveError}
+                  </div>
+                )}
                 <div className="flex gap-3 pt-2">
                   <button onClick={save} disabled={saving || !form.name.trim()}
                     className="flex-1 py-3 text-white text-sm font-semibold rounded-xl disabled:opacity-40"
                     style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                     {saving ? 'Saving…' : selected ? 'Update Variety' : 'Create Variety'}
                   </button>
-                  <button onClick={() => { setShowCreate(false); setSelected(null) }}
+                  <button onClick={() => { setShowCreate(false); setSelected(null); setSaveError('') }}
                     className="px-5 rounded-xl border border-slate-200 text-slate-600 text-sm hover:bg-slate-50">
                     Cancel
                   </button>
