@@ -12,11 +12,47 @@ import { getClient, getToken } from '@/lib/auth'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
+// Batch W (2026-05-19) — DUS picker now reads Cosh's
+// `dus_characters_descriptors` Connect. Each row stores the
+// cosh_ids of every level so we can re-render the picker on edit,
+// plus a name snapshot so display stays stable if Cosh translations
+// drift later. `part` / `character` / etc. are kept as optional
+// strings purely for backward compat — legacy free-text rows
+// authored before Batch W will render as read-only text.
 interface DusCharacter {
-  part: string
-  sub_part: string
-  character: string
-  descriptor: string
+  part_cosh_id?: string
+  part_name_en?: string
+  subpart_cosh_id?: string
+  subpart_name_en?: string
+  character_cosh_id?: string
+  character_name_en?: string
+  descriptor_cosh_id?: string
+  descriptor_name_en?: string
+  // Legacy free-text fields (pre-Batch W).
+  part?: string
+  sub_part?: string
+  character?: string
+  descriptor?: string
+}
+
+interface DusOptionDescriptor {
+  descriptor_cosh_id: string
+  descriptor_name_en: string
+}
+interface DusOptionCharacter {
+  character_cosh_id: string
+  character_name_en: string
+  descriptors: DusOptionDescriptor[]
+}
+interface DusOptionSubpart {
+  subpart_cosh_id: string
+  subpart_name_en: string
+  characters: DusOptionCharacter[]
+}
+interface DusOptionPart {
+  part_cosh_id: string
+  part_name_en: string
+  subparts: DusOptionSubpart[]
 }
 
 interface Variety {
@@ -61,19 +97,23 @@ function SeedVarietiesContent() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // DUS taxonomy tree for the current crop — fetched once per crop.
+  const [dusOptions, setDusOptions] = useState<DusOptionPart[]>([])
 
   const load = async () => {
     if (!clientId || !cropCoshId) return
-    const [vrRes, pkgRes, cropsRes] = await Promise.all([
+    const [vrRes, pkgRes, cropsRes, dusRes] = await Promise.all([
       api.get<Variety[]>(`/client/${clientId}/varieties?crop_cosh_id=${encodeURIComponent(cropCoshId)}`),
       api.get<Package[]>(`/client/${clientId}/packages`).catch(() => ({ data: [] as Package[] })),
       api.get<ClientCrop[]>(`/client/${clientId}/crops`).catch(() => ({ data: [] as ClientCrop[] })),
+      api.get<DusOptionPart[]>(`/client/${clientId}/seed/dus-options?crop_cosh_id=${encodeURIComponent(cropCoshId)}`)
+        .catch(() => ({ data: [] as DusOptionPart[] })),
     ])
     setVarieties(vrRes.data)
-    // Only show packages of the same crop in the PoP-assign chips.
     setPackages(pkgRes.data.filter(p => p.crop_cosh_id === cropCoshId))
     const matched = cropsRes.data.find(c => c.crop_cosh_id === cropCoshId)
     setCropName(matched?.crop_name_en || '')
+    setDusOptions(dusRes.data)
     setLoading(false)
   }
 
@@ -88,17 +128,76 @@ function SeedVarietiesContent() {
   }
 
   function addDusRow() {
-    setForm(f => ({ ...f, dus_characters: [...f.dus_characters, { part: '', sub_part: '', character: '', descriptor: '' }] }))
-  }
-  function setDusField(i: number, field: keyof DusCharacter, v: string) {
-    setForm(f => {
-      const chars = [...f.dus_characters]
-      chars[i] = { ...chars[i], [field]: v }
-      return { ...f, dus_characters: chars }
-    })
+    setForm(f => ({ ...f, dus_characters: [...f.dus_characters, {} as DusCharacter] }))
   }
   function removeDusRow(i: number) {
     setForm(f => ({ ...f, dus_characters: f.dus_characters.filter((_, idx) => idx !== i) }))
+  }
+
+  // Batch W (2026-05-19) — cascading DUS dropdowns. Picking a level
+  // clears every dependent level so we never end up with a Sub-Part
+  // that doesn't belong to the new Part. Persist cosh_id + name
+  // snapshot so the row renders correctly even if Cosh later
+  // changes the display name.
+  function pickDusPart(i: number, partCoshId: string) {
+    const part = dusOptions.find(p => p.part_cosh_id === partCoshId)
+    setForm(f => {
+      const chars = [...f.dus_characters]
+      chars[i] = {
+        part_cosh_id: partCoshId,
+        part_name_en: part?.part_name_en,
+      }
+      return { ...f, dus_characters: chars }
+    })
+  }
+  function pickDusSubpart(i: number, subpartCoshId: string) {
+    setForm(f => {
+      const chars = [...f.dus_characters]
+      const cur = chars[i]
+      const part = dusOptions.find(p => p.part_cosh_id === cur.part_cosh_id)
+      const subpart = part?.subparts.find(s => s.subpart_cosh_id === subpartCoshId)
+      chars[i] = {
+        part_cosh_id: cur.part_cosh_id,
+        part_name_en: cur.part_name_en,
+        subpart_cosh_id: subpartCoshId,
+        subpart_name_en: subpart?.subpart_name_en,
+      }
+      return { ...f, dus_characters: chars }
+    })
+  }
+  function pickDusCharacter(i: number, characterCoshId: string) {
+    setForm(f => {
+      const chars = [...f.dus_characters]
+      const cur = chars[i]
+      const part = dusOptions.find(p => p.part_cosh_id === cur.part_cosh_id)
+      const subpart = part?.subparts.find(s => s.subpart_cosh_id === cur.subpart_cosh_id)
+      const character = subpart?.characters.find(c => c.character_cosh_id === characterCoshId)
+      chars[i] = {
+        part_cosh_id: cur.part_cosh_id,
+        part_name_en: cur.part_name_en,
+        subpart_cosh_id: cur.subpart_cosh_id,
+        subpart_name_en: cur.subpart_name_en,
+        character_cosh_id: characterCoshId,
+        character_name_en: character?.character_name_en,
+      }
+      return { ...f, dus_characters: chars }
+    })
+  }
+  function pickDusDescriptor(i: number, descriptorCoshId: string) {
+    setForm(f => {
+      const chars = [...f.dus_characters]
+      const cur = chars[i]
+      const part = dusOptions.find(p => p.part_cosh_id === cur.part_cosh_id)
+      const subpart = part?.subparts.find(s => s.subpart_cosh_id === cur.subpart_cosh_id)
+      const character = subpart?.characters.find(c => c.character_cosh_id === cur.character_cosh_id)
+      const descriptor = character?.descriptors.find(d => d.descriptor_cosh_id === descriptorCoshId)
+      chars[i] = {
+        ...cur,
+        descriptor_cosh_id: descriptorCoshId,
+        descriptor_name_en: descriptor?.descriptor_name_en,
+      }
+      return { ...f, dus_characters: chars }
+    })
   }
 
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -138,7 +237,12 @@ function SeedVarietiesContent() {
       const payload = {
         ...form,
         description_points: form.description_points.filter(p => p.trim()),
-        dus_characters: form.dus_characters.filter(d => d.part.trim() && d.character.trim()),
+        // Keep rows that EITHER carry the new cosh_id shape (post
+        // Batch W) OR a legacy free-text part+character pair.
+        dus_characters: form.dus_characters.filter(d =>
+          (d.part_cosh_id && d.character_cosh_id)
+          || ((d.part?.trim() && d.character?.trim())),
+        ),
       }
       if (selected) {
         await api.put(`/client/${clientId}/varieties/${selected.id}`, payload)
@@ -349,23 +453,35 @@ function SeedVarietiesContent() {
                   </div>
                 </div>
 
-                {/* DUS Characters */}
+                {/* DUS Characters — cascading dropdowns from Cosh
+                    (Batch W, 2026-05-19). Pickers are filtered at each
+                    level by the previous selection. Legacy free-text
+                    rows authored before this batch render as read-only
+                    grey rows so history is preserved. */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-xs font-medium text-slate-600">DUS Characters</label>
                     <button onClick={addDusRow}
-                      className="text-xs text-blue-600 font-medium hover:underline">
+                      disabled={dusOptions.length === 0}
+                      title={dusOptions.length === 0 ? 'No DUS taxonomy for this crop in Cosh yet.' : ''}
+                      className="text-xs text-blue-600 font-medium hover:underline disabled:opacity-40 disabled:cursor-not-allowed">
                       + Add Row
                     </button>
                   </div>
+                  {dusOptions.length === 0 && (
+                    <p className="text-xs text-amber-600 mb-2">
+                      No DUS taxonomy for this crop is in Cosh yet. Once Cosh
+                      adds characters for this crop, new rows can be picked here.
+                    </p>
+                  )}
                   {form.dus_characters.length === 0 ? (
-                    <p className="text-xs text-slate-400 italic">No DUS characters added. Click &ldquo;+ Add Row&rdquo; to begin.</p>
+                    <p className="text-xs text-slate-400 italic">No DUS characters added.</p>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs border border-slate-100 rounded-lg overflow-hidden">
                         <thead className="bg-slate-50">
                           <tr>
-                            <th className="text-left px-2 py-2 font-medium text-slate-500">Part *</th>
+                            <th className="text-left px-2 py-2 font-medium text-slate-500">Plant Part *</th>
                             <th className="text-left px-2 py-2 font-medium text-slate-500">Sub-Part</th>
                             <th className="text-left px-2 py-2 font-medium text-slate-500">Character *</th>
                             <th className="text-left px-2 py-2 font-medium text-slate-500">Descriptor</th>
@@ -373,34 +489,81 @@ function SeedVarietiesContent() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {form.dus_characters.map((d, i) => (
-                            <tr key={i}>
-                              <td className="px-1 py-1">
-                                <input value={d.part} onChange={e => setDusField(i, 'part', e.target.value)}
-                                  placeholder="e.g. Leaf"
-                                  className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
-                              </td>
-                              <td className="px-1 py-1">
-                                <input value={d.sub_part} onChange={e => setDusField(i, 'sub_part', e.target.value)}
-                                  placeholder="Optional"
-                                  className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
-                              </td>
-                              <td className="px-1 py-1">
-                                <input value={d.character} onChange={e => setDusField(i, 'character', e.target.value)}
-                                  placeholder="e.g. Colour"
-                                  className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
-                              </td>
-                              <td className="px-1 py-1">
-                                <input value={d.descriptor} onChange={e => setDusField(i, 'descriptor', e.target.value)}
-                                  placeholder="e.g. Green"
-                                  className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
-                              </td>
-                              <td className="px-1 py-1">
-                                <button onClick={() => removeDusRow(i)}
-                                  className="text-slate-300 hover:text-red-400 px-1">✕</button>
-                              </td>
-                            </tr>
-                          ))}
+                          {form.dus_characters.map((d, i) => {
+                            // Legacy free-text row (pre Batch W) — show
+                            // the stored strings read-only with a small
+                            // hint and a Remove button. SE can delete
+                            // and re-add from the Cosh picker.
+                            if (!d.part_cosh_id && (d.part || d.character)) {
+                              return (
+                                <tr key={i} className="bg-slate-50">
+                                  <td className="px-2 py-1 text-slate-600">{d.part}</td>
+                                  <td className="px-2 py-1 text-slate-500">{d.sub_part}</td>
+                                  <td className="px-2 py-1 text-slate-600">{d.character}</td>
+                                  <td className="px-2 py-1 text-slate-500">{d.descriptor}</td>
+                                  <td className="px-1 py-1 text-right">
+                                    <span className="text-[10px] text-slate-400 italic mr-2">legacy</span>
+                                    <button onClick={() => removeDusRow(i)}
+                                      className="text-slate-300 hover:text-red-400 px-1">✕</button>
+                                  </td>
+                                </tr>
+                              )
+                            }
+                            const partOpt = dusOptions.find(p => p.part_cosh_id === d.part_cosh_id)
+                            const subOpt = partOpt?.subparts.find(s => s.subpart_cosh_id === d.subpart_cosh_id)
+                            const charOpt = subOpt?.characters.find(c => c.character_cosh_id === d.character_cosh_id)
+                            return (
+                              <tr key={i}>
+                                <td className="px-1 py-1">
+                                  <select value={d.part_cosh_id || ''}
+                                    onChange={e => pickDusPart(i, e.target.value)}
+                                    className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white">
+                                    <option value="">— pick —</option>
+                                    {dusOptions.map(p => (
+                                      <option key={p.part_cosh_id} value={p.part_cosh_id}>{p.part_name_en}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="px-1 py-1">
+                                  <select value={d.subpart_cosh_id || ''}
+                                    disabled={!partOpt}
+                                    onChange={e => pickDusSubpart(i, e.target.value)}
+                                    className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white disabled:bg-slate-50">
+                                    <option value="">— pick —</option>
+                                    {partOpt?.subparts.map(s => (
+                                      <option key={s.subpart_cosh_id} value={s.subpart_cosh_id}>{s.subpart_name_en}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="px-1 py-1">
+                                  <select value={d.character_cosh_id || ''}
+                                    disabled={!subOpt}
+                                    onChange={e => pickDusCharacter(i, e.target.value)}
+                                    className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white disabled:bg-slate-50">
+                                    <option value="">— pick —</option>
+                                    {subOpt?.characters.map(c => (
+                                      <option key={c.character_cosh_id} value={c.character_cosh_id}>{c.character_name_en}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="px-1 py-1">
+                                  <select value={d.descriptor_cosh_id || ''}
+                                    disabled={!charOpt}
+                                    onChange={e => pickDusDescriptor(i, e.target.value)}
+                                    className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white disabled:bg-slate-50">
+                                    <option value="">— pick —</option>
+                                    {charOpt?.descriptors.map(de => (
+                                      <option key={de.descriptor_cosh_id} value={de.descriptor_cosh_id}>{de.descriptor_name_en}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="px-1 py-1">
+                                  <button onClick={() => removeDusRow(i)}
+                                    className="text-slate-300 hover:text-red-400 px-1">✕</button>
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
