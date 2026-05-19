@@ -1801,16 +1801,19 @@ export default function PackageDetailPage() {
                             </button>
                           </>
                         )}
-                        {isCustom && (
-                          <button
-                            onClick={() => {
-                              setNewVarForParamId(newVarForParamId === param.id ? null : param.id)
-                              setNewVarName('')
-                            }}
-                            className="text-xs text-blue-600 hover:underline">
-                            {newVarForParamId === param.id ? 'Cancel' : '+ Variable'}
-                          </button>
-                        )}
+                        {/* Batch CC (2026-05-19) — "+ Variable" is
+                            now available on Cosh parameters too;
+                            backend stamps client_id so the variable
+                            stays per-client. Cosh-shipped variables
+                            remain read-only (no x). */}
+                        <button
+                          onClick={() => {
+                            setNewVarForParamId(newVarForParamId === param.id ? null : param.id)
+                            setNewVarName('')
+                          }}
+                          className="text-xs text-blue-600 hover:underline">
+                          {newVarForParamId === param.id ? 'Cancel' : '+ Variable'}
+                        </button>
                       </div>
                       {vars.length > 0 && (() => {
                         const coshVars = vars.filter(v => v.cosh_id !== null)
