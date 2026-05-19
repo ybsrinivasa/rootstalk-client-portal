@@ -593,6 +593,12 @@ export default function StandardResponseDetailPage() {
           if (!tl) return undefined
           return `${tl.name} · Day ${tl.from_value} → ${tl.to_value} after response`
         })()}
+        timelineWindow={(() => {
+          if (!showAddPractice) return undefined
+          const tl = timelines.find(t => t.id === showAddPractice)
+          if (!tl) return undefined
+          return { from_value: tl.from_value, to_value: tl.to_value }
+        })()}
         pipe={{ pipe: 'QA_CLIENT', clientId: clientId || '', parentId: srId || '' }}
         onClose={() => {
           setShowAddPractice(null)

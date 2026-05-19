@@ -171,6 +171,14 @@ interface Props {
    *  passes "Annual · DAS · 120d" style; PG passes
    *  "Day N → M after detection". */
   contextSubtitle?: string
+  /** Timeline window — drives the live "N applications (first on
+   *  Day X, then every Y days)" indicator next to
+   *  NUMBER_OF_APPLICATIONS on frequency-based L2s. Restored Batch
+   *  BB (2026-05-19) after the original implementation in Batch 34
+   *  was lost when the modal was extracted into this shared
+   *  component (Batch 39P-e). When omitted the field falls back to
+   *  the "auto-calculated server-side" stub. */
+  timelineWindow?: { from_value: number; to_value: number }
   cropCoshId: string
   existingPractice?: ExistingPractice
   pipe: PipeContext
@@ -179,7 +187,7 @@ interface Props {
 }
 
 export function PracticeFormModal({
-  open, mode, timelineId, contextSubtitle, cropCoshId,
+  open, mode, timelineId, contextSubtitle, timelineWindow, cropCoshId,
   existingPractice, pipe, onClose, onSaved,
 }: Props) {
   const endpoints = practiceEndpoints(pipe)
@@ -570,10 +578,53 @@ export function PracticeFormModal({
               {l2Spec.map(field => {
                 const variant = elementInputVariant(field.source)
                 if (variant === 'auto') {
+                  // Batch BB (2026-05-19) — live "N applications
+                  // (first on Day X, then every Y days)" indicator
+                  // restored. Same formula as backend's Batch 34
+                  // calc: applications across the timeline window
+                  // = floor((duration - 1) / interval) + 1, with
+                  // first application on Day from_value + 1.
+                  // Falls back to the legacy "auto-calculated
+                  // server-side" stub when no timelineWindow is
+                  // passed (callers that haven't been updated yet).
+                  const intervalF = l2Spec.find(f =>
+                    f.name.endsWith('_INTERVAL') && f.source === 'number_2dec',
+                  )
+                  const rawInterval = intervalF ? (elementValues[intervalF.name] || '') : ''
+                  const interval = rawInterval ? parseInt(rawInterval, 10) : NaN
+                  let n = 0
+                  if (timelineWindow && !Number.isNaN(interval) && interval > 0) {
+                    const duration = timelineWindow.to_value - timelineWindow.from_value + 1
+                    if (duration >= 1) n = Math.floor((duration - 1) / interval) + 1
+                  }
+                  const firstDay = timelineWindow ? timelineWindow.from_value + 1 : null
                   return (
-                    <div key={field.name} className="text-xs text-slate-400">
-                      <span className="font-medium">{field.label || field.name}</span>:
-                      <span className="italic ml-1">auto-calculated server-side</span>
+                    <div key={field.name} className="text-xs text-slate-500">
+                      <span className="font-medium text-slate-700">
+                        {field.label || field.name}:
+                      </span>{' '}
+                      {!timelineWindow ? (
+                        <span className="italic text-slate-400">auto-calculated server-side</span>
+                      ) : Number.isNaN(interval) || interval <= 0 ? (
+                        <span className="italic text-slate-400">
+                          set the interval above to see the count
+                        </span>
+                      ) : n < 2 ? (
+                        <span className="text-amber-700">
+                          Interval too long for this timeline — frequency
+                          practices repeat at least twice. Shorten the
+                          interval or extend the timeline window.
+                        </span>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-900">
+                            {n} application{n === 1 ? '' : 's'}
+                          </span>{' '}
+                          <span className="text-slate-400">
+                            (first on Day {firstDay}, then every {interval} day{interval === 1 ? '' : 's'})
+                          </span>
+                        </>
+                      )}
                     </div>
                   )
                 }
