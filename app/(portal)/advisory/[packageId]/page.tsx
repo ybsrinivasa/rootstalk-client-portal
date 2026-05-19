@@ -17,6 +17,15 @@ interface Package {
   duration_days: number; version: number; description: string | null
   start_date_label_cosh_id: string | null
   parent_global_id: string | null
+  // Batch HH (2026-05-19) — footprint/crop cascade audit fields
+  // from PackageOut. `cascade_inactivated_reason` is set only when
+  // status went INACTIVE because of a cascade; cleared on
+  // successful republish. `last_cascade_at` fires on every cascade
+  // including shrinks that didn't flip status, so the banner
+  // appears even on still-ACTIVE packages whose location list was
+  // narrowed by the CA.
+  cascade_inactivated_reason?: 'locations_cleared_by_cascade' | 'crop_removed_from_belt' | null
+  last_cascade_at?: string | null
 }
 interface LineageRow {
   id: string
@@ -188,6 +197,29 @@ export default function PackageDetailPage() {
   const [locationsSelected, setLocationsSelected] = useState<Set<string>>(new Set())
   const [savingLocations, setSavingLocations] = useState(false)
   const [locationsError, setLocationsError] = useState('')
+
+  // Footprint cascade banner (Batch HH, 2026-05-19). Read the
+  // dismissal mark from localStorage scoped per-package; a NEW
+  // cascade (different last_cascade_at) re-shows the banner so
+  // the SE has to actively re-dismiss every distinct event.
+  const [dismissedCascadeAt, setDismissedCascadeAt] = useState<string | null>(null)
+  useEffect(() => {
+    if (!pkg?.id) return
+    if (typeof window === 'undefined') return
+    setDismissedCascadeAt(
+      localStorage.getItem(`cascadeBanner.dismissed.${pkg.id}`),
+    )
+  }, [pkg?.id])
+  const cascadeBannerVisible = !!pkg?.last_cascade_at
+    && pkg.last_cascade_at !== dismissedCascadeAt
+  function dismissCascadeBanner() {
+    if (!pkg?.last_cascade_at) return
+    localStorage.setItem(
+      `cascadeBanner.dismissed.${pkg.id}`,
+      pkg.last_cascade_at,
+    )
+    setDismissedCascadeAt(pkg.last_cascade_at)
+  }
 
   // Parameters & Variables (Package Signature). Mirror of SA Global
   // CCA (2026-05-17). Lives behind ✎ Set Signature; compact summary
@@ -1014,6 +1046,25 @@ export default function PackageDetailPage() {
               {publishing ? 'Publishing…' : '✓ Publish'}
             </button>
           )}
+          {/* Batch HH (2026-05-19) — restore a package that was
+              auto-INACTIVATED because its districts were removed
+              from the footprint. Same publish handler; the publish
+              gate enforces "≥ 1 location" so the SE must add new
+              districts via Edit Locations first. crop_removed
+              packages recover via re-adding the crop in Setup,
+              not via this button. */}
+          {pkg.status === 'INACTIVE'
+            && pkg.cascade_inactivated_reason === 'locations_cleared_by_cascade' && (
+            <button onClick={() => setShowPublishConfirm(true)}
+              disabled={publishing || !readiness?.ready}
+              title={!readiness?.ready
+                ? 'Add at least one district via Edit Locations before restoring'
+                : 'Restore this package as ACTIVE'}
+              className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
+              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              {publishing ? 'Restoring…' : '↻ Restore (publish)'}
+            </button>
+          )}
           {pkg.status === 'ACTIVE' && (
             <>
               <button onClick={handleCloneToDraft}
@@ -1038,6 +1089,82 @@ export default function PackageDetailPage() {
       </div>
       {pubError && <p className="text-sm text-red-600">{pubError}</p>}
       {lineageError && <p className="text-sm text-red-600">{lineageError}</p>}
+
+      {/* Batch HH (2026-05-19) — footprint/crop cascade banner.
+          Variants:
+            • INACTIVE + locations_cleared_by_cascade → red call-out
+              with restore instruction.
+            • INACTIVE + crop_removed_from_belt → red call-out
+              pointing the CA to Setup → Crops to re-add the crop.
+            • ACTIVE + last_cascade_at set (shrink case, reason
+              already cleared on republish OR was never set because
+              status didn't flip) → amber notice.
+          Dismissal is per-package + per-cascade-timestamp; a new
+          cascade re-surfaces. */}
+      {cascadeBannerVisible && pkg.last_cascade_at && (
+        <div className={`rounded-xl p-4 border ${
+          pkg.cascade_inactivated_reason
+            ? 'bg-red-50 border-red-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
+          <div className="flex items-start gap-3">
+            <div className={`text-lg leading-none mt-0.5 ${
+              pkg.cascade_inactivated_reason ? 'text-red-600' : 'text-amber-600'
+            }`}>⚠</div>
+            <div className="flex-1 space-y-1">
+              {pkg.cascade_inactivated_reason === 'locations_cleared_by_cascade' && (
+                <>
+                  <p className="text-sm font-semibold text-red-800">
+                    This package was deactivated on{' '}
+                    {new Date(pkg.last_cascade_at).toLocaleDateString()}
+                  </p>
+                  <p className="text-sm text-red-700">
+                    Every district this package served was removed from the
+                    company footprint. Open <strong>Edit Locations</strong> to
+                    add districts from the current footprint, then click{' '}
+                    <strong>Restore (publish)</strong> to bring the package back
+                    to ACTIVE.
+                  </p>
+                </>
+              )}
+              {pkg.cascade_inactivated_reason === 'crop_removed_from_belt' && (
+                <>
+                  <p className="text-sm font-semibold text-red-800">
+                    This package was deactivated on{' '}
+                    {new Date(pkg.last_cascade_at).toLocaleDateString()}
+                  </p>
+                  <p className="text-sm text-red-700">
+                    The crop was removed from the company&apos;s Setup → Crops list.
+                    Ask the CA to re-add the crop — the package will revive
+                    automatically. Adding locations alone won&apos;t recover it.
+                  </p>
+                </>
+              )}
+              {!pkg.cascade_inactivated_reason && (
+                <>
+                  <p className="text-sm font-semibold text-amber-800">
+                    Footprint updated on{' '}
+                    {new Date(pkg.last_cascade_at).toLocaleDateString()}
+                  </p>
+                  <p className="text-sm text-amber-700">
+                    The CA changed the company location footprint. This package&apos;s
+                    location list was trimmed to stay within the footprint.
+                    Review the Locations panel below and add more if you need
+                    wider reach.
+                  </p>
+                </>
+              )}
+            </div>
+            <button onClick={dismissCascadeBanner}
+              aria-label="Dismiss notice"
+              className={`text-sm hover:underline ${
+                pkg.cascade_inactivated_reason ? 'text-red-600' : 'text-amber-700'
+              }`}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs text-slate-600">
         Each publish creates a new version. Farmers always move to the latest published
