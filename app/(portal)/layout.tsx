@@ -145,9 +145,19 @@ const ROLE_NAV: Record<string, string[]> = {
   // /alerts is the Relationship Manager's queue — restricted to CA
   // + CLIENT_RM. Other roles drop it from their sidebar
   // (2026-05-18 per user).
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops'],
+  //
+  // Batch X (2026-05-19) — /seed moved into SUBJECT_EXPERT (the SDM
+  // role is gone; Seed Data is now an SE privilege). The route is
+  // still seedOnly so non-Seed-Company SEs don't see it.
+  // Backend enforces the privilege check on every mutation; an SE
+  // without the privilege sees the link but every action will 403
+  // with `seed_data_or_ca_only` and a helpful message via Batch W-2
+  // error surfacing.
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/seed'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager'],
   CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
+  // Legacy: pre Batch X migration, SDM was its own role. Kept here
+  // for any straggler accounts; safe no-op now.
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
   PRODUCT_MANAGER:  ['/dashboard', '/qr'],
   REPORT_USER:      ['/dashboard'],

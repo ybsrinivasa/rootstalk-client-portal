@@ -14,23 +14,50 @@ interface PortalUser {
   professional_profile: string | null
 }
 
+// Batch X (2026-05-19) — SEED_DATA_MANAGER removed from the role
+// picker. Seed-data access is now a client-scoped privilege held by
+// one Subject Expert; assigned via the "Client Responsibilities"
+// panel at the top of this page. Legacy SEED_DATA_MANAGER rows were
+// migrated to SUBJECT_EXPERT + ClientUserPrivilege(SEED_DATA), but
+// the role label is kept in ROLE_COLOUR / ROLE_LABEL so any stragglers
+// still render correctly.
 const ROLES = [
   { value: 'SUBJECT_EXPERT', label: 'Subject Expert' },
   { value: 'FIELD_MANAGER', label: 'Field Manager' },
-  { value: 'SEED_DATA_MANAGER', label: 'Seed Data Manager' },
   { value: 'REPORT_USER', label: 'Report User' },
   { value: 'PRODUCT_MANAGER', label: 'Product Manager' },
   { value: 'CLIENT_RM', label: 'Relationship Manager' },
 ]
 
+const ROLE_LABEL: Record<string, string> = {
+  CA: 'Customer Admin',
+  SUBJECT_EXPERT: 'Subject Expert',
+  FIELD_MANAGER: 'Field Manager',
+  SEED_DATA_MANAGER: 'Seed Data',  // legacy migration safety
+  REPORT_USER: 'Report User',
+  PRODUCT_MANAGER: 'Product Manager',
+  CLIENT_RM: 'Relationship Manager',
+}
+
 const ROLE_COLOUR: Record<string, string> = {
   CA: 'bg-green-100 text-green-700',
   SUBJECT_EXPERT: 'bg-blue-100 text-blue-700',
   FIELD_MANAGER: 'bg-purple-100 text-purple-700',
-  SEED_DATA_MANAGER: 'bg-amber-100 text-amber-700',
+  SEED_DATA_MANAGER: 'bg-amber-100 text-amber-700',  // legacy
   REPORT_USER: 'bg-slate-100 text-slate-600',
   PRODUCT_MANAGER: 'bg-pink-100 text-pink-700',
   CLIENT_RM: 'bg-teal-100 text-teal-700',
+}
+
+interface PrivilegeOwner {
+  privilege: string
+  user_id: string | null
+  name: string | null
+  email: string | null
+}
+
+const PRIVILEGE_LABEL: Record<string, string> = {
+  SEED_DATA: 'Seed Data',
 }
 
 export default function UsersPage() {
@@ -61,15 +88,36 @@ export default function UsersPage() {
     name: '', designation: '', professional_profile: '',
   })
 
+  // Batch X (2026-05-19) — per-client privilege holders + assign UI.
+  // Visible only for Seed Companies (currently the only privilege).
+  const [privileges, setPrivileges] = useState<PrivilegeOwner[]>([])
+  const [savingPriv, setSavingPriv] = useState<string | null>(null)
+  const isSeedCompany = client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
+
   const load = () => {
     if (!clientId) return
-    api.get<PortalUser[]>(`/client/${clientId}/users`)
-      .then(r => setUsers(r.data))
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    Promise.all([
+      api.get<PortalUser[]>(`/client/${clientId}/users`)
+        .then(r => setUsers(r.data))
+        .catch(() => {}),
+      api.get<PrivilegeOwner[]>(`/client/${clientId}/privileges`)
+        .then(r => setPrivileges(r.data))
+        .catch(() => setPrivileges([])),
+    ]).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [clientId])
+
+  async function setPrivilegeHolder(privilege: string, userId: string | null) {
+    if (!clientId) return
+    setSavingPriv(privilege); setError('')
+    try {
+      await api.put(`/client/${clientId}/privileges/${privilege}`, { user_id: userId })
+      await load()
+    } catch (err: unknown) {
+      setError(extractErrorMessage(err, 'Failed to assign privilege.'))
+    } finally { setSavingPriv(null) }
+  }
 
   async function handleInvite(e: FormEvent) {
     e.preventDefault()
@@ -156,6 +204,55 @@ export default function UsersPage() {
         <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{error}</div>
       )}
 
+      {/* Batch X (2026-05-19) — per-client single-holder
+          responsibilities. Visible only on Seed Companies for now
+          (Seed Data is the only privilege). Mirrors the SA-Portal
+          "Content Manager Responsibilities" panel; the privilege
+          holder is always one Subject Expert. Selecting a different
+          SE atomically demotes the previous holder. */}
+      {isSeedCompany && !loading && (
+        <section>
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+            Client Responsibilities
+          </h2>
+          <div className="bg-white rounded-xl border border-slate-100 divide-y divide-slate-50">
+            {Object.keys(PRIVILEGE_LABEL).map(p => {
+              const owner = privileges.find(o => o.privilege === p)
+              const ses = users.filter(u =>
+                u.role === 'SUBJECT_EXPERT' && u.status === 'ACTIVE',
+              )
+              return (
+                <div key={p} className="flex items-center justify-between px-5 py-4 gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-900">{PRIVILEGE_LABEL[p]}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {owner?.user_id
+                        ? `Currently held by ${owner.name || owner.email}.`
+                        : 'No one is responsible yet. Assign a Subject Expert.'}
+                    </p>
+                  </div>
+                  <select
+                    value={owner?.user_id || ''}
+                    disabled={savingPriv === p || ses.length === 0}
+                    onChange={e => setPrivilegeHolder(p, e.target.value || null)}
+                    className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white disabled:bg-slate-50 min-w-[14rem]">
+                    <option value="">(unassigned)</option>
+                    {ses.map(s => (
+                      <option key={s.id} value={s.id}>{s.name || s.email}</option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })}
+            {users.filter(u => u.role === 'SUBJECT_EXPERT' && u.status === 'ACTIVE').length === 0 && (
+              <p className="px-5 py-3 text-xs text-slate-400">
+                Add at least one Subject Expert below to assign responsibilities.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
       {loading ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
       ) : users.length === 0 ? (
@@ -183,7 +280,7 @@ export default function UsersPage() {
                   </td>
                   <td className="px-5 py-3.5">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_COLOUR[user.role] || 'bg-slate-100 text-slate-600'}`}>
-                      {ROLES.find(r => r.value === user.role)?.label || user.role}
+                      {ROLE_LABEL[user.role] || user.role}
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
@@ -248,17 +345,7 @@ export default function UsersPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Role</label>
                 <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  {ROLES
-                    // Seed Data Manager is offered only on clients
-                    // onboarded as Seed Companies (Batch O, 2026-05-18).
-                    // Existing SDM rows on a non-seed client (shouldn't
-                    // happen post-fix) still render correctly in the
-                    // table via ROLE_COLOUR.
-                    .filter(r => {
-                      if (r.value !== 'SEED_DATA_MANAGER') return true
-                      return client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
-                    })
-                    .map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
               <div>
@@ -322,7 +409,7 @@ export default function UsersPage() {
             <div className="p-6 border-b border-slate-100">
               <h2 className="font-bold text-slate-900">Edit User</h2>
               <p className="text-slate-500 text-sm mt-0.5">
-                {editing.email} · {ROLES.find(r => r.value === editing.role)?.label || editing.role}
+                {editing.email} · {ROLE_LABEL[editing.role] || editing.role}
               </p>
             </div>
             <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
