@@ -134,6 +134,16 @@ export default function RecDetailPage() {
   const [cloneError, setCloneError] = useState('')
   const [makingEditable, setMakingEditable] = useState<string | null>(null)
 
+  // Import from Global on the Timeline screen (2026-05-21). Auto-pick
+  // the ACTIVE Global PG matching this rec's (problem_group_cosh_id,
+  // area_or_plant). When no match exists, the button is hidden.
+  // Re-importing replaces an empty DRAFT silently, asks before
+  // overwriting a DRAFT with content, and clones-to-new-DRAFT from
+  // an ACTIVE/INACTIVE row (the import endpoint handles all three).
+  const [matchingGlobal, setMatchingGlobal] = useState<{ id: string; version: number } | null>(null)
+  const [importingGlobal, setImportingGlobal] = useState(false)
+  const [importError, setImportError] = useState('')
+
   const loadRec = async () => {
     if (!clientId || !recId) return
     try {
@@ -203,6 +213,25 @@ export default function RecDetailPage() {
       }
     } catch { /* non-fatal */ }
   }
+  // Match an ACTIVE Global PG by (problem_group_cosh_id, area_or_plant)
+  // — the natural key for any (pg × bundle) lineage. There should be
+  // at most one ACTIVE per natural key; if none, the button hides.
+  const loadMatchingGlobal = async () => {
+    if (!rec) { setMatchingGlobal(null); return }
+    try {
+      const { data } = await api.get<{
+        id: string; problem_group_cosh_id: string;
+        area_or_plant: 'AREA_WISE' | 'PLANT_WISE' | null;
+        status: string; version: number
+      }[]>('/advisory/global/pg-recommendations')
+      const match = data.find(g =>
+        g.problem_group_cosh_id === rec.problem_group_cosh_id
+        && g.area_or_plant === rec.area_or_plant
+        && g.status === 'ACTIVE',
+      )
+      setMatchingGlobal(match ? { id: match.id, version: match.version } : null)
+    } catch { setMatchingGlobal(null) }
+  }
 
   useEffect(() => {
     loadRec()
@@ -211,7 +240,7 @@ export default function RecDetailPage() {
     loadLineage()
   }, [clientId, recId])
 
-  useEffect(() => { loadProblemName() }, [rec, clientId])
+  useEffect(() => { loadProblemName(); loadMatchingGlobal() }, [rec, clientId])
 
   async function handleAddTimeline(e: FormEvent) {
     e.preventDefault()
@@ -337,6 +366,50 @@ export default function RecDetailPage() {
     } finally { setMakingEditable(null) }
   }
 
+  // Import-from-Global on the Timeline screen (2026-05-21). Behaviour
+  // routes through the existing import endpoint:
+  //   • Viewing ACTIVE / INACTIVE → no DRAFT in lineage → backend
+  //     creates a new DRAFT row with the imported content. We route
+  //     to it. No confirm.
+  //   • Viewing DRAFT with no content → silent overwrite (nothing to
+  //     destroy). No confirm.
+  //   • Viewing DRAFT with content → ask before overwriting. The
+  //     backend returns 409 draft_exists_confirm_overwrite by default;
+  //     we pre-empt with a friendlier confirm here, then retry with
+  //     overwrite=true.
+  async function handleImportFromGlobal() {
+    if (!clientId || !rec || !matchingGlobal) return
+    setImportError('')
+    const hasContent = rec.status === 'DRAFT' && timelines.length > 0
+    if (hasContent) {
+      const ok = confirm(
+        `This DRAFT has ${timelines.length} timeline${timelines.length === 1 ? '' : 's'}. ` +
+        `Re-importing from Global v${matchingGlobal.version} will replace all of it. Continue?`,
+      )
+      if (!ok) return
+    }
+    setImportingGlobal(true)
+    try {
+      const { data } = await api.post<Rec>(
+        `/client/${clientId}/pg-recommendations/import/${matchingGlobal.id}` +
+        (hasContent ? '?overwrite=true' : ''),
+      )
+      // ACTIVE/INACTIVE source → new DRAFT id. DRAFT source → same id.
+      if (data.id !== recId) {
+        router.push(`/cha/recommendations/${data.id}`)
+      } else {
+        await loadRec()
+        await loadTimelines()
+        await loadReadiness()
+        await loadLineage()
+      }
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setImportError(msg || 'Failed to import from Global.')
+    } finally { setImportingGlobal(false) }
+  }
+
   async function handlePublish() {
     setPublishing(true); setPubError('')
     try {
@@ -416,12 +489,25 @@ export default function RecDetailPage() {
           </p>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
             <Link href={`/cha/recommendations/${recId}/preview`}
               className="text-sm font-medium px-4 py-2 rounded-xl border"
               style={{ borderColor: colour, color: colour }}>
               👁 Preview
             </Link>
+            {/* Import from Global is available regardless of status —
+                the import endpoint creates a new DRAFT from ACTIVE /
+                INACTIVE, or overwrites an existing DRAFT after confirm.
+                Hidden when no matching ACTIVE Global exists. */}
+            {matchingGlobal && (
+              <button onClick={handleImportFromGlobal} disabled={importingGlobal}
+                title={`Pull content from Global v${matchingGlobal.version}`}
+                className="text-sm font-medium px-4 py-2 rounded-xl border disabled:opacity-50"
+                style={{ borderColor: colour, color: colour }}>
+                {importingGlobal ? 'Importing…' :
+                  isDraft ? '↓ Import from Global' : '↓ Import from Global (new draft)'}
+              </button>
+            )}
             {/* Batch T (2026-05-18): single Edit button on non-DRAFT
                 rows replaces the big read-only banner. ACTIVE → start
                 a fresh draft; INACTIVE → revert from this history. */}
@@ -436,6 +522,9 @@ export default function RecDetailPage() {
           </div>
           {!isDraft && cloneError && (
             <p className="text-xs text-red-600">{cloneError}</p>
+          )}
+          {importError && (
+            <p className="text-xs text-red-600">{importError}</p>
           )}
           {rec.status === 'DRAFT' && (
             <button onClick={() => setShowPublishConfirm(true)}

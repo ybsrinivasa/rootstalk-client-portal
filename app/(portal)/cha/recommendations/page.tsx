@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useMemo, Suspense, FormEvent } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 import FilterChips, { ActiveChip } from '@/components/cca/FilterChips'
@@ -42,6 +42,7 @@ function ChaRecsContent() {
   const clientId = client?.id
   const colour = client?.primary_colour || '#1A5C2A'
   const params = useSearchParams()
+  const router = useRouter()
   const pgFilter = params.get('pg') || ''
   const apFilter = params.get('ap') || ''
   const statusFilter = params.get('status') || ''
@@ -65,6 +66,13 @@ function ChaRecsContent() {
   const [loadingGlobals, setLoadingGlobals] = useState(false)
   const [importing, setImporting] = useState<string | null>(null)
   const [importError, setImportError] = useState('')
+
+  // One-click bundle creation (2026-05-21) — replaces the old modal
+  // when the SE clicks "+ Add Recommendations" on a bundle card. The
+  // bundle type comes from the card itself; PG cosh_id from the URL.
+  // Per-bundle error so a failure on one card doesn't blank both.
+  const [bundleBusy, setBundleBusy] = useState<'AREA_WISE' | 'PLANT_WISE' | null>(null)
+  const [bundleError, setBundleError] = useState<Record<string, string>>({})
 
   // Publish
   const [publishTarget, setPublishTarget] = useState<ChaRec | null>(null)
@@ -131,6 +139,47 @@ function ChaRecsContent() {
     if (!pgFilter) return ''
     return problems.find(p => p.cosh_id === pgFilter)?.name_en || ''
   }, [pgFilter, problems])
+
+  // Bundle-card "+ Add Recommendations" — skip the create modal
+  // entirely. Bundle type is implicit in the card; PG cosh_id is in
+  // the URL filter. Create the DRAFT and route straight to its
+  // timelines page. Race-safe: if a rec already exists in this
+  // (client, pg, bundle) lineage, refetch + route to it instead.
+  async function createBundleAndGo(bundle: 'AREA_WISE' | 'PLANT_WISE') {
+    if (!clientId || !pgFilter) return
+    setBundleBusy(bundle)
+    setBundleError(e => ({ ...e, [bundle]: '' }))
+    try {
+      const { data } = await api.post<ChaRec>(
+        `/client/${clientId}/pg-recommendations`,
+        { problem_group_cosh_id: pgFilter, area_or_plant: bundle },
+      )
+      router.push(`/cha/recommendations/${data.id}`)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const code = (detail as { code?: string })?.code
+      if (code === 'bundle_already_exists') {
+        try {
+          const { data } = await api.get<ChaRec[]>(`/client/${clientId}/pg-recommendations`)
+          const existing = data.find(
+            r => r.problem_group_cosh_id === pgFilter && r.area_or_plant === bundle,
+          )
+          if (existing) {
+            router.push(`/cha/recommendations/${existing.id}`)
+            return
+          }
+        } catch { /* fall through to surfaced error */ }
+        setBundleError(e => ({ ...e, [bundle]: 'A bundle already exists for this combination. Refresh the page to see it.' }))
+      } else {
+        const msg = typeof detail === 'string'
+          ? detail
+          : (detail as { message?: string })?.message
+        setBundleError(e => ({ ...e, [bundle]: msg || 'Failed to create recommendation.' }))
+      }
+    } finally {
+      setBundleBusy(null)
+    }
+  }
 
   const openCreate = (preselectBundle?: 'AREA_WISE' | 'PLANT_WISE') => {
     setForm({
@@ -318,18 +367,24 @@ function ChaRecsContent() {
             </>
           )}
         </div>
-        <div className="flex gap-2">
-          <button onClick={openImport}
-            className="border text-sm font-medium px-4 py-2.5 rounded-xl"
-            style={{ borderColor: colour, color: colour }}>
-            ↓ Import from Global
-          </button>
-          <button onClick={() => openCreate()}
-            className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-            + New Recommendation
-          </button>
-        </div>
+        {/* Top-right pair only on the unfiltered list view. When a PG
+            is selected, the per-bundle cards below carry equivalent
+            affordances — the top-right pair would be redundant
+            (and confusing now that bundle creation is one-click). */}
+        {!pgFilter && (
+          <div className="flex gap-2">
+            <button onClick={openImport}
+              className="border text-sm font-medium px-4 py-2.5 rounded-xl"
+              style={{ borderColor: colour, color: colour }}>
+              ↓ Import from Global
+            </button>
+            <button onClick={() => openCreate()}
+              className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
+              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              + New Recommendation
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter chips are redundant when the page is already filtered
@@ -363,10 +418,11 @@ function ChaRecsContent() {
                   </div>
                   <p className="text-slate-400 text-sm mb-6">Not started</p>
                   <div className="mt-auto flex flex-col gap-2">
-                    <button onClick={() => openCreate(bundle)}
-                      className="text-sm font-semibold px-4 py-2.5 rounded-xl border text-white"
+                    <button onClick={() => createBundleAndGo(bundle)}
+                      disabled={bundleBusy === bundle}
+                      className="text-sm font-semibold px-4 py-2.5 rounded-xl border text-white disabled:opacity-50"
                       style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                      + Add Recommendations
+                      {bundleBusy === bundle ? 'Starting…' : '+ Add Recommendations'}
                     </button>
                     <button onClick={openImport}
                       className="text-sm font-medium px-4 py-2 rounded-xl border"
@@ -374,6 +430,9 @@ function ChaRecsContent() {
                       ↓ Import from Global
                     </button>
                   </div>
+                  {bundleError[bundle] && (
+                    <p className="text-xs text-red-600 mt-2">{bundleError[bundle]}</p>
+                  )}
                 </div>
               )
             }
