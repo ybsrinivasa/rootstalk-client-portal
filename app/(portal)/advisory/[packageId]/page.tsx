@@ -7,6 +7,7 @@ import PackageCalendar from '@/components/cca/PackageCalendar'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
+import { useReadOnlyGuard } from '@/components/advisory-authoring/ReadOnlyGuard'
 import { practiceShortLabel } from '@/lib/practice-label'
 import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
 
@@ -968,6 +969,18 @@ export default function PackageDetailPage() {
 
   useEffect(() => { if (pkg) loadLineage() }, [pkg?.id])
 
+  // 2026-05-21 — gate every edit action on DRAFT status. Read-only
+  // rows (ACTIVE / INACTIVE) cannot be mutated; clicking any +Add /
+  // ✎Edit / Delete pops a caution modal directing the user to the
+  // "+ Start new edit" button. Backend still 422s as defence-in-depth;
+  // this just stops the user from filling in a form that won't save.
+  // Hook lives ABOVE the early-return so Rules of Hooks hold.
+  const editorReadOnly = pkg ? pkg.status !== 'DRAFT' : true
+  const { tryEdit, GuardModal } = useReadOnlyGuard({
+    isReadOnly: editorReadOnly,
+    statusLabel: pkg?.status?.toLowerCase() || 'published',
+  })
+
   if (!pkg) return (
     <div className="max-w-4xl mx-auto pt-20 text-center text-slate-400">Loading package…</div>
   )
@@ -1028,12 +1041,12 @@ export default function PackageDetailPage() {
             👁 Preview
           </a>
           <button
-            onClick={openEdit}
+            onClick={() => tryEdit(openEdit)}
             className="border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
             ✎ Edit details
           </button>
           <button
-            onClick={() => { setShowSignature(true); setPvSaveError('') }}
+            onClick={() => tryEdit(() => { setShowSignature(true); setPvSaveError('') })}
             className="border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
             ✎ Set signature
           </button>
@@ -1223,7 +1236,7 @@ export default function PackageDetailPage() {
               Districts this package serves. Farmers in other districts won&apos;t see it on the PWA.
             </p>
           </div>
-          <button onClick={openEditLocations}
+          <button onClick={() => tryEdit(openEditLocations)}
             className="text-sm font-medium px-3 py-1.5 rounded-xl border"
             style={{ borderColor: colour, color: colour }}>
             ✎ Edit Locations
@@ -1260,7 +1273,7 @@ export default function PackageDetailPage() {
               Subject Experts credited on this Package. Their name, designation, and professional profile appear next to the PoP on the farmer&apos;s app.
             </p>
           </div>
-          <button onClick={openEditAuthors}
+          <button onClick={() => tryEdit(openEditAuthors)}
             className="text-sm font-medium px-3 py-1.5 rounded-xl border"
             style={{ borderColor: colour, color: colour }}>
             ✎ Edit Authors
@@ -1311,7 +1324,7 @@ export default function PackageDetailPage() {
               className="text-sm font-medium px-3 py-1.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50">
               ↓ Import
             </button>
-            <button onClick={openAddTimeline}
+            <button onClick={() => tryEdit(openAddTimeline)}
               className="text-sm font-medium px-3 py-1.5 rounded-xl border"
               style={{ borderColor: colour, color: colour }}>
               + Add
@@ -1322,7 +1335,7 @@ export default function PackageDetailPage() {
         {timelines.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-dashed border-slate-200">
             <p className="text-slate-500 text-sm">No timelines yet. A timeline defines a window (e.g. Day 0–30 after sowing) and contains the practices for that window.</p>
-            <button onClick={openAddTimeline}
+            <button onClick={() => tryEdit(openAddTimeline)}
               className="mt-3 text-sm font-medium text-white px-4 py-2 rounded-xl"
               style={{ background: colour }}>
               Add First Timeline
@@ -1348,14 +1361,14 @@ export default function PackageDetailPage() {
                       {FROM_TYPE_LABEL[tl.from_type]} · {formatTimelineRange(tl)}
                     </p>
                   </div>
-                  <button onClick={e => { e.stopPropagation(); openEditTimeline(tl) }}
+                  <button onClick={e => { e.stopPropagation(); tryEdit(() => openEditTimeline(tl)) }}
                     className="text-slate-300 hover:text-blue-500 transition-colors p-1"
                     title="Edit timeline">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
-                  <button onClick={e => { e.stopPropagation(); handleDeleteTimeline(tl) }}
+                  <button onClick={e => { e.stopPropagation(); tryEdit(() => handleDeleteTimeline(tl)) }}
                     className="text-slate-300 hover:text-red-400 transition-colors p-1"
                     title="Delete timeline">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1395,15 +1408,17 @@ export default function PackageDetailPage() {
                               </span>
                               <button onClick={e => {
                                 e.stopPropagation()
-                                setEditingPractice({ timelineId: tl.id, practice: p })
-                                setShowAddPractice(tl.id)
+                                tryEdit(() => {
+                                  setEditingPractice({ timelineId: tl.id, practice: p })
+                                  setShowAddPractice(tl.id)
+                                })
                               }}
                                 className="text-slate-300 hover:text-blue-500 p-1" title="Edit practice">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                 </svg>
                               </button>
-                              <button onClick={e => { e.stopPropagation(); handleDeletePractice(tl.id, p.id) }}
+                              <button onClick={e => { e.stopPropagation(); tryEdit(() => handleDeletePractice(tl.id, p.id)) }}
                                 className="text-slate-300 hover:text-red-400 p-1" title="Delete practice">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1432,7 +1447,7 @@ export default function PackageDetailPage() {
                         )
                       })
                     )}
-                    <button onClick={() => { setEditingPractice(null); setShowAddPractice(tl.id) }}
+                    <button onClick={() => tryEdit(() => { setEditingPractice(null); setShowAddPractice(tl.id) })}
                       className="text-xs font-medium mt-2"
                       style={{ color: colour }}>
                       + Add Practice
@@ -2495,6 +2510,7 @@ export default function PackageDetailPage() {
           </div>
         </div>
       )}
+      <GuardModal />
     </div>
   )
 }

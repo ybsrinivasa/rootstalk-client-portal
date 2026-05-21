@@ -83,7 +83,7 @@ export function ReadOnlyBanner({
             to confirm that the existing draft will become INACTIVE. */}
         <button onClick={onCloneToDraft} disabled={cloning}
           className="bg-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-amber-700 disabled:opacity-50">
-          {cloning ? 'Starting…' : `Start fresh v${nextVersion} draft`}
+          {cloning ? 'Starting…' : `+ Start new edit (v${nextVersion} draft)`}
         </button>
         {existingDraft && (
           <Link href={continueDraftHref(existingDraft)}
