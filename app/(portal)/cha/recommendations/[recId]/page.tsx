@@ -495,19 +495,23 @@ export default function RecDetailPage() {
               style={{ borderColor: colour, color: colour }}>
               👁 Preview
             </Link>
-            {/* Import from Global is available regardless of status —
+            {/* Import from Global is always shown — disabled when no
+                ACTIVE Global PG exists for this (PG × bundle) so the
+                SE understands the state instead of guessing about a
+                missing button. Available regardless of row status:
                 the import endpoint creates a new DRAFT from ACTIVE /
-                INACTIVE, or overwrites an existing DRAFT after confirm.
-                Hidden when no matching ACTIVE Global exists. */}
-            {matchingGlobal && (
-              <button onClick={handleImportFromGlobal} disabled={importingGlobal}
-                title={`Pull content from Global v${matchingGlobal.version}`}
-                className="text-sm font-medium px-4 py-2 rounded-xl border disabled:opacity-50"
-                style={{ borderColor: colour, color: colour }}>
-                {importingGlobal ? 'Importing…' :
-                  isDraft ? '↓ Import from Global' : '↓ Import from Global (new draft)'}
-              </button>
-            )}
+                INACTIVE, or overwrites an existing DRAFT after confirm. */}
+            <button onClick={handleImportFromGlobal}
+              disabled={importingGlobal || !matchingGlobal}
+              title={matchingGlobal
+                ? `Pull content from Global v${matchingGlobal.version}`
+                : 'No published Global recommendation exists for this Problem Group + bundle yet. Ask the Content Manager to publish one.'}
+              className="text-sm font-medium px-4 py-2 rounded-xl border disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ borderColor: colour, color: colour }}>
+              {importingGlobal ? 'Importing…' :
+                !matchingGlobal ? '↓ Import from Global (none published)' :
+                isDraft ? '↓ Import from Global' : '↓ Import from Global (new draft)'}
+            </button>
             {/* Batch T (2026-05-18): single Edit button on non-DRAFT
                 rows replaces the big read-only banner. ACTIVE → start
                 a fresh draft; INACTIVE → revert from this history. */}
