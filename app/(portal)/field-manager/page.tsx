@@ -7,6 +7,19 @@ interface Promoter {
   id: string; user_id: string; name: string | null; phone: string | null
   promoter_type: string; status: string; is_promoter: boolean
   territory_notes: string | null; registered_at: string
+  // 2026-05-21 — bulk-decorated by GET /field-manager/promoters
+  // for DEALER rows so the FM can verify identity at a glance
+  // and tap "📍 View on Map" without an extra round-trip.
+  // null for facilitators (no DealerProfile).
+  shop_name?: string | null
+  shop_address?: string | null
+  shop_gps_lat?: number | null
+  shop_gps_lng?: number | null
+}
+
+function mapHref(lat: number | null | undefined, lng: number | null | undefined): string | null {
+  if (lat == null || lng == null) return null
+  return `https://www.google.com/maps?q=${lat},${lng}`
 }
 interface Farmer {
   user_id: string; name: string | null; phone: string | null
@@ -186,6 +199,9 @@ export default function FieldManagerPage() {
                 <tr key={p.id} className="hover:bg-slate-50">
                   <td className="px-5 py-3.5">
                     <p className="font-medium text-slate-800">{p.name || '—'}</p>
+                    {p.shop_name && (
+                      <p className="text-xs text-slate-500 mt-0.5">{p.shop_name}</p>
+                    )}
                     {p.is_promoter && (
                       <span className="inline-block mt-1 text-xs bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-medium">
                         ★ Promoter
@@ -201,6 +217,13 @@ export default function FieldManagerPage() {
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                      {mapHref(p.shop_gps_lat, p.shop_gps_lng) && (
+                        <a href={mapHref(p.shop_gps_lat, p.shop_gps_lng)!}
+                          target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 whitespace-nowrap">
+                          📍 View on Map
+                        </a>
+                      )}
                       {p.status === 'ACTIVE' && (
                         <button onClick={() => togglePromoterFlag(p)}
                           className={`text-xs px-2 py-1 rounded-lg border whitespace-nowrap ${
@@ -407,9 +430,16 @@ export default function FieldManagerPage() {
                           </div>
                         )}
                         {(lookup.dealer_profile.shop_gps_lat && lookup.dealer_profile.shop_gps_lng) && (
-                          <p className="text-xs text-slate-400 font-mono">
-                            GPS: {lookup.dealer_profile.shop_gps_lat.toFixed(5)}, {lookup.dealer_profile.shop_gps_lng.toFixed(5)}
-                          </p>
+                          <div className="flex items-center gap-2 pt-1">
+                            <p className="text-xs text-slate-400 font-mono">
+                              GPS: {lookup.dealer_profile.shop_gps_lat.toFixed(5)}, {lookup.dealer_profile.shop_gps_lng.toFixed(5)}
+                            </p>
+                            <a href={mapHref(lookup.dealer_profile.shop_gps_lat, lookup.dealer_profile.shop_gps_lng)!}
+                              target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-blue-600 underline">
+                              📍 View on Map ↗
+                            </a>
+                          </div>
                         )}
                       </div>
                     )}
