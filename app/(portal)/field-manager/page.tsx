@@ -8,13 +8,16 @@ interface Promoter {
   promoter_type: string; status: string; is_promoter: boolean
   territory_notes: string | null; registered_at: string
   // 2026-05-21 — bulk-decorated by GET /field-manager/promoters
-  // for DEALER rows so the FM can verify identity at a glance
-  // and tap "📍 View on Map" without an extra round-trip.
-  // null for facilitators (no DealerProfile).
+  // for DEALER rows so the FM can verify identity at a glance,
+  // tap "📍 View on Map", and open the read-only Details modal
+  // without an extra round-trip. null/[] for facilitators.
   shop_name?: string | null
   shop_address?: string | null
   shop_gps_lat?: number | null
   shop_gps_lng?: number | null
+  sell_categories?: string[]
+  shop_photo_url?: string | null
+  shop_registration_url?: string | null
 }
 
 function mapHref(lat: number | null | undefined, lng: number | null | undefined): string | null {
@@ -70,6 +73,7 @@ export default function FieldManagerPage() {
     | { state: 'loaded'; data: LookupResult }
 
   const [phoneLookup, setPhoneLookup] = useState<PhoneLookupState>({ state: 'idle' })
+  const [detailsFor, setDetailsFor] = useState<Promoter | null>(null)
 
   const load = async () => {
     if (!clientId) return
@@ -217,6 +221,12 @@ export default function FieldManagerPage() {
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                      {type === 'DEALER' && (
+                        <button onClick={() => setDetailsFor(p)}
+                          className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 whitespace-nowrap">
+                          Details
+                        </button>
+                      )}
                       {mapHref(p.shop_gps_lat, p.shop_gps_lng) && (
                         <a href={mapHref(p.shop_gps_lat, p.shop_gps_lng)!}
                           target="_blank" rel="noopener noreferrer"
@@ -470,6 +480,114 @@ export default function FieldManagerPage() {
           </div>
         )
       })()}
+
+      {/* Dealer Details modal — read-only view of the current
+          DealerProfile. Data comes from the same list_promoters
+          payload the table already loaded; the dealer's edits on
+          their PWA flow through on the next page refresh. */}
+      {detailsFor && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setDetailsFor(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-slate-900 truncate">
+                  {detailsFor.shop_name || detailsFor.name || 'Dealer'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {detailsFor.name && detailsFor.shop_name ? detailsFor.name + ' · ' : ''}
+                  <span className="font-mono">{detailsFor.phone || '—'}</span>
+                </p>
+              </div>
+              <button onClick={() => setDetailsFor(null)}
+                className="text-slate-400 hover:text-slate-600 text-2xl leading-none -mt-1">×</button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4 text-sm">
+              {/* Shop photo */}
+              {detailsFor.shop_photo_url && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Shop photograph</p>
+                  <img src={detailsFor.shop_photo_url} alt=""
+                    className="w-full rounded-xl border border-slate-200 object-cover max-h-60" />
+                </div>
+              )}
+
+              {/* Address */}
+              {detailsFor.shop_address && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Address</p>
+                  <p className="text-slate-800 leading-relaxed whitespace-pre-line">{detailsFor.shop_address}</p>
+                </div>
+              )}
+
+              {/* Sell categories */}
+              {detailsFor.sell_categories && detailsFor.sell_categories.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Sells</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {detailsFor.sell_categories.map(c => (
+                      <span key={c}
+                        className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                        {c.charAt(0) + c.slice(1).toLowerCase()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Registration certificate */}
+              {detailsFor.shop_registration_url && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Registration certificate</p>
+                  <a href={detailsFor.shop_registration_url}
+                    target="_blank" rel="noopener noreferrer"
+                    className="inline-block text-sm text-blue-600 underline">
+                    View document ↗
+                  </a>
+                </div>
+              )}
+
+              {/* GPS + map */}
+              {(detailsFor.shop_gps_lat != null && detailsFor.shop_gps_lng != null) && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Shop location</p>
+                  <p className="text-xs text-slate-500 font-mono">
+                    {detailsFor.shop_gps_lat.toFixed(6)}, {detailsFor.shop_gps_lng.toFixed(6)}
+                  </p>
+                  <a href={mapHref(detailsFor.shop_gps_lat, detailsFor.shop_gps_lng)!}
+                    target="_blank" rel="noopener noreferrer"
+                    className="inline-block mt-1 text-sm text-blue-600 underline">
+                    📍 View on Map ↗
+                  </a>
+                </div>
+              )}
+
+              {/* Empty-profile fallback — registered but hasn't
+                  completed any shop fields yet. Rare since the PWA
+                  gates /dealer/home on profile completeness, but
+                  could happen if the dealer was onboarded then
+                  cleared a field. */}
+              {!detailsFor.shop_name && !detailsFor.shop_address
+                && !detailsFor.shop_photo_url && !detailsFor.shop_registration_url
+                && (!detailsFor.sell_categories || detailsFor.sell_categories.length === 0)
+                && detailsFor.shop_gps_lat == null && (
+                <p className="text-sm text-slate-500 italic">
+                  This dealer hasn&apos;t added any shop details yet.
+                </p>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setDetailsFor(null)}
+                className="text-sm border border-slate-200 text-slate-700 font-medium px-4 py-2 rounded-xl hover:bg-slate-50">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
