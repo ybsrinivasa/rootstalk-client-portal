@@ -7,6 +7,7 @@ import { getClient } from '@/lib/auth'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
+import { useReadOnlyGuard } from '@/components/advisory-authoring/ReadOnlyGuard'
 import { practiceShortLabel } from '@/lib/practice-label'
 
 interface SP {
@@ -365,6 +366,17 @@ export default function SpDetailPage() {
     } finally { setPublishing(false) }
   }
 
+  // 2026-05-21 Phase 1 — gate every edit action on DRAFT status.
+  // Pre-fix, the backend silently wrote mutations to ACTIVE rows
+  // (the sp_not_draft helper now 422s them); this hook stops the
+  // user before they fill in a form that will fail. Hook lives
+  // ABOVE the early-return so Rules of Hooks hold.
+  const editorReadOnly = sp ? sp.status !== 'DRAFT' : true
+  const { tryEdit, GuardModal } = useReadOnlyGuard({
+    isReadOnly: editorReadOnly,
+    statusLabel: sp?.status?.toLowerCase() || 'published',
+  })
+
   if (!sp) return (
     <div className="max-w-4xl mx-auto pt-20 text-center text-slate-400">Loading recommendation…</div>
   )
@@ -457,7 +469,7 @@ export default function SpDetailPage() {
           <h2 className="font-semibold text-slate-800">
             Timelines <span className="text-slate-400 font-normal text-sm">({timelines.length})</span>
           </h2>
-          <button onClick={() => setShowAddTL(true)}
+          <button onClick={() => tryEdit(() => setShowAddTL(true))}
             className="text-sm font-medium px-3 py-1.5 rounded-xl border"
             style={{ borderColor: colour, color: colour }}>
             + Add Timeline
@@ -494,14 +506,14 @@ export default function SpDetailPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={e => { e.stopPropagation(); openEditTimeline(tl) }}
+                    <button onClick={e => { e.stopPropagation(); tryEdit(() => openEditTimeline(tl)) }}
                       className="text-slate-300 hover:text-blue-500 p-1.5"
                       title="Edit timeline">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                       </svg>
                     </button>
-                    <button onClick={e => { e.stopPropagation(); deleteTimeline(tl) }}
+                    <button onClick={e => { e.stopPropagation(); tryEdit(() => deleteTimeline(tl)) }}
                       className="text-slate-300 hover:text-red-400 p-1.5"
                       title="Delete timeline">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -540,15 +552,17 @@ export default function SpDetailPage() {
                               </span>
                               <button onClick={e => {
                                 e.stopPropagation()
-                                setEditingPractice({ timelineId: tl.id, practice: p })
-                                setShowAddPractice(tl.id)
+                                tryEdit(() => {
+                                  setEditingPractice({ timelineId: tl.id, practice: p })
+                                  setShowAddPractice(tl.id)
+                                })
                               }}
                                 className="text-slate-300 hover:text-blue-500 p-1" title="Edit practice">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                 </svg>
                               </button>
-                              <button onClick={e => { e.stopPropagation(); deletePractice(tl.id, p.id) }}
+                              <button onClick={e => { e.stopPropagation(); tryEdit(() => deletePractice(tl.id, p.id)) }}
                                 className="text-slate-300 hover:text-red-400 p-1" title="Delete practice">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -577,7 +591,7 @@ export default function SpDetailPage() {
                         )
                       })
                     )}
-                    <button onClick={() => { setEditingPractice(null); setShowAddPractice(tl.id) }}
+                    <button onClick={() => tryEdit(() => { setEditingPractice(null); setShowAddPractice(tl.id) })}
                       className="w-full mt-2 text-sm py-2 rounded-xl border border-dashed border-slate-200 text-slate-500 hover:bg-slate-50">
                       + Add Practice
                     </button>
@@ -922,6 +936,7 @@ export default function SpDetailPage() {
           </div>
         </div>
       )}
+      <GuardModal />
     </div>
   )
 }
