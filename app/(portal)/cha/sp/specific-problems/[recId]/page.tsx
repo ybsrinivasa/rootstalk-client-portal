@@ -8,6 +8,9 @@ import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import { useReadOnlyGuard } from '@/components/advisory-authoring/ReadOnlyGuard'
+import {
+  ReadOnlyBanner, VersionHistorySection, type LineageRow,
+} from '@/components/advisory-authoring/LineageSection'
 import { practiceShortLabel } from '@/lib/practice-label'
 
 interface SP {
@@ -135,6 +138,14 @@ export default function SpDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [pubError, setPubError] = useState('')
 
+  // Lineage (Phase 2, 2026-05-21) — natural key is (client_id,
+  // specific_problem_cosh_id, crop_cosh_id). Single-DRAFT invariant
+  // enforced server-side. Mirrors the CA-PG versioning UI.
+  const [lineage, setLineage] = useState<LineageRow[]>([])
+  const [cloning, setCloning] = useState(false)
+  const [cloneError, setCloneError] = useState('')
+  const [makingEditable, setMakingEditable] = useState<string | null>(null)
+
   // Import-from-PG (Task G, 2026-05-18). Picker lists this client's
   // CA-PGs whose area_or_plant matches the SP's crop_measure. Backend
   // POST /import-from-pg/{pg_id} either seeds the SP with content or
@@ -190,6 +201,15 @@ export default function SpDetailPage() {
     } catch {
       setReadiness(null)
     }
+  }
+  const loadLineage = async () => {
+    if (!clientId || !recId) return
+    try {
+      const { data } = await api.get<LineageRow[]>(
+        `/client/${clientId}/sp-recommendations/${recId}/lineage`,
+      )
+      setLineage(data)
+    } catch { setLineage([]) }
   }
   const loadFriendlyNames = async () => {
     if (!clientId || !sp) return
@@ -266,7 +286,7 @@ export default function SpDetailPage() {
   }
 
   useEffect(() => {
-    loadSp(); loadTimelines(); loadReadiness()
+    loadSp(); loadTimelines(); loadReadiness(); loadLineage()
   }, [clientId, recId])
 
   useEffect(() => { loadFriendlyNames() }, [sp, clientId])
@@ -358,12 +378,55 @@ export default function SpDetailPage() {
       setShowPublishConfirm(false)
       await loadSp()
       await loadReadiness()
+      await loadLineage()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
       setPubError(msg || 'Failed to publish.')
       await loadReadiness()
     } finally { setPublishing(false) }
+  }
+
+  async function handleCloneToDraft() {
+    // Single-DRAFT invariant — if a DRAFT already exists in the
+    // lineage, the backend returns it (no new row). So no confirm
+    // step; the SE just lands on the editable DRAFT.
+    setCloning(true); setCloneError('')
+    try {
+      const { data } = await api.post<SP>(
+        `/client/${clientId}/sp-recommendations/${recId}/clone-to-draft`,
+      )
+      router.push(`/cha/sp/specific-problems/${data.id}`)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setCloneError(msg || 'Failed to start a new draft.')
+    } finally { setCloning(false) }
+  }
+
+  async function handleMakeEditable(srcId: string, srcVersion: number) {
+    const existing = lineage.find(r => r.status === 'DRAFT')
+    if (existing && existing.id !== srcId) {
+      const ok = confirm(
+        `A v${existing.version} DRAFT already exists in this lineage. ` +
+        `Open it instead of cloning v${srcVersion}?`,
+      )
+      if (ok) {
+        router.push(`/cha/sp/specific-problems/${existing.id}`)
+        return
+      }
+    }
+    setMakingEditable(srcId); setCloneError('')
+    try {
+      const { data } = await api.post<SP>(
+        `/client/${clientId}/sp-recommendations/${srcId}/clone-to-draft`,
+      )
+      router.push(`/cha/sp/specific-problems/${data.id}`)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setCloneError(msg || 'Failed to make this version editable.')
+    } finally { setMakingEditable(null) }
   }
 
   // 2026-05-21 Phase 1 — gate every edit action on DRAFT status.
@@ -382,9 +445,40 @@ export default function SpDetailPage() {
   )
 
   const totalPractices = timelines.reduce((s, t) => s + t.practices.length, 0)
+  const isDraft = sp.status === 'DRAFT'
+  const existingLineageDraft = lineage.find(r => r.status === 'DRAFT' && r.id !== sp.id)
+  // "+ Start new edit" CTA copy must read the version the new DRAFT
+  // will become on publish — max(lineage) + 1. When lineage hasn't
+  // loaded yet, fall back to current version + 1.
+  const nextVersion = Math.max(sp.version, ...lineage.map(r => r.version)) + 1
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      <ReadOnlyBanner
+        status={sp.status}
+        currentVersion={sp.version}
+        nextVersion={nextVersion}
+        existingDraft={existingLineageDraft || null}
+        continueDraftHref={(draft) => `/cha/sp/specific-problems/${draft.id}`}
+        cloning={cloning}
+        cloneError={cloneError}
+        onCloneToDraft={handleCloneToDraft}
+      />
+      <VersionHistorySection
+        lineage={lineage}
+        rowDetailUrl={(row) => `/cha/sp/specific-problems/${row.id}`}
+        makingEditable={makingEditable}
+        onMakeEditable={handleMakeEditable}
+        versionLabel={(row) => {
+          if (row.status === 'DRAFT') {
+            const otherMax = Math.max(
+              0, ...lineage.filter(r => r.id !== row.id).map(r => r.version),
+            )
+            return `v${otherMax + 1} (draft)`
+          }
+          return `v${row.version}`
+        }}
+      />
       <div className="flex items-start gap-4">
         <Link href="/cha/sp/specific-problems" className="mt-1 text-slate-400 hover:text-slate-600">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
