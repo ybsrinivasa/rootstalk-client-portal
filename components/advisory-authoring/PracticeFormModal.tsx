@@ -333,6 +333,17 @@ export function PracticeFormModal({
         } else {
           fetched[f.name] = []
         }
+      } else if (f.source === 'cosh_core:formulation') {
+        // 2026-05-22 — NPK Dosages L2s have no Common Name on the
+        // Practice, so the brand-cascade effect below (gated on
+        // commonName) never fires. The backend's `list_formulations`
+        // detects NPK L2s and routes through the `formulations_L2_npk`
+        // Connect instead. For other L2s with `cosh_core:formulation`
+        // + no cascade, this also fires harmlessly (returns the
+        // brand-cascade default for that L2).
+        pending.push(api.get<CoshOption[]>(
+          `/cosh/options/formulations?l2=${encodeURIComponent(l2)}`,
+        ).then(r => { fetched[f.name] = r.data }).catch(() => { fetched[f.name] = [] }))
       }
     }
     if (pending.length === 0) return
