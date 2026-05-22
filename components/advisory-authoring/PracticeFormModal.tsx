@@ -182,13 +182,22 @@ interface Props {
   cropCoshId: string
   existingPractice?: ExistingPractice
   pipe: PipeContext
+  /** Rule 1 (2026-05-22): Common Name cosh_ids already used by peer
+   *  Practices in this same Timeline. The modal greys out these
+   *  options in the COMMON_NAME dropdown when l1_type is PESTICIDE
+   *  or FERTILIZER, pre-empting the backend's
+   *  `common_name_duplicate_in_timeline` 422. Callers compute this
+   *  from their loaded practiceMap; omit / empty Set when peers are
+   *  unknown — the backend still catches it. The edit-in-place case
+   *  is handled internally (the row's own CN is never greyed). */
+  usedCommonNames?: Set<string>
   onClose: () => void
   onSaved: () => void
 }
 
 export function PracticeFormModal({
   open, mode, timelineId, contextSubtitle, timelineWindow, cropCoshId,
-  existingPractice, pipe, onClose, onSaved,
+  existingPractice, pipe, usedCommonNames, onClose, onSaved,
 }: Props) {
   const endpoints = practiceEndpoints(pipe)
 
@@ -630,6 +639,13 @@ export function PracticeFormModal({
                 }
                 const value = elementValues[field.name] || ''
                 const opts = optionsByField[field.name] || []
+                // Rule 1 pre-emption: when the field is COMMON_NAME and
+                // l1_type is PESTICIDE/FERTILIZER, grey out any cosh_id
+                // already used by a peer practice. Never grey out the
+                // row's own current CN (so edit-in-place still works).
+                const isCnGated = field.name === 'COMMON_NAME'
+                  && (practiceForm.l1_type === 'PESTICIDE' || practiceForm.l1_type === 'FERTILIZER')
+                  && usedCommonNames !== undefined
                 return (
                   <div key={field.name}>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -644,9 +660,16 @@ export function PracticeFormModal({
                         onChange={e => setElementValue(field.name, e.target.value)}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                         <option value="">— select —</option>
-                        {opts.map(o => (
-                          <option key={o.cosh_id} value={o.cosh_id}>{o.name}</option>
-                        ))}
+                        {opts.map(o => {
+                          const usedElsewhere = isCnGated
+                            && usedCommonNames!.has(o.cosh_id)
+                            && o.cosh_id !== value
+                          return (
+                            <option key={o.cosh_id} value={o.cosh_id} disabled={usedElsewhere}>
+                              {o.name}{usedElsewhere ? ' — already used in this Timeline' : ''}
+                            </option>
+                          )
+                        })}
                       </select>
                     ) : variant === 'textarea' ? (
                       <textarea value={value}
