@@ -69,9 +69,14 @@ function PackagesContent() {
   const load = async () => {
     if (!clientId) return
     setLoading(true)
+    // 2026-05-22: rollup view — fetch every row regardless of status,
+    // then group by lineage client-side. The status filter chip
+    // re-interprets to "show lineages whose head matches" so a
+    // status=ACTIVE filter no longer hides a DRAFT successor of an
+    // ACTIVE row — both belong to the same lineage and the user
+    // wants to see the lineage either way.
     const qs = new URLSearchParams()
     if (cropFilter) qs.set('crop_cosh_id', cropFilter)
-    if (statusFilter) qs.set('status', statusFilter)
     try {
       const [{ data: pkgs }, { data: cropsData }] = await Promise.all([
         api.get<CcaPackage[]>(`/client/${clientId}/cca/packages?${qs.toString()}`),
@@ -84,7 +89,61 @@ function PackagesContent() {
     }
   }
 
-  useEffect(() => { load() }, [clientId, cropFilter, statusFilter])
+  useEffect(() => { load() }, [clientId, cropFilter])
+
+  // 2026-05-22 lineage rollup — one row per (crop, lowercase(name))
+  // lineage. The "head" is the row the SE most likely wants to open:
+  // DRAFT if one exists (mid-edit), else latest ACTIVE, else latest
+  // INACTIVE. Older versions are reachable via the detail page's
+  // Version-history disclosure. Pre-rollup the list showed every
+  // version as a separate row — testers misread same-lineage rows
+  // as duplicates.
+  const STATUS_RANK: Record<string, number> = { DRAFT: 0, ACTIVE: 1, INACTIVE: 2 }
+  interface LineageRow {
+    head: CcaPackage
+    versionCount: number
+    latestUpdated: string | null
+  }
+  const lineages = useMemo<LineageRow[]>(() => {
+    const groups = new Map<string, CcaPackage[]>()
+    for (const p of packages) {
+      const key = `${p.crop_cosh_id}::${p.name.trim().toLowerCase()}`
+      const arr = groups.get(key)
+      if (arr) arr.push(p); else groups.set(key, [p])
+    }
+    const rows: LineageRow[] = []
+    for (const arr of groups.values()) {
+      const sorted = [...arr].sort((a, b) => {
+        const r = STATUS_RANK[a.status] - STATUS_RANK[b.status]
+        if (r !== 0) return r
+        if (b.version !== a.version) return b.version - a.version
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      })
+      const head = sorted[0]
+      const latestUpdated = arr
+        .map(p => p.updated_at)
+        .filter((s): s is string => !!s)
+        .sort()
+        .pop() || null
+      rows.push({ head, versionCount: arr.length, latestUpdated })
+    }
+    // Sort lineages: most-recently-touched first, then by name.
+    rows.sort((a, b) => {
+      const aT = a.latestUpdated || a.head.created_at
+      const bT = b.latestUpdated || b.head.created_at
+      const diff = new Date(bT).getTime() - new Date(aT).getTime()
+      if (diff !== 0) return diff
+      return a.head.name.localeCompare(b.head.name)
+    })
+    return rows
+  }, [packages])
+
+  // Apply status filter on the rolled-up heads — the chip now reads
+  // as "lineages whose head matches", which is what the SE intuits.
+  const filteredLineages = useMemo<LineageRow[]>(() => {
+    if (!statusFilter) return lineages
+    return lineages.filter(l => l.head.status === statusFilter)
+  }, [lineages, statusFilter])
 
   const cropName = useMemo(() => {
     if (!cropFilter) return ''
@@ -165,7 +224,7 @@ function PackagesContent() {
 
       {loading ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
-      ) : packages.length === 0 ? (
+      ) : filteredLineages.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
           <p className="text-slate-400 text-4xl mb-3">📋</p>
           <p className="text-slate-600 font-medium">
@@ -197,13 +256,18 @@ function PackagesContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {packages.map(p => (
+              {filteredLineages.map(({ head: p, versionCount, latestUpdated }) => (
                 <tr key={p.id} className="hover:bg-slate-50">
                   <td className="px-5 py-3.5">
                     <Link href={`/advisory/${p.id}`} className="font-medium text-slate-800 hover:text-green-700">
                       {p.name}
                     </Link>
                     <span className="text-xs text-slate-400 ml-2">v{p.version}</span>
+                    {versionCount > 1 && (
+                      <span className="text-xs text-slate-400 ml-1.5">
+                        · {versionCount} versions
+                      </span>
+                    )}
                     {p.description && (
                       <p className="text-xs text-slate-400 mt-0.5 truncate max-w-md">{p.description}</p>
                     )}
@@ -226,7 +290,7 @@ function PackagesContent() {
                   </td>
                   <td className="px-5 py-3.5 text-right text-slate-400 hidden md:table-cell text-xs">{p.location_count}</td>
                   <td className="px-5 py-3.5 text-right text-slate-400 hidden lg:table-cell text-xs">
-                    {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : '—'}
+                    {latestUpdated ? new Date(latestUpdated).toLocaleDateString() : '—'}
                   </td>
                 </tr>
               ))}
