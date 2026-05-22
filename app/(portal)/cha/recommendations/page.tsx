@@ -133,6 +133,18 @@ function ChaRecsContent() {
     return Array.from(byLineage.values())
   }, [recs])
 
+  // 2026-05-22 — version count per lineage; surfaced as "· N versions"
+  // next to vN so the SE knows older versions exist behind the head
+  // (reachable via the detail page's Version History disclosure).
+  const versionCountByLineage = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const r of recs) {
+      const key = `${r.problem_group_cosh_id}::${r.area_or_plant ?? ''}`
+      m.set(key, (m.get(key) || 0) + 1)
+    }
+    return m
+  }, [recs])
+
   // When filtered to a single PG, the title at the top should name
   // it clearly so the SE knows which PG's bundles they're seeing.
   const filteredPgName = useMemo(() => {
@@ -448,6 +460,14 @@ function ChaRecsContent() {
                     {rec.status}
                   </span>
                   <span className="text-xs text-slate-500">v{rec.version}</span>
+                  {(() => {
+                    const key = `${rec.problem_group_cosh_id}::${rec.area_or_plant ?? ''}`
+                    const count = versionCountByLineage.get(key) || 1
+                    if (count <= 1) return null
+                    return (
+                      <span className="text-xs text-slate-400">· {count} versions</span>
+                    )
+                  })()}
                 </div>
                 <dl className="text-sm text-slate-600 space-y-1 mb-4">
                   <div className="flex justify-between">
@@ -497,7 +517,10 @@ function ChaRecsContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {collapsedRecs.map(r => (
+              {collapsedRecs.map(r => {
+                const key = `${r.problem_group_cosh_id}::${r.area_or_plant ?? ''}`
+                const count = versionCountByLineage.get(key) || 1
+                return (
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="px-5 py-3.5">
                     <Link
@@ -506,6 +529,9 @@ function ChaRecsContent() {
                       {r.problem_group_name_en}
                     </Link>
                     <span className="text-xs text-slate-400 ml-2">v{r.version}</span>
+                    {count > 1 && (
+                      <span className="text-xs text-slate-400 ml-1.5">· {count} versions</span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-slate-600 text-xs">
                     {r.area_or_plant === 'AREA_WISE' ? 'Area-wise' :
@@ -530,7 +556,8 @@ function ChaRecsContent() {
                     {new Date(r.created_at).toLocaleDateString()}
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
