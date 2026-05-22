@@ -8,6 +8,7 @@ import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import { useReadOnlyGuard } from '@/components/advisory-authoring/ReadOnlyGuard'
+import { VersionHistorySection, type LineageRow as SharedLineageRow } from '@/components/advisory-authoring/LineageSection'
 import { practiceShortLabel } from '@/lib/practice-label'
 import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
 
@@ -321,9 +322,9 @@ export default function PackageDetailPage() {
 
   // Lineage / multi-row versioning (locked 2026-05-11)
   const [lineage, setLineage] = useState<LineageRow[]>([])
-  const [showVersions, setShowVersions] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [cloning, setCloning] = useState(false)
+  const [makingEditable, setMakingEditable] = useState<string | null>(null)
   const [lineageError, setLineageError] = useState('')
 
   const loadTimelines = async () => {
@@ -953,6 +954,31 @@ export default function PackageDetailPage() {
     } finally { setCloning(false) }
   }
 
+  // 2026-05-22 — companion to handleCloneToDraft for the shared
+  // <VersionHistorySection>. Allows the SE to "+ Start new edit"
+  // from any non-current historical (INACTIVE) row in the lineage.
+  // Mirrors CA-PG / CA-SP handleMakeEditable.
+  async function handleMakeEditable(srcId: string, srcVersion: number) {
+    const existing = lineage.find(r => r.status === 'DRAFT')
+    if (existing && existing.id !== srcId) {
+      const ok = confirm(
+        `A v${existing.version} DRAFT already exists in this lineage. ` +
+        `Making v${srcVersion} editable will replace it (the existing ` +
+        `draft becomes INACTIVE). Continue?`,
+      )
+      if (!ok) return
+    }
+    setMakingEditable(srcId); setLineageError('')
+    try {
+      const { data } = await api.post<Package>(
+        `/client/${clientId}/packages/${srcId}/clone-to-draft`,
+      )
+      router.push(`/advisory/${data.id}`)
+    } catch (err) {
+      setLineageError(extractErrorMessage(err, 'Failed to make this version editable.'))
+    } finally { setMakingEditable(null) }
+  }
+
 
   useEffect(() => { if (pkg) loadLineage() }, [pkg?.id])
 
@@ -974,6 +1000,27 @@ export default function PackageDetailPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Version history (Batch 39P-d, 2026-05-22 unified): one shared
+          component across CA-CCA / CA-PG / CA-SP / SA-CCA / SA-PG.
+          Mounted near the top of the detail page so the SE sees the
+          lineage context before scrolling through Timelines /
+          Practices. Replaces the prior inline panel that lived at
+          the bottom of this page. */}
+      <VersionHistorySection
+        lineage={lineage as unknown as SharedLineageRow[]}
+        rowDetailUrl={(row) => `/advisory/${row.id}`}
+        makingEditable={makingEditable}
+        onMakeEditable={handleMakeEditable}
+        versionLabel={(row) => {
+          if (row.status === 'DRAFT') {
+            const otherMax = Math.max(
+              0, ...lineage.filter(r => r.id !== row.id).map(r => r.version),
+            )
+            return `v${otherMax + 1} (draft)`
+          }
+          return `v${row.version}`
+        }}
+      />
       {/* Header */}
       <div className="flex items-start gap-4">
         <button onClick={() => router.back()} className="mt-1 text-slate-400 hover:text-slate-600">
@@ -1521,72 +1568,10 @@ export default function PackageDetailPage() {
         )}
       </div>
 
-      {/* Version history panel */}
-      {lineage.length > 1 && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setShowVersions(v => !v)}
-            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-50">
-            <span className="text-sm font-semibold text-slate-700">
-              Version history <span className="text-slate-400 font-normal">({lineage.length} versions)</span>
-            </span>
-            <svg className={`w-4 h-4 text-slate-400 transition-transform ${showVersions ? 'rotate-180' : ''}`}
-              fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {showVersions && (
-            <div className="border-t border-slate-100 divide-y divide-slate-50">
-              {lineage.map(row => {
-                const statusBadge = row.status === 'ACTIVE' ? 'bg-green-100 text-green-700'
-                  : row.status === 'DRAFT' ? 'bg-amber-100 text-amber-700'
-                  : 'bg-slate-100 text-slate-500'
-                const dateLabel = row.published_at
-                  ? `Published ${new Date(row.published_at).toLocaleDateString()}`
-                  : `Created ${new Date(row.created_at).toLocaleDateString()}`
-                const originLabel: Record<string, string> = {
-                  CM_PUSH: 'CM push',
-                  SE_PULL_DRAFT: 'Pulled from Global',
-                  SE_EDIT_DRAFT: 'Self edit',
-                  SE_ROLLBACK_PUBLISH: 'Rolled back',
-                }
-                const origin = row.created_via ? originLabel[row.created_via] || row.created_via : null
-                return (
-                  <div key={row.id} className={`flex items-center gap-3 px-5 py-3 ${row.is_current ? 'bg-blue-50/30' : ''}`}>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold text-slate-700">v{row.version}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusBadge}`}>{row.status}</span>
-                        {origin && <span className="text-xs text-slate-400">· {origin}</span>}
-                        {row.is_current && <span className="text-xs font-medium text-blue-600">· you are here</span>}
-                      </div>
-                      <p className="text-xs text-slate-400 mt-0.5">{dateLabel}</p>
-                    </div>
-                    {!row.is_current && (
-                      <div className="flex items-center gap-2">
-                        {/* 2026-05-22 — Republish-this removed from
-                            version history. Path now: Open → +Start
-                            new edit (on the INACTIVE detail page) →
-                            edit if needed → Publish. The Publish on
-                            an unchanged DRAFT IS the re-publish, so
-                            no separate affordance is needed. User
-                            principle: don't let a click here skip
-                            the SE's review of the historical row's
-                            content. */}
-                        <button onClick={() => router.push(`/advisory/${row.id}`)}
-                          className="text-xs font-medium text-slate-500 px-3 py-1.5 hover:underline">
-                          Open →
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Version history previously rendered here (inline panel) —
+          moved to the top of the page using the shared
+          <VersionHistorySection> component (2026-05-22) for
+          consistency with SA-CCA / CA-PG / CA-SP / SA-PG. */}
 
       {/* Edit Locations modal — state-grouped picker shared with
           Setup → Locations (components/locations/LocationPicker).
