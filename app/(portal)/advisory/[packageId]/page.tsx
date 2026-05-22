@@ -324,7 +324,6 @@ export default function PackageDetailPage() {
   const [showVersions, setShowVersions] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [cloning, setCloning] = useState(false)
-  const [rollingBack, setRollingBack] = useState<string | null>(null)
   const [lineageError, setLineageError] = useState('')
 
   const loadTimelines = async () => {
@@ -954,18 +953,6 @@ export default function PackageDetailPage() {
     } finally { setCloning(false) }
   }
 
-  async function handleRollbackPublish(targetId: string) {
-    if (!confirm('Republish this historical version as a new live version? Your current live version will become history. Farmers will move to this content automatically.')) return
-    setRollingBack(targetId); setLineageError('')
-    try {
-      const { data } = await api.post<Package>(
-        `/client/${clientId}/packages/${targetId}/rollback-publish`,
-      )
-      router.push(`/advisory/${data.id}`)
-    } catch (err) {
-      setLineageError(extractErrorMessage(err, 'Failed to republish.'))
-    } finally { setRollingBack(null) }
-  }
 
   useEffect(() => { if (pkg) loadLineage() }, [pkg?.id])
 
@@ -1097,6 +1084,23 @@ export default function PackageDetailPage() {
                 </button>
               )}
             </>
+          )}
+          {/* 2026-05-22 — regular INACTIVE rows (historical versions
+              the SE opened via the version history) get the same
+              "+ Start new edit" affordance as ACTIVE. The new DRAFT
+              copies the INACTIVE row's content; the SE can edit
+              before publishing or publish unchanged (re-publish path).
+              Cascade-INACTIVE keeps its own "↻ Restore (publish)"
+              above — that's a recovery flow, not a regular edit. */}
+          {pkg.status === 'INACTIVE'
+            && pkg.cascade_inactivated_reason !== 'locations_cleared_by_cascade' && (
+            <button onClick={handleCloneToDraft}
+              disabled={cloning}
+              title="Start a new edit from this historical version. You can edit before publishing, or publish unchanged to make it live again."
+              className="text-sm font-semibold px-4 py-2.5 rounded-xl text-white disabled:opacity-50"
+              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              {cloning ? 'Starting…' : '+ Start new edit'}
+            </button>
           )}
         </div>
       </div>
@@ -1561,17 +1565,18 @@ export default function PackageDetailPage() {
                     </div>
                     {!row.is_current && (
                       <div className="flex items-center gap-2">
-                        {row.status === 'INACTIVE' && (
-                          <button onClick={() => handleRollbackPublish(row.id)}
-                            disabled={rollingBack === row.id}
-                            className="text-xs font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-50"
-                            style={{ borderColor: colour, color: colour }}>
-                            {rollingBack === row.id ? 'Republishing…' : '↻ Republish this'}
-                          </button>
-                        )}
+                        {/* 2026-05-22 — Republish-this removed from
+                            version history. Path now: Open → +Start
+                            new edit (on the INACTIVE detail page) →
+                            edit if needed → Publish. The Publish on
+                            an unchanged DRAFT IS the re-publish, so
+                            no separate affordance is needed. User
+                            principle: don't let a click here skip
+                            the SE's review of the historical row's
+                            content. */}
                         <button onClick={() => router.push(`/advisory/${row.id}`)}
                           className="text-xs font-medium text-slate-500 px-3 py-1.5 hover:underline">
-                          Open
+                          Open →
                         </button>
                       </div>
                     )}

@@ -9,7 +9,7 @@
 //
 //   • `<VersionHistorySection>` — disclosure panel listing every row
 //     in the lineage. "Open draft →" links the existing DRAFT row;
-//     "View →" navigates to ACTIVE / INACTIVE; "Make editable" on
+//     "View →" navigates to ACTIVE / INACTIVE; "+ Start new edit" on
 //     INACTIVE rows kicks a fresh clone-to-draft from that historical
 //     content.
 //
@@ -148,7 +148,7 @@ export function VersionHistorySection({
                 <button onClick={() => onMakeEditable(row.id, row.version)}
                   disabled={makingEditable !== null}
                   className="text-xs font-semibold text-amber-700 hover:underline disabled:opacity-50">
-                  {makingEditable === row.id ? 'Working…' : 'Make editable'}
+                  {makingEditable === row.id ? 'Starting…' : '+ Start new edit'}
                 </button>
               )}
             </div>
