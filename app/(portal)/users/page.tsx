@@ -92,7 +92,14 @@ export default function UsersPage() {
   // Visible only for Seed Companies (currently the only privilege).
   const [privileges, setPrivileges] = useState<PrivilegeOwner[]>([])
   const [savingPriv, setSavingPriv] = useState<string | null>(null)
-  const isSeedCompany = client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
+  // 2026-05-22: org types switched from legacy slugs to live Cosh
+  // UUIDs. "Seed Company" row in Cosh `organization_types` Core
+  // is `4b0847f9-…` — mirror of backend SEED_COMPANY_COSH_ID in
+  // app/modules/seed_mgmt/router.py. Keep both in sync; if Cosh
+  // ever replaces this row, update both constants.
+  const isSeedCompany = client?.org_type_cosh_ids?.includes(
+    '4b0847f9-a590-452f-9129-ee0e2d946dd9',
+  ) ?? false
 
   const load = () => {
     if (!clientId) return

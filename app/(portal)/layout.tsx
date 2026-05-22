@@ -166,7 +166,13 @@ const ROLE_NAV: Record<string, string[]> = {
 const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
 
 function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
-  const isSeedClient = client?.org_type_cosh_ids?.includes('org_type_seed_companies') ?? false
+  // 2026-05-22: org types switched from legacy slugs to live Cosh
+  // UUIDs. "Seed Company" Cosh UUID = `4b0847f9-…`. Mirror of
+  // SEED_COMPANY_COSH_ID in backend and the same constant in
+  // app/(portal)/users/page.tsx.
+  const isSeedClient = client?.org_type_cosh_ids?.includes(
+    '4b0847f9-a590-452f-9129-ee0e2d946dd9',
+  ) ?? false
 
   // CA is exclusive (Batch K) — sees everything. CONTENT_MANAGER
   // (Batch Q, 2026-05-18) is the synthesised role for a CM who
