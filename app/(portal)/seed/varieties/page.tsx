@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, useMemo, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
@@ -132,10 +132,92 @@ function SeedVarietiesContent() {
   const [assignablePkgs, setAssignablePkgs] = useState<AssignablePackage[]>([])
   // Set of package_id selected for this variety in the form.
   const [pkgAssignments, setPkgAssignments] = useState<Set<string>>(new Set())
-  // Set of district_cosh_id chosen as filters.
+  // 2026-05-22 — district picker is opt-OUT: all districts start
+  // selected; deselecting narrows the assignable-package set AND
+  // reciprocally auto-unchecks any package that no longer overlaps
+  // with any selected district. The Set holds districts the SE is
+  // selling into (kept, not removed).
   const [districtFilter, setDistrictFilter] = useState<Set<string>>(new Set())
+  // Per-state expand/collapse on the district picker.
+  const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set())
   // Per-package "show details" disclosure state.
   const [expandedPkg, setExpandedPkg] = useState<string | null>(null)
+
+  // 2026-05-22 — districts grouped by state, computed once per
+  // assignablePkgs change. Drives both the picker UI and the
+  // "select all" initial state.
+  interface StateBucket { id: string; name: string; districts: { id: string; name: string }[] }
+  const districtsByState = useMemo<StateBucket[]>(() => {
+    const byState = new Map<string, { name: string; districts: Map<string, string> }>()
+    for (const p of assignablePkgs) {
+      for (const l of p.locations) {
+        if (!l.district_cosh_id || !l.district_name_en) continue
+        const sid = l.state_cosh_id || '__nostate__'
+        const sname = l.state_name_en || '(no state)'
+        const slot = byState.get(sid) || { name: sname, districts: new Map() }
+        slot.districts.set(l.district_cosh_id, l.district_name_en)
+        byState.set(sid, slot)
+      }
+    }
+    return Array.from(byState.entries())
+      .map(([id, s]) => ({
+        id, name: s.name,
+        districts: Array.from(s.districts.entries())
+          .map(([did, dname]) => ({ id: did, name: dname }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [assignablePkgs])
+
+  // Flat set of every district id across all states — the
+  // "all selected" default for a fresh modal.
+  const allDistrictIds = useMemo<Set<string>>(() => {
+    const all = new Set<string>()
+    for (const s of districtsByState) {
+      for (const d of s.districts) all.add(d.id)
+    }
+    return all
+  }, [districtsByState])
+
+  // Reciprocal: when a district is deselected, walk the currently-
+  // assigned packages and auto-uncheck any whose locations have no
+  // overlap with the remaining checked districts. Packages with no
+  // locations at all are exempt (they aren't location-bound).
+  function applyReciprocalRemoval(nextDistricts: Set<string>) {
+    setPkgAssignments(prevAssign => {
+      const next = new Set(prevAssign)
+      for (const pkgId of prevAssign) {
+        const pkg = assignablePkgs.find(p => p.id === pkgId)
+        if (!pkg || pkg.locations.length === 0) continue
+        const hasOverlap = pkg.locations.some(
+          l => l.district_cosh_id && nextDistricts.has(l.district_cosh_id),
+        )
+        if (!hasOverlap) next.delete(pkgId)
+      }
+      return next
+    })
+  }
+
+  function toggleDistrict(districtId: string, nextChecked: boolean) {
+    const nextDistricts = new Set(districtFilter)
+    if (nextChecked) nextDistricts.add(districtId)
+    else nextDistricts.delete(districtId)
+    setDistrictFilter(nextDistricts)
+    if (!nextChecked) applyReciprocalRemoval(nextDistricts)
+  }
+
+  function toggleStateAll(stateId: string, nextChecked: boolean) {
+    const state = districtsByState.find(s => s.id === stateId)
+    if (!state) return
+    const nextDistricts = new Set(districtFilter)
+    if (nextChecked) {
+      for (const d of state.districts) nextDistricts.add(d.id)
+    } else {
+      for (const d of state.districts) nextDistricts.delete(d.id)
+    }
+    setDistrictFilter(nextDistricts)
+    if (!nextChecked) applyReciprocalRemoval(nextDistricts)
+  }
 
   const load = async () => {
     if (!clientId || !cropCoshId) return
@@ -350,7 +432,8 @@ function SeedVarietiesContent() {
       setSelected(null)
       setForm(emptyForm(cropCoshId))
       setPkgAssignments(new Set())
-      setDistrictFilter(new Set())
+      setDistrictFilter(new Set(allDistrictIds))
+      setExpandedStates(new Set(districtsByState.map(s => s.id)))
       setExpandedPkg(null)
       load()
     } catch (e: unknown) {
@@ -413,7 +496,8 @@ function SeedVarietiesContent() {
         .filter(a => a.status === 'ACTIVE')
         .map(a => a.package_id),
     ))
-    setDistrictFilter(new Set())
+    setDistrictFilter(new Set(allDistrictIds))
+    setExpandedStates(new Set(districtsByState.map(s => s.id)))
     setExpandedPkg(null)
     setSaveError('')
     setShowCreate(true)
@@ -442,7 +526,9 @@ function SeedVarietiesContent() {
           <button onClick={() => {
               setShowCreate(true); setSelected(null);
               setForm(emptyForm(cropCoshId));
-              setPkgAssignments(new Set()); setDistrictFilter(new Set());
+              setPkgAssignments(new Set());
+              setDistrictFilter(new Set(allDistrictIds));
+              setExpandedStates(new Set(districtsByState.map(s => s.id)));
               setExpandedPkg(null); setSaveError('')
             }}
             className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
@@ -763,13 +849,20 @@ function SeedVarietiesContent() {
                   )}
                 </div>
 
-                {/* Sold via Packages — Batch Y (2026-05-19).
-                    Cards for each Package on this crop; check to
-                    assign. District filter chips narrow the visible
-                    set when there are many packages. Currently-
-                    assigned packages outside the filter stay visible
-                    with a tag so the SE can't accidentally un-check
-                    by not seeing them. */}
+                {/* Sold via Packages — redesigned 2026-05-22.
+                    Two-way coupling between districts and packages:
+                      • All districts start selected; deselecting a
+                        district auto-removes any currently-assigned
+                        package that no longer overlaps with the
+                        remaining selected districts.
+                      • Package list filters to only packages reachable
+                        by at least one selected district. Packages
+                        with no locations stay visible (not location-
+                        bound).
+                      • States collapse/expand; Select All / Deselect
+                        All per state.
+                    Backend rolls up by lineage (one row per Package
+                    name, not per version). */}
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-2">
                     Sold via Packages
@@ -782,96 +875,108 @@ function SeedVarietiesContent() {
                     </p>
                   ) : (
                     <>
-                      {/* District filter chips grouped by state.
-                          Batch Z (2026-05-19): without grouping, 100+
-                          districts across many states became visually
-                          overwhelming. Each state gets its own row of
-                          chips with the state name as a left-side
-                          label. Sticky rule from Batch Y still holds —
-                          assigned-but-outside-filter cards stay
-                          visible with a tag. */}
-                      {(() => {
-                        // Walk packages once, group districts by state.
-                        const byState = new Map<string, {
-                          name: string
-                          districts: Map<string, string>
-                        }>()
-                        for (const p of assignablePkgs) {
-                          for (const l of p.locations) {
-                            if (!l.district_cosh_id || !l.district_name_en) continue
-                            const sid = l.state_cosh_id || '__nostate__'
-                            const sname = l.state_name_en || '(no state)'
-                            const slot = byState.get(sid) || { name: sname, districts: new Map() }
-                            slot.districts.set(l.district_cosh_id, l.district_name_en)
-                            byState.set(sid, slot)
-                          }
-                        }
-                        if (byState.size === 0) return null
-                        const states = Array.from(byState.entries())
-                          .sort((a, b) => a[1].name.localeCompare(b[1].name))
-                        return (
-                          <div className="mb-3">
-                            <div className="flex items-baseline justify-between mb-1">
-                              <p className="text-[11px] text-slate-500">
-                                Filter by district where you sell:
-                              </p>
-                              {districtFilter.size > 0 && (
-                                <button onClick={() => setDistrictFilter(new Set())}
-                                  className="text-xs text-slate-400 hover:text-slate-600 underline">
-                                  Clear filter ({districtFilter.size})
-                                </button>
-                              )}
+                      {districtsByState.length > 0 && (
+                        <div className="mb-3">
+                          <div className="flex items-baseline justify-between mb-1">
+                            <p className="text-[11px] text-slate-500">
+                              Districts where this variety is sold —
+                              deselect to remove packages tied only to those
+                              districts:
+                            </p>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => setDistrictFilter(new Set(allDistrictIds))}
+                                disabled={districtFilter.size === allDistrictIds.size}
+                                className="text-[11px] text-slate-500 hover:text-slate-700 underline disabled:opacity-30 disabled:no-underline">
+                                Select all
+                              </button>
+                              <button onClick={() => {
+                                  const empty = new Set<string>()
+                                  setDistrictFilter(empty)
+                                  applyReciprocalRemoval(empty)
+                                }}
+                                disabled={districtFilter.size === 0}
+                                className="text-[11px] text-slate-500 hover:text-slate-700 underline disabled:opacity-30 disabled:no-underline">
+                                Deselect all
+                              </button>
                             </div>
-                            <div className="space-y-1.5 border border-slate-100 rounded-lg p-2 bg-slate-50/60 max-h-48 overflow-y-auto">
-                              {states.map(([sid, s]) => {
-                                const districts = Array.from(s.districts.entries())
-                                  .sort((a, b) => a[1].localeCompare(b[1]))
-                                return (
-                                  <div key={sid} className="flex items-start gap-2">
-                                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide min-w-[6rem] pt-1 shrink-0">
+                          </div>
+                          <div className="space-y-1.5 border border-slate-100 rounded-lg p-2 bg-slate-50/60 max-h-64 overflow-y-auto">
+                            {districtsByState.map(s => {
+                              const total = s.districts.length
+                              const selectedCount = s.districts.filter(d => districtFilter.has(d.id)).length
+                              const allSelected = selectedCount === total
+                              const noneSelected = selectedCount === 0
+                              const isExpanded = expandedStates.has(s.id)
+                              return (
+                                <div key={s.id} className="bg-white rounded-md border border-slate-100">
+                                  <div className="flex items-center gap-2 px-2 py-1.5">
+                                    <button onClick={() => setExpandedStates(ex => {
+                                        const n = new Set(ex)
+                                        if (n.has(s.id)) n.delete(s.id); else n.add(s.id)
+                                        return n
+                                      })}
+                                      className="text-slate-400 hover:text-slate-600 text-xs w-4 text-center">
+                                      {isExpanded ? '▾' : '▸'}
+                                    </button>
+                                    <span className="text-xs font-semibold text-slate-700 flex-1">
                                       {s.name}
                                     </span>
-                                    <div className="flex flex-wrap gap-1 flex-1">
-                                      {districts.map(([id, name]) => {
-                                        const active = districtFilter.has(id)
+                                    <span className={`text-[11px] ${
+                                      allSelected ? 'text-green-600'
+                                      : noneSelected ? 'text-slate-400'
+                                      : 'text-amber-700'
+                                    }`}>
+                                      {selectedCount} of {total}
+                                    </span>
+                                    <button onClick={() => toggleStateAll(s.id, true)}
+                                      disabled={allSelected}
+                                      className="text-[11px] text-slate-500 hover:text-slate-700 underline disabled:opacity-30 disabled:no-underline">
+                                      Select all
+                                    </button>
+                                    <button onClick={() => toggleStateAll(s.id, false)}
+                                      disabled={noneSelected}
+                                      className="text-[11px] text-slate-500 hover:text-slate-700 underline disabled:opacity-30 disabled:no-underline">
+                                      Deselect all
+                                    </button>
+                                  </div>
+                                  {isExpanded && (
+                                    <div className="border-t border-slate-100 px-2 py-2 flex flex-wrap gap-1">
+                                      {s.districts.map(d => {
+                                        const checked = districtFilter.has(d.id)
                                         return (
-                                          <button key={id}
-                                            onClick={() => setDistrictFilter(set => {
-                                              const n = new Set(set)
-                                              if (active) n.delete(id); else n.add(id)
-                                              return n
-                                            })}
-                                            className={`text-xs px-2 py-0.5 rounded-full border ${
-                                              active
-                                                ? 'bg-green-100 border-green-300 text-green-700'
-                                                : 'bg-white border-slate-200 text-slate-500 hover:border-green-300'
-                                            }`}>
-                                            {name}
-                                          </button>
+                                          <label key={d.id} className="inline-flex items-center gap-1.5 text-xs cursor-pointer px-2 py-0.5 rounded-full border bg-white border-slate-200 hover:bg-slate-50">
+                                            <input type="checkbox"
+                                              checked={checked}
+                                              onChange={e => toggleDistrict(d.id, e.target.checked)}
+                                              className="w-3.5 h-3.5 accent-green-600" />
+                                            <span className={checked ? 'text-slate-700' : 'text-slate-400'}>{d.name}</span>
+                                          </label>
                                         )
                                       })}
                                     </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
+                                  )}
+                                </div>
+                              )
+                            })}
                           </div>
-                        )
-                      })()}
+                        </div>
+                      )}
 
                       <div className="space-y-2">
                         {assignablePkgs.map(p => {
                           const isAssigned = pkgAssignments.has(p.id)
-                          // District filter: visible if any of the
-                          // package's districts is in the filter, OR
-                          // if filter is empty, OR if already assigned
-                          // (so we don't accidentally hide it).
-                          const matchesFilter = districtFilter.size === 0
+                          // 2026-05-22 — reachable if location-less
+                          // (not bound to any district) OR any location
+                          // is in the currently-selected districts.
+                          // Auto-uncheck on district deselection keeps
+                          // pkgAssignments in sync, so we no longer
+                          // need the "assigned-but-out-of-filter"
+                          // safety case.
+                          const isReachable = p.locations.length === 0
                             || p.locations.some(l =>
                               l.district_cosh_id && districtFilter.has(l.district_cosh_id))
-                          if (!matchesFilter && !isAssigned) return null
+                          if (!isReachable) return null
                           const isExpanded = expandedPkg === p.id
-                          const outOfFilter = !matchesFilter && isAssigned
                           return (
                             <div key={p.id}
                               className={`rounded-xl border p-3 ${
@@ -895,11 +1000,6 @@ function SeedVarietiesContent() {
                                     }`}>
                                       {p.status}
                                     </span>
-                                    {outOfFilter && (
-                                      <span className="text-[10px] text-slate-400 italic">
-                                        currently assigned, outside filter
-                                      </span>
-                                    )}
                                   </div>
                                   <p className="text-xs text-slate-500 mt-0.5">
                                     {p.duration_days} days
