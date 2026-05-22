@@ -61,17 +61,6 @@ interface ProfileData {
   ca_email: string | null
 }
 
-const ORG_TYPE_MAP: Record<string, string> = {
-  org_type_seed_companies:         'Seed Companies',
-  org_type_pesticide_manufacturer: 'Pesticide Manufacturer',
-  org_type_fertiliser_company:     'Fertiliser Company',
-  org_type_agrochemical:           'Agrochemical',
-  org_type_input_distributor:      'Input Distributor',
-  org_type_fpo:                    'FPO / Co-operative',
-  org_type_government:             'Government Body',
-  org_type_ngo:                    'NGO',
-}
-
 function InfoCard({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="bg-stone-50 border border-stone-100 rounded-lg px-4 py-3">

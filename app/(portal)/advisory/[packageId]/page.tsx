@@ -111,13 +111,8 @@ interface PublishReadiness {
 
 const FROM_TYPE_LABEL = { DBS: 'Days Before Sowing', DAS: 'Days After Sowing', CALENDAR: 'Calendar' }
 
-// Mirror of SA Global CCA's START_DATE_LABELS — kept in sync as
-// the canonical list of recognised package start-date anchors.
-const START_DATE_LABELS = [
-  { cosh_id: 'label:sowing_date',   name: 'Sowing Date' },
-  { cosh_id: 'label:planting_date', name: 'Planting Date' },
-  { cosh_id: 'label:pruning_date',  name: 'Pruning Date' },
-]
+// 2026-05-22: live Cosh list from `/cosh/options/start-date-names`.
+interface StartDateOption { cosh_id: string; name: string }
 
 // Reference Type constrained by package_type (matches SA portal):
 //   Annual    → DAS / DBS only
@@ -301,12 +296,19 @@ export default function PackageDetailPage() {
   const [showEdit, setShowEdit] = useState(false)
   const [editForm, setEditForm] = useState({
     name: '', duration_days: '120',
-    start_date_label_cosh_id: 'label:sowing_date',
+    start_date_label_cosh_id: '',
     description: '',
     status: 'DRAFT' as 'DRAFT' | 'ACTIVE' | 'INACTIVE',
   })
   const [savingEdit, setSavingEdit] = useState(false)
   const [editError, setEditError] = useState('')
+  const [startDateLabels, setStartDateLabels] = useState<StartDateOption[]>([])
+
+  useEffect(() => {
+    api.get<StartDateOption[]>(`/cosh/options/start-date-names`)
+      .then(r => setStartDateLabels(r.data))
+      .catch(() => setStartDateLabels([]))
+  }, [])
 
   // Edit Timeline (Batch 28 parity). `showEditTL` carries the
   // Timeline being edited; from_type stays read-only (locked at
@@ -691,7 +693,7 @@ export default function PackageDetailPage() {
     setEditForm({
       name: pkg.name,
       duration_days: String(pkg.duration_days),
-      start_date_label_cosh_id: pkg.start_date_label_cosh_id || 'label:sowing_date',
+      start_date_label_cosh_id: pkg.start_date_label_cosh_id || startDateLabels[0]?.cosh_id || '',
       description: pkg.description || '',
       status: pkg.status,
     })
@@ -1723,7 +1725,10 @@ export default function PackageDetailPage() {
                 <select value={editForm.start_date_label_cosh_id}
                   onChange={e => setEditForm(f => ({ ...f, start_date_label_cosh_id: e.target.value }))}
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white">
-                  {START_DATE_LABELS.map(l => (
+                  {!editForm.start_date_label_cosh_id && (
+                    <option value="">— pick a label —</option>
+                  )}
+                  {startDateLabels.map(l => (
                     <option key={l.cosh_id} value={l.cosh_id}>{l.name}</option>
                   ))}
                 </select>

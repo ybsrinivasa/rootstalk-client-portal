@@ -34,16 +34,17 @@ interface OnboardingContext {
   full_name: string; short_name: string; ca_name: string; ca_email: string; is_manufacturer: boolean
 }
 
-const ORG_TYPES = [
-  { id: 'org_type_seed_companies',   label: 'Seed Companies',                  unlocks: 'Seed module' },
-  { id: 'org_type_pesticide_mfr',    label: 'Pesticide Manufacturer',           unlocks: null },
-  { id: 'org_type_fertiliser_mfr',   label: 'Fertiliser Manufacturer',          unlocks: null },
-  { id: 'org_type_agri_university',  label: 'Agricultural University / KVK',    unlocks: null },
-  { id: 'org_type_govt_dept',        label: 'Government Line Department',        unlocks: null },
-  { id: 'org_type_nonprofit',        label: 'Not-for-profit',                   unlocks: null },
-  { id: 'org_type_private_company',  label: 'Private Company',                  unlocks: null },
-  { id: 'org_type_research_inst',    label: 'Research Institution / Commodity Board', unlocks: null },
-]
+// 2026-05-22: list now fetched live from Cosh `organization_types`
+// Core via `/cosh/options/organization-types`. The "unlocks" affordance
+// is a frontend annotation — Cosh doesn't store it — so we keep a
+// small map keyed on the Cosh UUID for the rows that gate a module.
+// "Seed Company" UUID lines up with `SEED_COMPANY_COSH_ID` in
+// backend/app/modules/seed_mgmt/router.py.
+const UNLOCKS_BY_COSH_ID: Record<string, string> = {
+  '4b0847f9-a590-452f-9129-ee0e2d946dd9': 'Seed module',
+}
+
+interface OrgTypeOption { cosh_id: string; name: string }
 
 export default function OnboardingPage() {
   const { token } = useParams<{ token: string }>()
@@ -83,6 +84,8 @@ export default function OnboardingPage() {
   const primaryWarning = form.primary_colour ? nearestRoleWarning(form.primary_colour) : null
   const secondaryWarning = form.secondary_colour ? nearestRoleWarning(form.secondary_colour) : null
 
+  const [orgTypes, setOrgTypes] = useState<OrgTypeOption[]>([])
+
   useEffect(() => {
     api.get<OnboardingContext>(`/onboarding/${token}`)
       .then(r => {
@@ -92,6 +95,17 @@ export default function OnboardingPage() {
       .catch(() => setInvalid(true))
       .finally(() => setLoading(false))
   }, [token])
+
+  // 2026-05-22 — live Cosh list. Fails open to empty list (the
+  // checklist will be empty, validate() then refuses submission with
+  // "Please select at least one organisation type"). Token-scoped
+  // public endpoint not required — the onboarding page is on the
+  // public domain but the token-auth boundary applies to writes only.
+  useEffect(() => {
+    api.get<OrgTypeOption[]>(`/cosh/options/organization-types`)
+      .then(r => setOrgTypes(r.data))
+      .catch(() => setOrgTypes([]))
+  }, [])
 
   async function uploadLogo(file: File) {
     setUploadingLogo(true)
@@ -466,25 +480,28 @@ export default function OnboardingPage() {
             }`}>
             <h2 className="font-semibold text-slate-800">Organisation Type(s) <span className="text-red-500">*</span></h2>
             <p className="text-slate-500 text-sm">Select all that apply. This determines which modules are available.</p>
-            {ORG_TYPES.map(org => (
-              <label key={org.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-xl hover:bg-slate-50">
+            {orgTypes.map(org => {
+              const unlocks = UNLOCKS_BY_COSH_ID[org.cosh_id]
+              return (
+              <label key={org.cosh_id} className="flex items-center gap-3 cursor-pointer p-2 rounded-xl hover:bg-slate-50">
                 <input type="checkbox"
-                  checked={form.org_type_cosh_ids.includes(org.id)}
+                  checked={form.org_type_cosh_ids.includes(org.cosh_id)}
                   onChange={() => {
-                    toggleOrgType(org.id)
+                    toggleOrgType(org.cosh_id)
                     if (fieldErrors.org_type_cosh_ids) {
                       setFieldErrors(p => { const { org_type_cosh_ids, ...rest } = p; return rest })
                     }
                   }}
                   className="w-4 h-4 rounded accent-green-600" />
                 <div>
-                  <span className="text-sm text-slate-800">{org.label}</span>
-                  {org.unlocks && (
-                    <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Unlocks {org.unlocks}</span>
+                  <span className="text-sm text-slate-800">{org.name}</span>
+                  {unlocks && (
+                    <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Unlocks {unlocks}</span>
                   )}
                 </div>
               </label>
-            ))}
+              )
+            })}
             {fieldErrors.org_type_cosh_ids && (
               <p className="text-xs text-red-600 font-medium">{fieldErrors.org_type_cosh_ids}</p>
             )}

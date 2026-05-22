@@ -33,13 +33,8 @@ const STATUS_COLOUR: Record<string, string> = {
   INACTIVE: 'bg-slate-100 text-slate-500',
 }
 
-// Hardcoded for V1 — Cosh hasn't shipped the start-date-label Connect
-// yet. When it does, replace with a /cca/start-date-labels fetch.
-const START_DATE_LABELS = [
-  { cosh_id: 'label:sowing_date', name: 'Sowing Date' },
-  { cosh_id: 'label:planting_date', name: 'Planting Date' },
-  { cosh_id: 'label:pruning_date', name: 'Pruning Date' },
-]
+// 2026-05-22: live Cosh list from `/cosh/options/start-date-names`.
+interface StartDateOption { cosh_id: string; name: string }
 
 function PackagesContent() {
   const client = getClient()
@@ -62,9 +57,16 @@ function PackagesContent() {
     crop_cosh_id: '',
     package_type: 'ANNUAL' as 'ANNUAL' | 'PERENNIAL',
     duration_days: '120',
-    start_date_label_cosh_id: 'label:sowing_date',
+    start_date_label_cosh_id: '',
     description: '',
   })
+  const [startDateLabels, setStartDateLabels] = useState<StartDateOption[]>([])
+
+  useEffect(() => {
+    api.get<StartDateOption[]>(`/cosh/options/start-date-names`)
+      .then(r => setStartDateLabels(r.data))
+      .catch(() => setStartDateLabels([]))
+  }, [])
 
   const load = async () => {
     if (!clientId) return
@@ -163,7 +165,9 @@ function PackagesContent() {
       crop_cosh_id: cropFilter || '',  // pre-fill from chip if active
       package_type: 'ANNUAL',
       duration_days: '120',
-      start_date_label_cosh_id: 'label:sowing_date',
+      // Default to the first Cosh start-date-name when the list is
+      // loaded; empty otherwise (HTML required gates the submit).
+      start_date_label_cosh_id: startDateLabels[0]?.cosh_id || '',
       description: '',
     })
     setCreateError('')
@@ -377,7 +381,10 @@ function PackagesContent() {
                   onChange={e => setForm(f => ({ ...f, start_date_label_cosh_id: e.target.value }))}
                   required
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
-                  {START_DATE_LABELS.map(l => (
+                  {!form.start_date_label_cosh_id && (
+                    <option value="">— pick a label —</option>
+                  )}
+                  {startDateLabels.map(l => (
                     <option key={l.cosh_id} value={l.cosh_id}>{l.name}</option>
                   ))}
                 </select>
