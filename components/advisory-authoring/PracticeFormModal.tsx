@@ -40,6 +40,7 @@ export interface L2ElementField {
   mandatory_if_set: string[]
   cascade_from: string[]
   auto_selected: boolean
+  is_interval?: boolean
 }
 
 interface PracticeElement {
@@ -626,14 +627,20 @@ export function PracticeFormModal({
                       {!timelineWindow ? (
                         <span className="italic text-slate-400">auto-calculated server-side</span>
                       ) : Number.isNaN(interval) || interval <= 0 ? (
-                        <span className="italic text-slate-400">
-                          set the interval above to see the count
+                        // 2026-05-22 — interval blank ⇒ one-shot. Indicator
+                        // reflects what the farmer sees: a single application
+                        // somewhere in the window, no fixed cadence.
+                        <span className="text-slate-600">
+                          <span className="font-semibold">1 application</span>
+                          {' '}
+                          <span className="text-slate-400">— at any time during this timeline</span>
                         </span>
                       ) : n < 2 ? (
                         <span className="text-amber-700">
                           Interval too long for this timeline — frequency
                           practices repeat at least twice. Shorten the
-                          interval or extend the timeline window.
+                          interval or leave it blank for a one-time
+                          application.
                         </span>
                       ) : (
                         <>
@@ -688,10 +695,23 @@ export function PracticeFormModal({
                         rows={2}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
                     ) : variant === 'number' ? (
-                      <input type="number" value={value}
-                        step={field.source === 'number_4dec' ? '0.0001' : field.source === 'number_2dec' ? '0.01' : '1'}
-                        onChange={e => setElementValue(field.name, e.target.value)}
-                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <>
+                        <input type="number" value={value}
+                          step={field.source === 'number_4dec' ? '0.0001' : field.source === 'number_2dec' ? '0.01' : '1'}
+                          placeholder={field.is_interval ? 'leave blank for one-time application' : undefined}
+                          onChange={e => setElementValue(field.name, e.target.value)}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        {field.is_interval && (
+                          // 2026-05-22 — interval is non-mandatory. Blank ⇒
+                          // "apply once at any time during this timeline"
+                          // (one-shot path); the farmer's advisory surfaces
+                          // it the same way a non-frequency practice does.
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Leave blank if this practice is to be applied
+                            once at any time during the timeline.
+                          </p>
+                        )}
+                      </>
                     ) : variant === 'media' ? (
                       <div>
                         {value && (
