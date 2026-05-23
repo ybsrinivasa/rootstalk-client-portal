@@ -67,6 +67,10 @@ const emptyTLForm = {
   to_value: '7',
 }
 
+// Module-level constant so the array identity is stable across
+// renders — the modal's reset effect uses this as a dep key.
+const QA_AGNOSTIC_HIDDEN_L0: string[] = ['INPUT']
+
 export default function StandardResponseDetailPage() {
   const params = useParams<{ srId: string }>()
   const srId = params?.srId
@@ -463,54 +467,61 @@ export default function StandardResponseDetailPage() {
                     + Add Practice
                   </button>
 
-                  {/* Relations + CQs — shared with CA-CCA (Batch N2). */}
-                  <RelationsSection
-                    timelineId={tl.id}
-                    timelineName={tl.name}
-                    practices={(practiceMap[tl.id] || []).map(p => ({
-                      id: p.id,
-                      l0_type: p.l0_type,
-                      l1_type: p.l1_type,
-                      l2_type: p.l2_type,
-                      is_special_input: p.is_special_input,
-                      elements: p.elements?.map(e => ({
-                        element_type: e.element_type,
-                        value: e.value,
-                        display_value: e.display_value,
-                      })),
-                    }))}
-                    pipe={{
-                      pipe: 'QA_CLIENT',
-                      clientId: clientId || '',
-                      parentId: srId || '',
-                    }}
-                    onRelationsChange={(tid, rels) =>
-                      setRelationsByTimeline(m => ({ ...m, [tid]: rels }))
-                    }
-                  />
-                  <CQsSection
-                    timelineId={tl.id}
-                    timelineName={tl.name}
-                    practices={(practiceMap[tl.id] || []).map(p => ({
-                      id: p.id,
-                      l0_type: p.l0_type,
-                      l1_type: p.l1_type,
-                      l2_type: p.l2_type,
-                      is_special_input: p.is_special_input,
-                      relation_id: p.relation_id ?? null,
-                      elements: p.elements?.map(e => ({
-                        element_type: e.element_type,
-                        value: e.value,
-                        display_value: e.display_value,
-                      })),
-                    }))}
-                    relations={(relationsByTimeline[tl.id] || []) as never}
-                    pipe={{
-                      pipe: 'QA_CLIENT',
-                      clientId: clientId || '',
-                      parentId: srId || '',
-                    }}
-                  />
+                  {/* Relations + CQs are crop-specific by nature
+                      (rules reference crop attributes). Hide them on
+                      "Common to all crops" SRs — same scope rule as
+                      INPUT practices below. */}
+                  {sr.crop_cosh_id && (
+                    <>
+                      <RelationsSection
+                        timelineId={tl.id}
+                        timelineName={tl.name}
+                        practices={(practiceMap[tl.id] || []).map(p => ({
+                          id: p.id,
+                          l0_type: p.l0_type,
+                          l1_type: p.l1_type,
+                          l2_type: p.l2_type,
+                          is_special_input: p.is_special_input,
+                          elements: p.elements?.map(e => ({
+                            element_type: e.element_type,
+                            value: e.value,
+                            display_value: e.display_value,
+                          })),
+                        }))}
+                        pipe={{
+                          pipe: 'QA_CLIENT',
+                          clientId: clientId || '',
+                          parentId: srId || '',
+                        }}
+                        onRelationsChange={(tid, rels) =>
+                          setRelationsByTimeline(m => ({ ...m, [tid]: rels }))
+                        }
+                      />
+                      <CQsSection
+                        timelineId={tl.id}
+                        timelineName={tl.name}
+                        practices={(practiceMap[tl.id] || []).map(p => ({
+                          id: p.id,
+                          l0_type: p.l0_type,
+                          l1_type: p.l1_type,
+                          l2_type: p.l2_type,
+                          is_special_input: p.is_special_input,
+                          relation_id: p.relation_id ?? null,
+                          elements: p.elements?.map(e => ({
+                            element_type: e.element_type,
+                            value: e.value,
+                            display_value: e.display_value,
+                          })),
+                        }))}
+                        relations={(relationsByTimeline[tl.id] || []) as never}
+                        pipe={{
+                          pipe: 'QA_CLIENT',
+                          clientId: clientId || '',
+                          parentId: srId || '',
+                        }}
+                      />
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -595,6 +606,7 @@ export default function StandardResponseDetailPage() {
           return { from_value: tl.from_value, to_value: tl.to_value }
         })()}
         pipe={{ pipe: 'QA_CLIENT', clientId: clientId || '', parentId: srId || '' }}
+        hiddenL0Types={sr?.crop_cosh_id ? undefined : QA_AGNOSTIC_HIDDEN_L0}
         usedCommonNames={(() => {
           if (!showAddPractice) return new Set<string>()
           const peers = practiceMap[showAddPractice] || []

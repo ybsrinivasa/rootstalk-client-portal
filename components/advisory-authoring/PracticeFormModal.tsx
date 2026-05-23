@@ -192,13 +192,19 @@ interface Props {
    *  unknown — the backend still catches it. The edit-in-place case
    *  is handled internally (the row's own CN is never greyed). */
   usedCommonNames?: Set<string>
+  /** L0 buckets to hide from the create-mode selector. Used by
+   *  QA "Common to all crops" SRs to suppress INPUT — INPUTs are
+   *  inherently crop-specific (dose, brand, timing). Edit mode
+   *  always shows the existing row's L0 so old data can be cleaned
+   *  up; only the create flow is gated. */
+  hiddenL0Types?: string[]
   onClose: () => void
   onSaved: () => void
 }
 
 export function PracticeFormModal({
   open, mode, timelineId, contextSubtitle, timelineWindow, cropCoshId,
-  existingPractice, pipe, usedCommonNames, onClose, onSaved,
+  existingPractice, pipe, usedCommonNames, hiddenL0Types, onClose, onSaved,
 }: Props) {
   const endpoints = practiceEndpoints(pipe)
 
@@ -237,15 +243,23 @@ export function PracticeFormModal({
         is_brand_locked: !!existingPractice.is_brand_locked,
       })
     } else {
+      // Pick the first non-hidden L0 from the loaded taxonomy as the
+      // create-mode default. Falls back to 'INPUT' when taxonomy
+      // hasn't loaded yet; a second effect (below) corrects the
+      // selection once the taxonomy resolves and INPUT is hidden.
+      const hidden = new Set(hiddenL0Types || [])
+      const defaultL0 = taxonomy.find(l0 => !hidden.has(l0.id))?.id
+        || (hidden.has('INPUT') ? 'NON_INPUT' : 'INPUT')
       setPracticeForm({
-        l0_type: 'INPUT', l1_type: '', l2_type: '', display_order: '0',
+        l0_type: defaultL0, l1_type: '', l2_type: '', display_order: '0',
         is_special_input: false, is_brand_locked: false,
       })
       setL2Spec([]); setElementValues({}); setOptionsByField({})
       setL2Meta({ is_special_input: false, frequency_based: false })
     }
     setError('')
-  }, [open, mode, existingPractice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode, existingPractice, taxonomy.length, (hiddenL0Types || []).join(',')])
 
   const currentL0 = taxonomy.find(l0 => l0.id === practiceForm.l0_type)
   const currentL1 = currentL0?.l1.find(l1 => l1.id === practiceForm.l1_type)
@@ -548,9 +562,18 @@ export function PracticeFormModal({
               }))}
               className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               {taxonomy.length === 0 && <option value="INPUT">INPUT</option>}
-              {taxonomy.map(l0 => (
-                <option key={l0.id} value={l0.id}>{l0.label}</option>
-              ))}
+              {taxonomy
+                .filter(l0 => {
+                  if (!hiddenL0Types?.includes(l0.id)) return true
+                  // Edit mode: keep the existing L0 visible so an
+                  // earlier-authored INPUT row can still be opened
+                  // and cleaned up. Hidden only applies to the
+                  // create-new flow.
+                  return mode === 'edit' && existingPractice?.l0_type === l0.id
+                })
+                .map(l0 => (
+                  <option key={l0.id} value={l0.id}>{l0.label}</option>
+                ))}
             </select>
           </div>
 
