@@ -317,7 +317,7 @@ export default function StandardResponseDetailPage() {
           <Link href={`/standard-responses/${srId}/preview`}
             className="text-sm font-medium px-3 py-1.5 rounded-xl border"
             style={{ borderColor: colour, color: colour }}>
-            👁 Preview
+            👁 {sr.status === 'DRAFT' ? 'Preview and Publish' : 'Preview'}
           </Link>
         </div>
         <div className="flex items-start gap-3 flex-wrap mt-2">
@@ -662,7 +662,7 @@ export default function StandardResponseDetailPage() {
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
                   {sr.status === 'DRAFT'
-                    ? 'Publish this question first (from Preview) to control visibility.'
+                    ? 'Publish this question first (from Preview and Publish) to control visibility.'
                     : 'Inactive hides the question from FarmPundits without losing the authored advisory.'}
                 </p>
               </div>
