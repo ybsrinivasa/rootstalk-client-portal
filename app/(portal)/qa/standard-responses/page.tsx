@@ -6,11 +6,14 @@ import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 import FilterChips, { ActiveChip } from '@/components/cca/FilterChips'
 
+type SRStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE'
+
 interface QaSr {
   id: string
   question_text: string
   crop_cosh_id: string | null
   crop_name_en: string | null
+  status: SRStatus
   timeline_count: number
   created_at: string
   updated_at: string
@@ -19,6 +22,12 @@ interface QaSr {
 interface QaCrop {
   crop_cosh_id: string
   name_en: string
+}
+
+const STATUS_CHIP: Record<SRStatus, string> = {
+  DRAFT: 'bg-slate-100 text-slate-600',
+  ACTIVE: 'bg-green-50 text-green-700',
+  INACTIVE: 'bg-amber-50 text-amber-700',
 }
 
 function QaSrsContent() {
@@ -36,13 +45,10 @@ function QaSrsContent() {
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
-  const [form, setForm] = useState({
-    question_text: '',
-    crop_cosh_id: '' as string | '__AGNOSTIC__',
-  })
+  const [questionText, setQuestionText] = useState('')
 
   const cropName = useMemo(() => {
-    if (cropFilter === '__AGNOSTIC__') return 'Crop-agnostic'
+    if (cropFilter === '__AGNOSTIC__') return 'Common to all crops'
     return crops.find(c => c.crop_cosh_id === cropFilter)?.name_en || cropFilter
   }, [cropFilter, crops])
 
@@ -71,24 +77,19 @@ function QaSrsContent() {
   }, [cropFilter, cropName])
 
   const openCreate = () => {
-    setForm({
-      question_text: '',
-      crop_cosh_id: cropFilter || '',
-    })
+    setQuestionText('')
     setCreateError('')
     setShowCreate(true)
   }
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
-    if (!clientId) return
+    if (!clientId || !cropFilter) return
     setCreating(true); setCreateError('')
     try {
       const body = {
-        question_text: form.question_text.trim(),
-        crop_cosh_id: form.crop_cosh_id === '__AGNOSTIC__'
-          ? null
-          : (form.crop_cosh_id || null),
+        question_text: questionText.trim(),
+        crop_cosh_id: cropFilter === '__AGNOSTIC__' ? null : cropFilter,
       }
       const { data } = await api.post<{ id: string }>(
         `/client/${clientId}/standard-responses`, body,
@@ -112,11 +113,19 @@ function QaSrsContent() {
             anchors a Timeline + Practice tree the farmer&apos;s advisory merges in.
           </p>
         </div>
-        <button onClick={openCreate}
-          className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-          style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-          + New Question
-        </button>
+        {cropFilter ? (
+          <button onClick={openCreate}
+            className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
+            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+            + New Question
+          </button>
+        ) : (
+          <Link href="/qa/crops"
+            className="text-sm font-semibold px-4 py-2.5 rounded-xl border"
+            style={{ borderColor: colour, color: colour }}>
+            Pick a crop to add →
+          </Link>
+        )}
       </div>
 
       <FilterChips chips={chips} />
@@ -139,6 +148,7 @@ function QaSrsContent() {
             <thead className="bg-slate-50 border-b border-slate-100">
               <tr>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Question</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Crop</th>
                 <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Timelines</th>
                 <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Last edited</th>
@@ -153,9 +163,14 @@ function QaSrsContent() {
                       {s.question_text}
                     </Link>
                   </td>
+                  <td className="px-5 py-3.5">
+                    <span className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ${STATUS_CHIP[s.status] || STATUS_CHIP.DRAFT}`}>
+                      {s.status?.toLowerCase() || 'draft'}
+                    </span>
+                  </td>
                   <td className="px-5 py-3.5 text-slate-600 text-xs">
                     {s.crop_name_en || (s.crop_cosh_id ? s.crop_cosh_id : (
-                      <span className="text-slate-400 italic">crop-agnostic</span>
+                      <span className="text-amber-700/80 italic">Common to all crops</span>
                     ))}
                   </td>
                   <td className="px-5 py-3.5 text-right text-slate-600 hidden md:table-cell text-xs">
@@ -174,36 +189,29 @@ function QaSrsContent() {
         </div>
       )}
 
-      {showCreate && (
+      {showCreate && cropFilter && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="p-6 border-b border-slate-100">
               <h2 className="font-bold text-slate-900">New Standard Response</h2>
               <p className="text-slate-500 text-sm mt-0.5">
-                Type the farmer-facing question. Pick a crop or leave it crop-agnostic.
-                You&apos;ll add Timelines + Practices on the next screen.
+                Type the farmer-facing question. You&apos;ll add Timelines + Practices on the next screen.
               </p>
             </div>
             <form onSubmit={handleCreate} className="p-6 space-y-4">
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Crop</label>
+                <div className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-700">
+                  {cropName}
+                </div>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Question</label>
-                <textarea value={form.question_text}
-                  onChange={e => setForm(f => ({ ...f, question_text: e.target.value }))}
+                <textarea value={questionText}
+                  onChange={e => setQuestionText(e.target.value)}
                   required rows={2}
                   placeholder="e.g. When should I irrigate after sowing?"
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Crop</label>
-                <select value={form.crop_cosh_id}
-                  onChange={e => setForm(f => ({ ...f, crop_cosh_id: e.target.value as string | '__AGNOSTIC__' }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
-                  <option value="">Pick a crop…</option>
-                  <option value="__AGNOSTIC__">Crop-agnostic</option>
-                  {crops.map(c => (
-                    <option key={c.crop_cosh_id} value={c.crop_cosh_id}>{c.name_en}</option>
-                  ))}
-                </select>
               </div>
               {createError && <p className="text-sm text-red-600">{createError}</p>}
               <div className="flex gap-3 pt-2">
@@ -212,7 +220,7 @@ function QaSrsContent() {
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
                   Cancel
                 </button>
-                <button type="submit" disabled={creating || !form.question_text.trim()}
+                <button type="submit" disabled={creating || !questionText.trim()}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                   style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                   {creating ? 'Creating…' : 'Create'}

@@ -67,7 +67,7 @@ function QaPracticesContent() {
     const out: ActiveChip[] = []
     if (cropFilter) {
       const friendly = cropFilter === '__AGNOSTIC__'
-        ? 'Crop-agnostic'
+        ? 'Common to all crops'
         : (data.items[0]?.crop_name_en || cropFilter)
       out.push({ key: 'crop', label: `Crop: ${friendly}` })
     }

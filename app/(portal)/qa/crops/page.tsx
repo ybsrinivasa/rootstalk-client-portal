@@ -37,14 +37,6 @@ export default function QaCropsPage() {
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-slate-100">Loading…</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {/* Crop-agnostic entry — always available */}
-          <Link
-            href={`/qa/standard-responses?crop=__AGNOSTIC__`}
-            className="bg-slate-50 rounded-2xl border border-dashed border-slate-200 p-4 shadow-sm hover:border-green-300 hover:shadow-md transition-all">
-            <p className="font-semibold text-slate-700">Crop-agnostic</p>
-            <p className="text-xs text-slate-400 mt-0.5">Questions that apply across crops</p>
-          </Link>
-
           {crops.map(c => (
             <Link key={c.crop_cosh_id}
               href={`/qa/standard-responses?crop=${encodeURIComponent(c.crop_cosh_id)}`}
@@ -53,13 +45,22 @@ export default function QaCropsPage() {
             </Link>
           ))}
 
+          {/* "Common to all crops" — always available, positioned last so
+              the crop-specific cards take precedence in the user's eye. */}
+          <Link
+            href={`/qa/standard-responses?crop=__AGNOSTIC__`}
+            className="bg-amber-50/60 rounded-2xl border border-amber-100 p-4 shadow-sm hover:border-amber-200 hover:shadow-md transition-all">
+            <p className="font-semibold text-amber-900">Common to all crops</p>
+            <p className="text-xs text-amber-700/70 mt-0.5">Questions that apply across crops</p>
+          </Link>
+
           {crops.length === 0 && (
             <div className="md:col-span-2 lg:col-span-3 bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
               <p className="text-slate-400 text-4xl mb-3">📚</p>
               <p className="text-slate-600 font-medium">No crops on the belt</p>
               <p className="text-slate-400 text-sm mt-1">
                 Ask the CA to shortlist crops in <Link href="/setup" className="text-green-700 hover:underline">Setup</Link>.
-                You can still author crop-agnostic Q&amp;A above.
+                You can still author questions that apply to all crops via the card above.
               </p>
             </div>
           )}

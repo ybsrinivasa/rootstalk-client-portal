@@ -41,8 +41,17 @@ interface Timeline {
   status?: 'ACTIVE' | 'INACTIVE'
   practices: Practice[]
 }
+type SRStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE'
+
 interface SR {
   id: string; question_text: string; crop_cosh_id: string | null
+  status: SRStatus
+}
+
+const SR_STATUS_CHIP: Record<SRStatus, string> = {
+  DRAFT: 'bg-slate-100 text-slate-600',
+  ACTIVE: 'bg-green-50 text-green-700',
+  INACTIVE: 'bg-amber-50 text-amber-700',
 }
 
 const L0_COLOUR: Record<string, string> = {
@@ -97,14 +106,14 @@ export default function StandardResponseDetailPage() {
   const [cropName, setCropName] = useState<string>('')
   const [editingPractice, setEditingPractice] = useState<{ timelineId: string; practice: Practice } | null>(null)
 
-  // Inline-edit question_text (Task H, 2026-05-18). User-chosen UX:
-  // pencil under the heading → in-place textarea → save back via
-  // PUT /standard-responses/{id}. crop_cosh_id is preserved (the
-  // backend wipes-and-sets both fields on PUT).
-  const [editingQuestion, setEditingQuestion] = useState(false)
-  const [questionDraft, setQuestionDraft] = useState('')
-  const [savingQuestion, setSavingQuestion] = useState(false)
-  const [questionError, setQuestionError] = useState('')
+  // Edit details modal — question text + active/inactive toggle.
+  // Toggle is disabled while DRAFT (Inactive only makes sense after
+  // publish; DRAFTs are already Pundit-invisible). Replaces the older
+  // pencil-style inline edit (Batch H).
+  const [showEditSR, setShowEditSR] = useState(false)
+  const [editSRForm, setEditSRForm] = useState({ question_text: '', is_active: true })
+  const [savingSR, setSavingSR] = useState(false)
+  const [editSRError, setEditSRError] = useState('')
 
   async function load() {
     if (!clientId || !srId) return
@@ -237,30 +246,51 @@ export default function StandardResponseDetailPage() {
     } finally { setEditingTL(false) }
   }
 
-  function openQuestionEdit() {
+  function openEditSR() {
     if (!sr) return
-    setQuestionDraft(sr.question_text)
-    setQuestionError('')
-    setEditingQuestion(true)
+    setEditSRForm({
+      question_text: sr.question_text,
+      is_active: sr.status !== 'INACTIVE',
+    })
+    setEditSRError('')
+    setShowEditSR(true)
   }
 
-  async function saveQuestion() {
+  async function handleEditSR(e: FormEvent) {
+    e.preventDefault()
     if (!sr || !clientId) return
-    const next = questionDraft.trim()
-    if (!next) { setQuestionError('Question text is required.'); return }
-    if (next === sr.question_text) { setEditingQuestion(false); return }
-    setSavingQuestion(true); setQuestionError('')
+    const next = editSRForm.question_text.trim()
+    if (!next) { setEditSRError('Question text is required.'); return }
+    setSavingSR(true); setEditSRError('')
     try {
-      // Backend PUT wipes-and-sets both fields, so preserve crop.
-      const { data } = await api.put<SR>(
-        `/client/${clientId}/standard-responses/${srId}`,
-        { question_text: next, crop_cosh_id: sr.crop_cosh_id },
-      )
-      setSr(data)
-      setEditingQuestion(false)
+      let updated = sr
+      if (next !== sr.question_text) {
+        // Backend PUT wipes-and-sets both fields, so preserve crop.
+        const { data } = await api.put<SR>(
+          `/client/${clientId}/standard-responses/${srId}`,
+          { question_text: next, crop_cosh_id: sr.crop_cosh_id },
+        )
+        updated = data
+      }
+      // Toggle the lifecycle flag — only meaningful once published.
+      // The endpoints refuse out-of-state calls so the disabled-toggle
+      // UI gate is doubled by a backend guard.
+      if (sr.status === 'ACTIVE' && !editSRForm.is_active) {
+        const { data } = await api.post<SR>(
+          `/client/${clientId}/standard-responses/${srId}/deactivate`,
+        )
+        updated = { ...updated, status: data.status }
+      } else if (sr.status === 'INACTIVE' && editSRForm.is_active) {
+        const { data } = await api.post<SR>(
+          `/client/${clientId}/standard-responses/${srId}/activate`,
+        )
+        updated = { ...updated, status: data.status }
+      }
+      setSr(updated)
+      setShowEditSR(false)
     } catch (err: unknown) {
-      setQuestionError(extractErrorMessage(err, 'Failed to save question.'))
-    } finally { setSavingQuestion(false) }
+      setEditSRError(extractErrorMessage(err, 'Failed to save changes.'))
+    } finally { setSavingSR(false) }
   }
 
   if (loading) {
@@ -291,58 +321,23 @@ export default function StandardResponseDetailPage() {
           </Link>
         </div>
         <div className="flex items-start gap-3 flex-wrap mt-2">
-          {editingQuestion ? (
-            <div className="flex-1 space-y-2">
-              <textarea
-                value={questionDraft}
-                onChange={e => setQuestionDraft(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Escape') { setEditingQuestion(false); setQuestionError('') }
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveQuestion()
-                }}
-                rows={2}
-                autoFocus
-                className="w-full text-xl font-bold text-slate-900 border border-blue-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={saveQuestion}
-                  disabled={savingQuestion || !questionDraft.trim()}
-                  className="text-sm font-semibold text-white px-4 py-1.5 rounded-lg disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                  {savingQuestion ? 'Saving…' : 'Save'}
-                </button>
-                <button type="button"
-                  onClick={() => { setEditingQuestion(false); setQuestionError('') }}
-                  className="text-sm font-medium text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-100">
-                  Cancel
-                </button>
-                <span className="text-[11px] text-slate-400 ml-1">⌘+Enter to save, Esc to cancel</span>
-              </div>
-              {questionError && <p className="text-sm text-red-600">{questionError}</p>}
-            </div>
+          <h1 className="text-xl font-bold text-slate-900 flex-1">{sr.question_text}</h1>
+          <span className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ${SR_STATUS_CHIP[sr.status] || SR_STATUS_CHIP.DRAFT}`}>
+            {sr.status?.toLowerCase() || 'draft'}
+          </span>
+          {sr.crop_cosh_id ? (
+            <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
+              {cropName || '(loading crop…)'}
+            </span>
           ) : (
-            <>
-              <h1 className="text-xl font-bold text-slate-900 flex-1">
-                {sr.question_text}
-                <button type="button"
-                  onClick={openQuestionEdit}
-                  className="ml-2 text-slate-300 hover:text-blue-500 align-middle"
-                  title="Edit question">
-                  <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                </button>
-              </h1>
-              {sr.crop_cosh_id ? (
-                <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
-                  {cropName || '(loading crop…)'}
-                </span>
-              ) : (
-                <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-                  Crop-agnostic
-                </span>
-              )}
-            </>
+            <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">
+              Common to all crops
+            </span>
           )}
+          <button type="button" onClick={openEditSR}
+            className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            Edit details
+          </button>
         </div>
         <p className="text-slate-500 text-sm mt-2">
           When a FarmPundit picks this question, the timelines below merge into the farmer's advisory
@@ -620,6 +615,74 @@ export default function StandardResponseDetailPage() {
           if (tlId) loadPractices(tlId)
         }}
       />
+
+      {/* Edit Standard Response modal — question text + active/inactive */}
+      {showEditSR && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Edit details</h2>
+              <p className="text-slate-500 text-sm mt-0.5">
+                Crop: <span className="font-medium text-slate-700">{sr.crop_cosh_id ? (cropName || sr.crop_cosh_id) : 'Common to all crops'}</span>
+                <span className="ml-1 text-xs text-slate-400">(locked)</span>
+              </p>
+            </div>
+            <form onSubmit={handleEditSR} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Question</label>
+                <textarea value={editSRForm.question_text}
+                  onChange={e => setEditSRForm(f => ({ ...f, question_text: e.target.value }))}
+                  required rows={3}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Visibility</label>
+                <div className="flex gap-2">
+                  {([
+                    { v: true, label: 'Active' },
+                    { v: false, label: 'Inactive' },
+                  ] as const).map(opt => {
+                    const selected = editSRForm.is_active === opt.v
+                    const draft = sr.status === 'DRAFT'
+                    return (
+                      <button key={String(opt.v)} type="button"
+                        disabled={draft}
+                        onClick={() => setEditSRForm(f => ({ ...f, is_active: opt.v }))}
+                        className={`flex-1 py-2 rounded-xl text-sm font-medium border ${
+                          selected
+                            ? (opt.v
+                                ? 'bg-green-50 border-green-300 text-green-700'
+                                : 'bg-amber-50 border-amber-300 text-amber-700')
+                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                        } ${draft ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {sr.status === 'DRAFT'
+                    ? 'Publish this question first (from Preview) to control visibility.'
+                    : 'Inactive hides the question from FarmPundits without losing the authored advisory.'}
+                </p>
+              </div>
+              {editSRError && <p className="text-sm text-red-600">{editSRError}</p>}
+              <div className="flex gap-3 pt-2">
+                <button type="button"
+                  onClick={() => { setShowEditSR(false); setEditSRError('') }}
+                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingSR || !editSRForm.question_text.trim()}
+                  className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  {savingSR ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Edit Timeline modal */}
       {showEditTL && (
