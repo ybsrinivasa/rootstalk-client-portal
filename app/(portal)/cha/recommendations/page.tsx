@@ -62,6 +62,11 @@ function ChaRecsContent() {
 
   // Import
   const [showImport, setShowImport] = useState(false)
+  // null = no bundle filter (top-right button). Set to AREA_WISE /
+  // PLANT_WISE when the modal is launched from a specific bundle's
+  // "Not started" card so we don't ask the user a question they
+  // already answered by clicking on that side of the screen.
+  const [importBundle, setImportBundle] = useState<'AREA_WISE' | 'PLANT_WISE' | null>(null)
   const [globals, setGlobals] = useState<GlobalPG[]>([])
   const [loadingGlobals, setLoadingGlobals] = useState(false)
   const [importing, setImporting] = useState<string | null>(null)
@@ -233,16 +238,21 @@ function ChaRecsContent() {
     }
   }
 
-  const openImport = async () => {
+  const openImport = async (bundle: 'AREA_WISE' | 'PLANT_WISE' | null = null) => {
+    setImportBundle(bundle)
     setShowImport(true); setImportError(''); setLoadingGlobals(true)
     try {
       const { data } = await api.get<GlobalPG[]>('/advisory/global/pg-recommendations')
-      // When in PG-context (came from /cha/problems → a PG), only
-      // show globals for that PG. Otherwise show every active global.
+      // Two layers of filtering:
+      //  - PG context (came from /cha/problems → a specific PG): only
+      //    globals for that PG.
+      //  - Bundle context (came from a per-bundle "Not started" card):
+      //    only globals matching that side of the bifurcation.
       setGlobals(
         data.filter(g =>
           g.status === 'ACTIVE'
           && (!pgFilter || g.problem_group_cosh_id === pgFilter)
+          && (!bundle || g.area_or_plant === bundle)
         )
       )
     } catch {
@@ -385,7 +395,7 @@ function ChaRecsContent() {
             (and confusing now that bundle creation is one-click). */}
         {!pgFilter && (
           <div className="flex gap-2">
-            <button onClick={openImport}
+            <button onClick={() => openImport()}
               className="border text-sm font-medium px-4 py-2.5 rounded-xl"
               style={{ borderColor: colour, color: colour }}>
               ↓ Import from Global
@@ -436,7 +446,7 @@ function ChaRecsContent() {
                       style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                       {bundleBusy === bundle ? 'Starting…' : '+ Add Recommendations'}
                     </button>
-                    <button onClick={openImport}
+                    <button onClick={() => openImport(bundle)}
                       className="text-sm font-medium px-4 py-2 rounded-xl border"
                       style={{ borderColor: colour, color: colour }}>
                       ↓ Import from Global
@@ -697,7 +707,14 @@ function ChaRecsContent() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="p-6 border-b border-slate-100">
-              <h2 className="font-bold text-slate-900">Import from Global CHA Library</h2>
+              <h2 className="font-bold text-slate-900">
+                Import from Global CHA Library
+                {importBundle && (
+                  <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 align-middle">
+                    {importBundle === 'AREA_WISE' ? 'Area-wise' : 'Plant-wise'}
+                  </span>
+                )}
+              </h2>
               <p className="text-slate-500 text-sm mt-0.5">
                 Pick a Global PG to bring into your company. Each import creates
                 a new draft version for you to review.
@@ -720,7 +737,7 @@ function ChaRecsContent() {
               ) : globals.length === 0 ? (
                 <p className="text-center text-slate-400 text-sm py-8">
                   {pgFilter
-                    ? `No active global recommendations for ${problemNameById[pgFilter] || pgFilter} yet. Ask your RootsTalk admin to publish one.`
+                    ? `No active ${importBundle === 'AREA_WISE' ? 'Area-wise ' : importBundle === 'PLANT_WISE' ? 'Plant-wise ' : ''}global recommendations for ${problemNameById[pgFilter] || pgFilter} yet. Ask your RootsTalk admin to publish one.`
                     : 'No active global PG recommendations yet. Ask your RootsTalk admin to publish some.'}
                 </p>
               ) : (
