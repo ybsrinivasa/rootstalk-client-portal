@@ -3,6 +3,7 @@ import { useEffect, useState, FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
+import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
@@ -358,17 +359,25 @@ export default function SpDetailPage() {
 
   async function deleteTimeline(tl: Timeline) {
     if (!confirm(`Delete timeline "${tl.name}"? All practices in it will also be removed.`)) return
-    await api.delete(`/client/${clientId}/sp-recommendations/${recId}/timelines/${tl.id}`)
-    await loadTimelines()
-    loadReadiness()
+    try {
+      await api.delete(`/client/${clientId}/sp-recommendations/${recId}/timelines/${tl.id}`)
+      await loadTimelines()
+      loadReadiness()
+    } catch (err: unknown) {
+      alert(extractErrorMessage(err, 'Failed to delete timeline.'))
+    }
   }
 
   async function deletePractice(timelineId: string, practiceId: string) {
     if (!confirm('Delete this practice?')) return
-    await api.delete(
-      `/client/${clientId}/sp-recommendations/${recId}/timelines/${timelineId}/practices/${practiceId}`,
-    )
-    await loadTimelines()
+    try {
+      await api.delete(
+        `/client/${clientId}/sp-recommendations/${recId}/timelines/${timelineId}/practices/${practiceId}`,
+      )
+      await loadTimelines()
+    } catch (err: unknown) {
+      alert(extractErrorMessage(err, 'Failed to delete practice.'))
+    }
   }
 
   async function handlePublish() {
