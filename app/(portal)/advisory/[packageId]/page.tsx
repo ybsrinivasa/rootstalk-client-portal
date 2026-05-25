@@ -895,16 +895,24 @@ export default function PackageDetailPage() {
 
   async function handleDeleteTimeline(tl: Timeline) {
     if (!confirm(`Delete timeline "${tl.name}"? All practices in it will also be deleted.`)) return
-    await api.delete(`/client/${clientId}/packages/${packageId}/timelines/${tl.id}`)
-    await loadTimelines()
-    loadReadiness()
-    if (expanded === tl.id) setExpanded(null)
+    try {
+      await api.delete(`/client/${clientId}/packages/${packageId}/timelines/${tl.id}`)
+      await loadTimelines()
+      loadReadiness()
+      if (expanded === tl.id) setExpanded(null)
+    } catch (err: unknown) {
+      alert(extractErrorMessage(err, 'Failed to delete timeline.'))
+    }
   }
 
   async function handleDeletePractice(timelineId: string, practiceId: string) {
     if (!confirm('Delete this practice?')) return
-    await api.delete(`/client/${clientId}/timelines/${timelineId}/practices/${practiceId}`)
-    await loadPractices(timelineId)
+    try {
+      await api.delete(`/client/${clientId}/timelines/${timelineId}/practices/${practiceId}`)
+      await loadPractices(timelineId)
+    } catch (err: unknown) {
+      alert(extractErrorMessage(err, 'Failed to delete practice.'))
+    }
   }
 
   // ── Multi-row versioning actions ──────────────────────────────────────────
