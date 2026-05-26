@@ -14,10 +14,16 @@ interface PendingInvitation {
   id: string; pundit_id: string; name: string | null; phone: string | null; email: string | null
   role: string; status: string; rejection_reason: string | null; created_at: string
 }
+interface CoshNamedRef { cosh_id: string; name: string | null }
 interface SearchResult {
   id: string; user_id: string; name: string | null; phone: string | null; email: string | null
-  education: string | null; experience_band: string | null; support_method: string | null; already_onboarded: boolean
+  education: CoshNamedRef | null
+  experience: CoshNamedRef | null
+  already_onboarded: boolean
 }
+interface CoshOption { cosh_id: string; name: string }
+interface CoshState { cosh_id: string; name: string | null }
+interface CoshLocationsResponse { states: CoshState[] }
 interface CompanyQuery {
   id: string; title: string; status: string; severity: string; created_at: string; farmer_user_id: string
 }
@@ -32,86 +38,20 @@ const STATUS_COLOUR: Record<string, string> = {
   EXPIRED: 'bg-slate-100 text-slate-500',
 }
 
-// Filter option lists — kept in sync with the PWA `/pundit/register`
-// page so the CA filters can match what experts actually selected on
-// their profile. If the spec or the register page adds new values,
-// update both places.
-const STATES: Array<[string, string]> = [
-  ['state_andhra_pradesh', 'Andhra Pradesh'],
-  ['state_arunachal_pradesh', 'Arunachal Pradesh'],
-  ['state_assam', 'Assam'],
-  ['state_bihar', 'Bihar'],
-  ['state_chhattisgarh', 'Chhattisgarh'],
-  ['state_goa', 'Goa'],
-  ['state_gujarat', 'Gujarat'],
-  ['state_haryana', 'Haryana'],
-  ['state_himachal_pradesh', 'Himachal Pradesh'],
-  ['state_jharkhand', 'Jharkhand'],
-  ['state_karnataka', 'Karnataka'],
-  ['state_kerala', 'Kerala'],
-  ['state_madhya_pradesh', 'Madhya Pradesh'],
-  ['state_maharashtra', 'Maharashtra'],
-  ['state_manipur', 'Manipur'],
-  ['state_meghalaya', 'Meghalaya'],
-  ['state_mizoram', 'Mizoram'],
-  ['state_nagaland', 'Nagaland'],
-  ['state_odisha', 'Odisha'],
-  ['state_punjab', 'Punjab'],
-  ['state_rajasthan', 'Rajasthan'],
-  ['state_sikkim', 'Sikkim'],
-  ['state_tamil_nadu', 'Tamil Nadu'],
-  ['state_telangana', 'Telangana'],
-  ['state_tripura', 'Tripura'],
-  ['state_uttar_pradesh', 'Uttar Pradesh'],
-  ['state_uttarakhand', 'Uttarakhand'],
-  ['state_west_bengal', 'West Bengal'],
-  ['state_delhi', 'Delhi'],
-  ['state_jammu_and_kashmir', 'Jammu & Kashmir'],
-]
-const EXPERTISE_DOMAINS: Array<[string, string]> = [
-  ['plant_protection', 'Plant Protection'],
-  ['plant_nutrition', 'Plant Nutrition'],
-  ['overall_agronomy', 'Overall Agronomy'],
-  ['plant_propagation', 'Plant Propagation'],
-  ['farm_equipments_and_mechanisation', 'Farm Equipment & Mechanisation'],
-]
-const CROP_GROUPS: Array<[string, string]> = [
-  ['cereals', 'Cereals'],
-  ['oilseeds', 'Oilseeds'],
-  ['fruit_trees', 'Fruit Trees'],
-  ['fibre_crops', 'Fibre Crops'],
-  ['flower_crops', 'Flower Crops'],
-  ['fodder_crops', 'Fodder Crops'],
-  ['medicinal_and_aromatic_crops', 'Medicinal & Aromatic'],
-]
-const LANGUAGES: Array<[string, string]> = [
-  ['en', 'English'], ['hi', 'Hindi'], ['te', 'Telugu'], ['kn', 'Kannada'],
-  ['ta', 'Tamil'], ['ml', 'Malayalam'], ['mr', 'Marathi'], ['gu', 'Gujarati'],
-  ['pa', 'Punjabi'], ['bn', 'Bengali'],
-]
-const EDUCATIONS: Array<[string, string]> = [
-  ['DOCTORATE', 'Doctorate'],
-  ['MASTERS', 'Masters'],
-  ['BACCALAUREATE', 'Baccalaureate'],
-  ['CLASS_XII_AND_BELOW', 'Class XII and below'],
-  ['NO_FORMAL_EDUCATION', 'No formal education'],
-]
-const EXPERIENCES: Array<[string, string]> = [
-  ['UP_TO_5_YEARS', 'Up to 5 years'],
-  ['FROM_5_TO_10', '5–10 years'],
-  ['FROM_10_TO_15', '10–15 years'],
-  ['ABOVE_15', 'More than 15 years'],
-]
-const SUPPORT_METHODS: Array<[string, string]> = [
-  ['CONVENTIONAL', 'Conventional'],
-  ['NON_CHEMICAL', 'Non-chemical'],
-]
-const CULTIVATION_TYPES: Array<[string, string]> = [
-  ['open_field', 'Open Field'],
-  ['greenhouse', 'Greenhouse / Polyhouse'],
-  ['nursery', 'Nursery'],
-  ['hydroponic', 'Hydroponic'],
-]
+// Every dropdown now binds to a Cosh `core_type` slug (the same set
+// the PWA /pundit/register form fetches). Two effects below load
+// the option lists at mount; if the user has used the PWA register
+// form, the values being matched against are the same Cosh UUIDs.
+const PUNDIT_SLUGS = [
+  'pundit_education',
+  'pundit_experience',
+  'pundit_farming_methods',
+  'pundit_cultivation_types',
+  'pundit_domain_expertise',
+  'pundit_crop_groups',
+  'pundit_languages',
+] as const
+type Slug = typeof PUNDIT_SLUGS[number]
 
 export default function FarmPunditsPage() {
   const client = getClient()
@@ -136,12 +76,38 @@ export default function FarmPunditsPage() {
     expertise_domains: [] as string[],
     language_codes: [] as string[],
     crop_groups: [] as string[],
-    education: '',
-    experience_band: '',
-    support_method: '',
-    cultivation_type: '',
+    farming_methods: [] as string[],
+    cultivation_types: [] as string[],
+    education_cosh_id: '',
+    experience_cosh_id: '',
     phone: '',
   })
+
+  // Cosh-driven option lists for every dropdown. Loaded once on mount;
+  // state_list comes from /cosh/locations/india (already used elsewhere),
+  // the eight pundit_* slugs from the allowlisted /cosh/pundit-options.
+  const [options, setOptions] = useState<Record<Slug, CoshOption[]>>(() => {
+    const seed = {} as Record<Slug, CoshOption[]>
+    PUNDIT_SLUGS.forEach(s => { seed[s] = [] })
+    return seed
+  })
+  const [states, setStates] = useState<CoshOption[]>([])
+
+  useEffect(() => {
+    PUNDIT_SLUGS.forEach(slug => {
+      api.get<CoshOption[]>(`/cosh/pundit-options?slug=${slug}`)
+        .then(r => setOptions(o => ({ ...o, [slug]: r.data })))
+        .catch(() => { /* dropdown stays empty — search still works */ })
+    })
+    api.get<CoshLocationsResponse>('/cosh/locations/india')
+      .then(r => setStates(
+        (r.data.states || [])
+          .filter(s => s.name)
+          .map(s => ({ cosh_id: s.cosh_id, name: s.name! }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      ))
+      .catch(() => {})
+  }, [])
 
   const [inviteRole, setInviteRole] = useState<Record<string, string>>({})
 
@@ -162,7 +128,10 @@ export default function FarmPunditsPage() {
 
   useEffect(() => { load() }, [clientId])
 
-  function toggleArr(field: 'state_cosh_ids' | 'expertise_domains' | 'language_codes' | 'crop_groups', value: string) {
+  type MultiField =
+    | 'state_cosh_ids' | 'expertise_domains' | 'language_codes'
+    | 'crop_groups' | 'farming_methods' | 'cultivation_types'
+  function toggleArr(field: MultiField, value: string) {
     setSearchForm(f => ({
       ...f,
       [field]: f[field].includes(value) ? f[field].filter(x => x !== value) : [...f[field], value],
@@ -180,11 +149,11 @@ export default function FarmPunditsPage() {
       searchForm.expertise_domains.forEach(v => params.append('expertise_domains', v))
       searchForm.language_codes.forEach(v => params.append('language_codes', v))
       searchForm.crop_groups.forEach(v => params.append('crop_groups', v))
+      searchForm.farming_methods.forEach(v => params.append('farming_methods', v))
+      searchForm.cultivation_types.forEach(v => params.append('cultivation_types', v))
       // Single-value: append only if set.
-      if (searchForm.education) params.append('education', searchForm.education)
-      if (searchForm.experience_band) params.append('experience_band', searchForm.experience_band)
-      if (searchForm.support_method) params.append('support_method', searchForm.support_method)
-      if (searchForm.cultivation_type) params.append('cultivation_type', searchForm.cultivation_type)
+      if (searchForm.education_cosh_id) params.append('education_cosh_id', searchForm.education_cosh_id)
+      if (searchForm.experience_cosh_id) params.append('experience_cosh_id', searchForm.experience_cosh_id)
       if (searchForm.phone) params.append('phone', searchForm.phone)
       const { data } = await api.get<SearchResult[]>(`/client/${clientId}/pundit-search?${params}`)
       setSearchResults(data)
@@ -255,28 +224,34 @@ export default function FarmPunditsPage() {
   }
 
   // Reusable multi-select pill block — selected values fill with the
-  // role colour, unselected sit on a muted border.
+  // role colour, unselected sit on a muted border. Options now come
+  // from Cosh ({cosh_id, name}); a loading message replaces the pills
+  // until the fetch resolves.
   const PillGroup = ({
     label, options, selected, onToggle,
   }: {
     label: string
-    options: Array<[string, string]>
+    options: CoshOption[]
     selected: string[]
     onToggle: (v: string) => void
   }) => (
     <div>
       <p className="text-xs font-medium text-slate-500 mb-1.5">{label}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map(([val, lbl]) => (
-          <button key={val} type="button" onClick={() => onToggle(val)}
-            className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
-              selected.includes(val) ? 'text-white border-transparent' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-            }`}
-            style={selected.includes(val) ? { background: COLOUR } : {}}>
-            {lbl}
-          </button>
-        ))}
-      </div>
+      {options.length === 0 ? (
+        <p className="text-xs text-slate-400 italic">Loading…</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {options.map(o => (
+            <button key={o.cosh_id} type="button" onClick={() => onToggle(o.cosh_id)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+                selected.includes(o.cosh_id) ? 'text-white border-transparent' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              style={selected.includes(o.cosh_id) ? { background: COLOUR } : {}}>
+              {o.name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 
@@ -486,54 +461,42 @@ export default function FarmPunditsPage() {
           <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
             <h3 className="font-semibold text-slate-800 mb-4">Search FarmPundits</h3>
             <form onSubmit={handleSearch} className="space-y-4">
-              <PillGroup label="Support States" options={STATES}
+              <PillGroup label="Preferred States" options={states}
                 selected={searchForm.state_cosh_ids}
                 onToggle={v => toggleArr('state_cosh_ids', v)} />
-              <PillGroup label="Expertise Domains" options={EXPERTISE_DOMAINS}
+              <PillGroup label="Domain Expertise" options={options.pundit_domain_expertise}
                 selected={searchForm.expertise_domains}
                 onToggle={v => toggleArr('expertise_domains', v)} />
-              <PillGroup label="Crop Groups" options={CROP_GROUPS}
+              <PillGroup label="Crop Groups" options={options.pundit_crop_groups}
                 selected={searchForm.crop_groups}
                 onToggle={v => toggleArr('crop_groups', v)} />
-              <PillGroup label="Languages" options={LANGUAGES}
+              <PillGroup label="Languages" options={options.pundit_languages}
                 selected={searchForm.language_codes}
                 onToggle={v => toggleArr('language_codes', v)} />
+              <PillGroup label="Farming Methods" options={options.pundit_farming_methods}
+                selected={searchForm.farming_methods}
+                onToggle={v => toggleArr('farming_methods', v)} />
+              <PillGroup label="Cultivation Types" options={options.pundit_cultivation_types}
+                selected={searchForm.cultivation_types}
+                onToggle={v => toggleArr('cultivation_types', v)} />
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1.5">Education</label>
-                  <select value={searchForm.education}
-                    onChange={e => setSearchForm(f => ({ ...f, education: e.target.value }))}
+                  <select value={searchForm.education_cosh_id}
+                    onChange={e => setSearchForm(f => ({ ...f, education_cosh_id: e.target.value }))}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
                     <option value="">Any</option>
-                    {EDUCATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    {options.pundit_education.map(o => <option key={o.cosh_id} value={o.cosh_id}>{o.name}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1.5">Years of Experience</label>
-                  <select value={searchForm.experience_band}
-                    onChange={e => setSearchForm(f => ({ ...f, experience_band: e.target.value }))}
+                  <select value={searchForm.experience_cosh_id}
+                    onChange={e => setSearchForm(f => ({ ...f, experience_cosh_id: e.target.value }))}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
                     <option value="">Any</option>
-                    {EXPERIENCES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Support Method</label>
-                  <select value={searchForm.support_method}
-                    onChange={e => setSearchForm(f => ({ ...f, support_method: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
-                    <option value="">Any</option>
-                    {SUPPORT_METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Cultivation Type</label>
-                  <select value={searchForm.cultivation_type}
-                    onChange={e => setSearchForm(f => ({ ...f, cultivation_type: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none">
-                    <option value="">Any</option>
-                    {CULTIVATION_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    {options.pundit_experience.map(o => <option key={o.cosh_id} value={o.cosh_id}>{o.name}</option>)}
                   </select>
                 </div>
                 <div className="col-span-2">
@@ -568,9 +531,8 @@ export default function FarmPunditsPage() {
                         {r.email && <span className="text-xs text-slate-400">{r.email}</span>}
                       </div>
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        {r.education && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{r.education}</span>}
-                        {r.experience_band && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{r.experience_band}</span>}
-                        {r.support_method && <span className="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded-full">{r.support_method}</span>}
+                        {r.education?.name && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{r.education.name}</span>}
+                        {r.experience?.name && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{r.experience.name}</span>}
                       </div>
                     </div>
                     {r.already_onboarded ? (
