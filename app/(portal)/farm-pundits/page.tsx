@@ -15,11 +15,46 @@ interface PendingInvitation {
   role: string; status: string; rejection_reason: string | null; created_at: string
 }
 interface CoshNamedRef { cosh_id: string; name: string | null }
+interface Address {
+  line: string | null
+  locality: string | null
+  town: string | null
+  pin_code: string | null
+  district: string | null
+  state: string | null
+}
+type InvitationStatus = 'NONE' | 'PENDING' | 'ONBOARDED'
 interface SearchResult {
   id: string; user_id: string; name: string | null; phone: string | null; email: string | null
+  address: Address | null
+  invitation_status: InvitationStatus
+}
+interface SupportArea {
+  state_cosh_id: string; state_name: string | null
+  district_cosh_id: string | null; district_name: string | null
+}
+interface FullPunditProfile {
+  id: string
+  name: string | null
+  phone: string | null
+  email: string | null
+  address: Address | null
   education: CoshNamedRef | null
   experience: CoshNamedRef | null
-  already_onboarded: boolean
+  is_employed_by_organization: boolean
+  organisation_type: CoshNamedRef | null
+  non_employed_kind: 'RETIRED' | 'EXPERIENCED_FARMER' | null
+  farming_methods: CoshNamedRef[]
+  cultivation_types: CoshNamedRef[]
+  expertise_domains: CoshNamedRef[]
+  crop_groups: CoshNamedRef[]
+  languages: CoshNamedRef[]
+  support_areas: SupportArea[]
+  role: string
+  status: string
+  round_robin_sequence: number | null
+  is_promoter_pundit: boolean
+  onboarded_at: string
 }
 interface CoshOption { cosh_id: string; name: string }
 interface CoshState { cosh_id: string; name: string | null }
@@ -111,6 +146,32 @@ export default function FarmPunditsPage() {
 
   const [inviteRole, setInviteRole] = useState<Record<string, string>>({})
 
+  // Active-Expert drill-down: viewing the full Cosh-resolved profile
+  // of an onboarded Pundit in a modal. Null = closed.
+  const [viewingProfile, setViewingProfile] = useState<FullPunditProfile | null>(null)
+  const [viewingProfileLoading, setViewingProfileLoading] = useState(false)
+
+  async function openProfile(cpId: string) {
+    setViewingProfileLoading(true)
+    setViewingProfile(null)
+    try {
+      const { data } = await api.get<FullPunditProfile>(
+        `/client/${clientId}/pundits/${cpId}/profile`,
+      )
+      setViewingProfile(data)
+    } finally { setViewingProfileLoading(false) }
+  }
+
+  function clearAll() {
+    setSearchForm({
+      state_cosh_ids: [], expertise_domains: [], language_codes: [],
+      crop_groups: [], farming_methods: [], cultivation_types: [],
+      education_cosh_id: '', experience_cosh_id: '', phone: '',
+    })
+    setSearchResults([])
+    setInviteError('')
+  }
+
   const load = async () => {
     if (!clientId) return
     const [p, invPending, invRejected, q] = await Promise.all([
@@ -167,10 +228,13 @@ export default function FarmPunditsPage() {
         pundit_user_id: punditUserId,
         role: inviteRole[resultId] || 'PRIMARY',
       })
-      // The expert hasn't accepted yet — flag the result as "Invited"
-      // (not "Onboarded") and refresh the pendingInvitations list so
-      // the My Experts tab reflects the new pending row.
-      setSearchResults(prev => prev.map(r => r.id === resultId ? { ...r, already_onboarded: true } : r))
+      // Flip this row's status to PENDING so the card shows the
+      // disabled "⏳ Invitation Pending" button instead of Invite.
+      // Backend dedupe also refuses a second invite, but this keeps
+      // the UI honest within the session before a fresh search.
+      setSearchResults(prev => prev.map(r =>
+        r.id === resultId ? { ...r, invitation_status: 'PENDING' as InvitationStatus } : r,
+      ))
       // Refresh both lists — re-inviting a previously-rejected expert
       // creates a new PENDING row, but the old REJECTED row (with its
       // reason text) is still useful context for the CA.
@@ -403,6 +467,10 @@ export default function FarmPunditsPage() {
                       </td>
                       <td className="px-5 py-3.5 text-right">
                         <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                          <button onClick={() => openProfile(p.id)}
+                            className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 whitespace-nowrap">
+                            View profile
+                          </button>
                           <button onClick={() => togglePromoterPundit(p.id, p.is_promoter_pundit)}
                             className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
                             {p.is_promoter_pundit ? 'Remove PP' : 'Mark PP'}
@@ -508,15 +576,24 @@ export default function FarmPunditsPage() {
                 </div>
               </div>
 
-              <button type="submit" disabled={searching}
-                className="w-full text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
-                {searching ? 'Searching…' : 'Search FarmPundits'}
-              </button>
+              <div className="flex gap-2">
+                <button type="submit" disabled={searching}
+                  className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  {searching ? 'Searching…' : 'Search FarmPundits'}
+                </button>
+                <button type="button" onClick={clearAll}
+                  className="px-4 py-2.5 rounded-xl text-sm border border-slate-200 text-slate-600 hover:bg-slate-50">
+                  Clear all
+                </button>
+              </div>
             </form>
           </div>
 
-          {/* Search results */}
+          {/* Search results — compact identity card. The criteria the
+              CA used to filter stay visible on the form above; the
+              card shows only what's needed to recognise the person
+              (name + phone if not hidden + email + address). */}
           {searchResults.length > 0 && (
             <div className="space-y-3">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{searchResults.length} results</p>
@@ -524,24 +601,30 @@ export default function FarmPunditsPage() {
               {searchResults.map(r => (
                 <div key={r.id} className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
                   <div className="flex items-start gap-3">
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <p className="font-medium text-slate-800">{r.name || '—'}</p>
                       <div className="flex items-center gap-2 mt-1 flex-wrap">
                         {r.phone && <span className="text-xs font-mono text-slate-500">{r.phone}</span>}
                         {r.email && <span className="text-xs text-slate-400">{r.email}</span>}
                       </div>
-                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        {r.education?.name && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{r.education.name}</span>}
-                        {r.experience?.name && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{r.experience.name}</span>}
-                      </div>
+                      {r.address && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          {[
+                            r.address.line, r.address.locality, r.address.town,
+                            r.address.district, r.address.state, r.address.pin_code,
+                          ].filter(Boolean).join(', ') || (
+                            <span className="italic text-slate-300">Address not provided</span>
+                          )}
+                        </p>
+                      )}
                     </div>
-                    {r.already_onboarded ? (
-                      // After invite OR already accepted — both paths
-                      // converge to already_onboarded=true. The
-                      // pendingInvitations list above is what tells
-                      // the CA whether the expert has actually
-                      // accepted.
-                      <span className="text-xs text-amber-600 font-medium shrink-0">✓ Invited</span>
+                    {r.invitation_status === 'ONBOARDED' ? (
+                      <span className="text-xs text-green-700 font-medium shrink-0 whitespace-nowrap">✓ Onboarded</span>
+                    ) : r.invitation_status === 'PENDING' ? (
+                      <span className="text-xs text-amber-600 font-medium shrink-0 whitespace-nowrap"
+                        title="Awaiting expert's response. Re-invite blocked until accepted or declined.">
+                        ⏳ Invitation Pending
+                      </span>
                     ) : (
                       <div className="flex flex-col gap-1.5 shrink-0">
                         <select value={inviteRole[r.id] || 'PRIMARY'}
@@ -604,6 +687,135 @@ export default function FarmPunditsPage() {
           )}
         </div>
       )}
+
+      {/* Active-Expert profile drawer. Triggered by "View profile" on
+          any onboarded Pundit row. Reads live from the DB on each
+          open so any subsequent edit by the Pundit shows up here
+          immediately. */}
+      {(viewingProfile || viewingProfileLoading) && (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/30"
+          onClick={() => { setViewingProfile(null); setViewingProfileLoading(false) }}>
+          <div className="bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 flex items-center justify-between">
+              <h2 className="font-semibold text-slate-800">FarmPundit Profile</h2>
+              <button onClick={() => { setViewingProfile(null); setViewingProfileLoading(false) }}
+                className="text-slate-400 hover:text-slate-700 text-xl">×</button>
+            </div>
+            {viewingProfileLoading && (
+              <div className="p-8 text-center text-slate-400 text-sm">Loading…</div>
+            )}
+            {viewingProfile && (
+              <div className="p-5 space-y-4 text-sm">
+                <div>
+                  <p className="font-semibold text-slate-800 text-base">{viewingProfile.name || '—'}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 font-mono">{viewingProfile.phone || 'Phone hidden'}</p>
+                  {viewingProfile.email && <p className="text-xs text-slate-500">{viewingProfile.email}</p>}
+                </div>
+
+                {viewingProfile.address && (
+                  <ProfileBlock label="Address">
+                    {[
+                      viewingProfile.address.line, viewingProfile.address.locality,
+                      viewingProfile.address.town, viewingProfile.address.district,
+                      viewingProfile.address.state, viewingProfile.address.pin_code,
+                    ].filter(Boolean).join(', ') || (
+                      <span className="text-slate-400 italic">Address not provided</span>
+                    )}
+                  </ProfileBlock>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <ProfileBlock label="Education">{viewingProfile.education?.name || '—'}</ProfileBlock>
+                  <ProfileBlock label="Experience">{viewingProfile.experience?.name || '—'}</ProfileBlock>
+                </div>
+
+                <ProfileBlock label="Farming Methods">
+                  <ChipRow items={viewingProfile.farming_methods} />
+                </ProfileBlock>
+                <ProfileBlock label="Cultivation Types">
+                  <ChipRow items={viewingProfile.cultivation_types} />
+                </ProfileBlock>
+
+                <ProfileBlock label="Working for an Organisation">
+                  {viewingProfile.is_employed_by_organization ? (
+                    <>
+                      Yes
+                      {viewingProfile.organisation_type?.name && (
+                        <span className="text-slate-500"> · {viewingProfile.organisation_type.name}</span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      No
+                      {viewingProfile.non_employed_kind && (
+                        <span className="text-slate-500">
+                          {' · '}{viewingProfile.non_employed_kind === 'RETIRED' ? 'Retired from service' : 'Experienced farmer'}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </ProfileBlock>
+
+                <ProfileBlock label="Domain Expertise">
+                  <ChipRow items={viewingProfile.expertise_domains} />
+                </ProfileBlock>
+                <ProfileBlock label="Crop Groups">
+                  <ChipRow items={viewingProfile.crop_groups} />
+                </ProfileBlock>
+                <ProfileBlock label="Languages Conversant">
+                  <ChipRow items={viewingProfile.languages} muted />
+                </ProfileBlock>
+                <ProfileBlock label="Preferred States">
+                  {viewingProfile.support_areas.length === 0 ? (
+                    <span className="text-slate-400">—</span>
+                  ) : (
+                    <ul className="space-y-0.5">
+                      {viewingProfile.support_areas.map((a, i) => (
+                        <li key={i}>{a.state_name || a.state_cosh_id}</li>
+                      ))}
+                    </ul>
+                  )}
+                </ProfileBlock>
+
+                <div className="pt-3 border-t border-slate-100 grid grid-cols-2 gap-3 text-xs text-slate-500">
+                  <div><span className="uppercase tracking-wide font-semibold">Role:</span> {viewingProfile.role}</div>
+                  <div><span className="uppercase tracking-wide font-semibold">Status:</span> {viewingProfile.status}</div>
+                  {viewingProfile.round_robin_sequence != null && (
+                    <div><span className="uppercase tracking-wide font-semibold">Round-robin:</span> #{viewingProfile.round_robin_sequence}</div>
+                  )}
+                  {viewingProfile.is_promoter_pundit && (
+                    <div><span className="uppercase tracking-wide font-semibold text-purple-700">Promoter-Pundit</span></div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProfileBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">{label}</p>
+      <div className="text-slate-700">{children}</div>
+    </div>
+  )
+}
+
+function ChipRow({ items, muted = false }: { items: { cosh_id: string; name: string | null }[]; muted?: boolean }) {
+  if (items.length === 0) return <span className="text-slate-400">—</span>
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map(it => (
+        <span key={it.cosh_id}
+          className={`text-xs px-2 py-0.5 rounded-full font-medium ${muted ? 'bg-slate-100 text-slate-700' : 'bg-indigo-50 text-indigo-700'}`}>
+          {it.name || it.cosh_id}
+        </span>
+      ))}
     </div>
   )
 }
