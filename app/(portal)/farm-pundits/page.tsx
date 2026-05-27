@@ -6,7 +6,13 @@ import { getClient } from '@/lib/auth'
 
 interface Pundit {
   id: string; pundit_id: string; name: string | null; phone: string | null
-  role: string; status: string; is_promoter_pundit: boolean
+  role: string; status: string
+  is_promoter_pundit: boolean
+  // True only when the Pundit also has an ACTIVE Facilitator-Promoter
+  // row at this client (spec §14.2 / M5). The Mark-PP button is
+  // hidden when false; clicking it would otherwise 409 with
+  // `promoter_pundit_requires_facilitator_promoter`.
+  can_be_promoter_pundit: boolean
   round_robin_sequence: number | null; active_query_count: number
   onboarded_at: string
 }
@@ -471,10 +477,22 @@ export default function FarmPunditsPage() {
                             className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 whitespace-nowrap">
                             View profile
                           </button>
-                          <button onClick={() => togglePromoterPundit(p.id, p.is_promoter_pundit)}
-                            className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
-                            {p.is_promoter_pundit ? 'Remove PP' : 'Mark PP'}
-                          </button>
+                          {/* Mark PP: only offered when the Pundit
+                              also has an ACTIVE Facilitator-Promoter
+                              row at this client (server-side M5 gate
+                              mirrors this). Remove PP is always
+                              allowed when the flag is already on. */}
+                          {p.is_promoter_pundit ? (
+                            <button onClick={() => togglePromoterPundit(p.id, p.is_promoter_pundit)}
+                              className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
+                              Remove PP
+                            </button>
+                          ) : p.can_be_promoter_pundit ? (
+                            <button onClick={() => togglePromoterPundit(p.id, p.is_promoter_pundit)}
+                              className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
+                              Mark PP
+                            </button>
+                          ) : null}
                           {p.status === 'ACTIVE' && (
                             <button onClick={() => deactivate(p.id)}
                               className="text-xs px-2 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
