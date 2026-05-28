@@ -18,9 +18,12 @@ api.interceptors.response.use(
     if (typeof window !== 'undefined') {
       const status = error.response?.status
       const code = error.response?.data?.detail?.code
-      if (status === 401) {
+      if (status === 401 && !window.location.pathname.startsWith('/onboarding/')) {
         // Preserve the company-branded login URL on session expiry,
-        // mirroring the explicit logout flow in lib/auth.ts.
+        // mirroring the explicit logout flow in lib/auth.ts. The
+        // /onboarding/[token] page is intentionally public — its
+        // own .catch() handles failures (empty-list fallback for the
+        // org-type checklist). Don't hijack it with a hard redirect.
         let target = '/login'
         try {
           const cached = JSON.parse(localStorage.getItem('rt_cp_client') || 'null') as { short_name?: string } | null
