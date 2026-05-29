@@ -6,6 +6,10 @@ import { getClient } from '@/lib/auth'
 interface Promoter {
   id: string; user_id: string; name: string | null; phone: string | null
   promoter_type: string; status: string; is_promoter: boolean
+  // R9 (2026-05-29): Promoter-invitation lifecycle on the same row.
+  // FACILITATOR: NONE → PENDING → (ACCEPTED|DECLINED).
+  // DEALER:     NONE → ACCEPTED (auto-accept on request, no handshake).
+  promoter_request_status: 'NONE' | 'PENDING' | 'ACCEPTED' | 'DECLINED'
   territory_notes: string | null; registered_at: string
   // 2026-05-21 — bulk-decorated by GET /field-manager/promoters
   // for DEALER rows so the FM can verify identity at a glance,
@@ -124,24 +128,51 @@ export default function FieldManagerPage() {
     load()
   }
 
-  async function togglePromoterFlag(p: Promoter) {
-    const target = !p.is_promoter
-    const verb = target ? 'Mark' : 'Unmark'
-    const consequence = target
-      ? 'They will be able to assign packages on behalf of this company.'
-      : 'They will stop being able to assign packages on behalf of this company. Existing assignments are unaffected.'
-    if (!confirm(`${verb} ${p.name || 'this person'} as a Promoter? ${consequence}`)) return
+  // R9 (2026-05-29): the FM "make Promoter" action now branches on
+  // promoter_type. For DEALERs the backend auto-accepts (one-step).
+  // For FACILITATORs it sets the row to PENDING and the Facilitator
+  // must accept via the PWA. The teardown endpoint (revoke-promoter)
+  // is symmetric for both types and works from any state.
+  async function requestPromoter(p: Promoter) {
+    const isFacilitator = p.promoter_type === 'FACILITATOR'
+    const consequence = isFacilitator
+      ? 'They will receive an invitation in the PWA. Until they accept, they are not yet a Promoter.'
+      : 'They will be able to assign packages on behalf of this company.'
+    const verb = isFacilitator ? 'Send a Promoter invitation to' : 'Mark'
+    if (!confirm(`${verb} ${p.name || 'this person'}? ${consequence}`)) return
     try {
       await api.put(
-        `/client/${clientId}/field-manager/promoters/${p.id}/promoter-flag`,
-        { is_promoter: target },
+        `/client/${clientId}/field-manager/promoters/${p.id}/request-promoter`,
       )
       load()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       const msg = typeof detail === 'string'
         ? detail
-        : (detail as { message?: string })?.message || 'Could not change Promoter status.'
+        : (detail as { message?: string })?.message || 'Could not designate Promoter.'
+      alert(msg)
+    }
+  }
+
+  async function revokePromoter(p: Promoter) {
+    const isFacilitator = p.promoter_type === 'FACILITATOR'
+    const consequence = p.promoter_request_status === 'PENDING'
+      ? 'The pending invitation will be withdrawn.'
+      : 'They will stop being able to assign packages on behalf of this company. Existing assignments are unaffected.'
+    const verb = p.promoter_request_status === 'PENDING'
+      ? 'Revoke the pending Promoter invitation for'
+      : (isFacilitator ? 'End the Promoter role for' : 'Unmark')
+    if (!confirm(`${verb} ${p.name || 'this person'}? ${consequence}`)) return
+    try {
+      await api.put(
+        `/client/${clientId}/field-manager/promoters/${p.id}/revoke-promoter`,
+      )
+      load()
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string'
+        ? detail
+        : (detail as { message?: string })?.message || 'Could not revoke Promoter.'
       alert(msg)
     }
   }
@@ -211,6 +242,11 @@ export default function FieldManagerPage() {
                         ★ Promoter
                       </span>
                     )}
+                    {p.promoter_request_status === 'PENDING' && (
+                      <span className="inline-block mt-1 ml-1 text-xs bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">
+                        Invitation pending
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 font-mono text-xs text-slate-600 hidden sm:table-cell">{p.phone || '—'}</td>
                   <td className="px-5 py-3.5 text-slate-400 text-xs hidden md:table-cell">{p.territory_notes || '—'}</td>
@@ -234,14 +270,24 @@ export default function FieldManagerPage() {
                           📍 View on Map
                         </a>
                       )}
-                      {p.status === 'ACTIVE' && (
-                        <button onClick={() => togglePromoterFlag(p)}
-                          className={`text-xs px-2 py-1 rounded-lg border whitespace-nowrap ${
-                            p.is_promoter
-                              ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                              : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'
-                          }`}>
-                          {p.is_promoter ? 'Unmark Promoter' : 'Mark as Promoter'}
+                      {p.status === 'ACTIVE' && p.is_promoter && (
+                        <button onClick={() => revokePromoter(p)}
+                          className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
+                          {p.promoter_type === 'FACILITATOR' ? 'End Promoter Role' : 'Unmark Promoter'}
+                        </button>
+                      )}
+                      {p.status === 'ACTIVE' && !p.is_promoter && p.promoter_request_status === 'PENDING' && (
+                        <button onClick={() => revokePromoter(p)}
+                          className="text-xs px-2 py-1 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 whitespace-nowrap">
+                          Revoke Invitation
+                        </button>
+                      )}
+                      {p.status === 'ACTIVE' && !p.is_promoter && p.promoter_request_status !== 'PENDING' && (
+                        <button onClick={() => requestPromoter(p)}
+                          className="text-xs px-2 py-1 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">
+                          {p.promoter_type === 'FACILITATOR'
+                            ? (p.promoter_request_status === 'DECLINED' ? 'Re-invite as Promoter' : 'Invite as Promoter')
+                            : 'Mark as Promoter'}
                         </button>
                       )}
                       {p.status === 'ACTIVE' ? (
