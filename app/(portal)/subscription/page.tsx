@@ -57,6 +57,8 @@ interface PromoterAllocationRow {
 interface AllocationsResponse {
   client_id: string
   company_unallocated_balance: number
+  unlimited?: boolean
+  enterprise_to_date?: string | null
   promoters: PromoterAllocationRow[]
 }
 
@@ -66,7 +68,23 @@ interface UserLookup {
   phone: string | null
 }
 
-interface PoolBalance { balance: number }
+interface PoolBalance {
+  balance: number
+  unlimited?: boolean
+  enterprise_to_date?: string | null
+}
+
+function formatClosureDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function daysUntil(iso: string): number {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(iso)
+  target.setHours(0, 0, 0, 0)
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000)
+}
 interface Quote {
   units: number
   gross_paise: number
@@ -94,6 +112,8 @@ export default function SubscriptionPage() {
   const colour = client?.primary_colour || '#1A5C2A'
 
   const [balance, setBalance] = useState<number | null>(null)
+  const [unlimited, setUnlimited] = useState(false)
+  const [enterpriseToDate, setEnterpriseToDate] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [units, setUnits] = useState('100')
   const [quote, setQuote] = useState<Quote | null>(null)
@@ -114,7 +134,11 @@ export default function SubscriptionPage() {
   const loadBalance = () => {
     if (!clientId) return
     api.get<PoolBalance>(`/client/${clientId}/subscription-pool/balance`)
-      .then(r => setBalance(r.data.balance))
+      .then(r => {
+        setBalance(r.data.balance)
+        setUnlimited(!!r.data.unlimited)
+        setEnterpriseToDate(r.data.enterprise_to_date ?? null)
+      })
       .catch(() => setBalance(0))
       .finally(() => setLoading(false))
   }
@@ -277,17 +301,66 @@ export default function SubscriptionPage() {
         <p className="text-slate-500 text-sm mt-0.5">Manage subscription units for farmer onboarding</p>
       </div>
 
+      {/* Banner — 30-day expiry warning */}
+      {unlimited && enterpriseToDate && daysUntil(enterpriseToDate) <= 30 && daysUntil(enterpriseToDate) >= 0 && (
+        <div className={`rounded-2xl px-5 py-4 flex items-start gap-3 border ${
+          daysUntil(enterpriseToDate) < 3
+            ? 'bg-red-50 border-red-200 text-red-800'
+            : daysUntil(enterpriseToDate) < 14
+              ? 'bg-amber-50 border-amber-200 text-amber-800'
+              : 'bg-blue-50 border-blue-200 text-blue-800'
+        }`}>
+          <span aria-hidden className="text-lg leading-none">⏳</span>
+          <div className="flex-1 text-sm">
+            <p className="font-semibold">
+              Enterprise Licence expires on {formatClosureDate(enterpriseToDate)}
+              {daysUntil(enterpriseToDate) === 0
+                ? ' — today.'
+                : ` — ${daysUntil(enterpriseToDate)} day${daysUntil(enterpriseToDate) === 1 ? '' : 's'} away.`}
+            </p>
+            <p className="opacity-80 mt-0.5 text-xs">
+              After expiry, no new farmer subscriptions can be created and CA-portal access will be paused.
+              Existing farmer subscriptions continue to their natural close. Plan a renewal with the RootsTalk team.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Balance card */}
       <div className="rounded-2xl p-8 text-white"
         style={{ background: `linear-gradient(135deg, ${colour}dd, ${colour})` }}>
-        <p className="text-white/70 text-sm">Available Units</p>
-        <p className="text-5xl font-bold mt-1">{loading ? '…' : balance?.toLocaleString()}</p>
-        <p className="text-white/60 text-sm mt-2">
-          Each unit allows one farmer to subscribe to one Package of Practices
-        </p>
+        {unlimited ? (
+          <>
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <p className="text-white/70 text-sm">Available Units</p>
+              <span className="text-xs bg-white/20 text-white px-2 py-0.5 rounded-full font-medium">Enterprise Licence</span>
+            </div>
+            <p className="text-5xl font-bold mt-1">Unlimited</p>
+            {enterpriseToDate && (
+              <p className="text-white/80 text-sm mt-2">
+                Closes {formatClosureDate(enterpriseToDate)}
+                {daysUntil(enterpriseToDate) >= 0 && (
+                  <span> · {daysUntil(enterpriseToDate)} day{daysUntil(enterpriseToDate) === 1 ? '' : 's'} remaining</span>
+                )}
+              </p>
+            )}
+            <p className="text-white/60 text-xs mt-2">
+              Promoters can assign any number of farmer subscriptions during this period — pool top-ups are not needed.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-white/70 text-sm">Available Units</p>
+            <p className="text-5xl font-bold mt-1">{loading ? '…' : balance?.toLocaleString()}</p>
+            <p className="text-white/60 text-sm mt-2">
+              Each unit allows one farmer to subscribe to one Package of Practices
+            </p>
+          </>
+        )}
       </div>
 
-      {/* How it works */}
+      {/* How it works — hidden during EL since units don't apply */}
+      {!unlimited && (
       <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
         <h3 className="font-semibold text-slate-800 mb-3">How subscription units work</h3>
         <div className="space-y-3 text-sm text-slate-600">
@@ -309,8 +382,24 @@ export default function SubscriptionPage() {
           </div>
         </div>
       </div>
+      )}
 
-      {/* Purchase form */}
+      {/* EL active — replace purchase + allocations sections with an explainer */}
+      {unlimited && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6">
+          <h3 className="font-semibold text-emerald-900 mb-2">Your Enterprise Licence is active</h3>
+          <p className="text-sm text-emerald-800 leading-relaxed">
+            While the licence is active, the company-wide subscription pool and per-promoter allocations are paused —
+            promoters do not need a kitty allocation to assign farmer subscriptions. Pool top-ups are unnecessary during this window.
+          </p>
+          <p className="text-xs text-emerald-700 mt-3">
+            Any unspent pool units purchased earlier remain in your account and become spendable again automatically when the licence ends.
+          </p>
+        </div>
+      )}
+
+      {/* Purchase form — hidden during EL */}
+      {!unlimited && (
       <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
         <h3 className="font-semibold text-slate-800 mb-4">Add Units to Pool</h3>
         <form onSubmit={handlePurchase} className="space-y-4">
@@ -380,8 +469,10 @@ export default function SubscriptionPage() {
           </button>
         </form>
       </div>
+      )}
 
-      {/* ── Promoter Allocations (Phase C) ─────────────────────────────── */}
+      {/* ── Promoter Allocations (Phase C) — hidden during EL ───────────── */}
+      {!unlimited && (
       <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
         <div className="flex items-baseline justify-between mb-1">
           <h3 className="font-semibold text-slate-800">Promoter Allocations</h3>
@@ -461,6 +552,7 @@ export default function SubscriptionPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   )
 }

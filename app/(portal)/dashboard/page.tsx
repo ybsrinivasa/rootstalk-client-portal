@@ -8,7 +8,11 @@ interface Package {
   id: string; name: string; crop_cosh_id: string
   status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'; version: number; created_at: string
 }
-interface PoolBalance { balance: number }
+interface PoolBalance {
+  balance: number
+  unlimited?: boolean
+  enterprise_to_date?: string | null
+}
 interface Alert { id: string }
 
 const STATUS_COLOUR = {
@@ -38,6 +42,8 @@ export default function DashboardPage() {
 
   const [packages, setPackages] = useState<Package[]>([])
   const [balance, setBalance] = useState<number | null>(null)
+  const [unlimited, setUnlimited] = useState(false)
+  const [enterpriseToDate, setEnterpriseToDate] = useState<string | null>(null)
   const [alertCount, setAlertCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   // Crop friendly-name lookup so the Recent Packages row shows
@@ -54,6 +60,8 @@ export default function DashboardPage() {
     ]).then(([pkgRes, poolRes, alertRes, cropRes]) => {
       setPackages(pkgRes.data.slice(0, 6))
       setBalance(poolRes.data.balance)
+      setUnlimited(!!poolRes.data.unlimited)
+      setEnterpriseToDate(poolRes.data.enterprise_to_date ?? null)
       setAlertCount(Array.isArray(alertRes.data) ? alertRes.data.length : 0)
       const m: Record<string, string> = {}
       for (const c of cropRes.data) if (c.crop_name_en) m[c.crop_cosh_id] = c.crop_name_en
@@ -61,10 +69,18 @@ export default function DashboardPage() {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [clientId])
 
-  const stats = [
+  const poolValue: React.ReactNode = unlimited
+    ? 'Unlimited'
+    : balance === null
+      ? '…'
+      : balance
+  const poolHint: string | null = unlimited && enterpriseToDate
+    ? `Closes ${new Date(enterpriseToDate).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}`
+    : null
+  const stats: Array<{ label: string; value: React.ReactNode; href: string; hint?: string | null }> = [
     { label: 'Total Packages',    value: packages.length,                                   href: '/advisory' },
     { label: 'Active Packages',   value: packages.filter(p => p.status === 'ACTIVE').length, href: '/advisory' },
-    { label: 'Subscription Pool', value: balance === null ? '…' : balance,                   href: '/subscription' },
+    { label: 'Subscription Pool', value: poolValue,                                          href: '/subscription', hint: poolHint },
     { label: 'Recent Alerts',     value: alertCount === null ? '…' : alertCount,             href: '/alerts' },
   ]
 
@@ -91,14 +107,22 @@ export default function DashboardPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map(s => (
-          <Link key={s.label} href={s.href}
-            className="bg-white rounded-xl p-5 shadow-sm border border-stone-200 hover:shadow-md transition-shadow overflow-hidden relative"
-            style={{ borderLeftWidth: 3, borderLeftColor: accent }}>
-            <p className="text-3xl font-bold text-stone-800">{loading ? '…' : s.value}</p>
-            <p className="text-stone-500 text-xs mt-1">{s.label}</p>
-          </Link>
-        ))}
+        {stats.map(s => {
+          const isUnlimitedPool = s.label === 'Subscription Pool' && unlimited
+          const value = loading ? '…' : s.value
+          const isString = typeof value === 'string'
+          return (
+            <Link key={s.label} href={s.href}
+              className="bg-white rounded-xl p-5 shadow-sm border border-stone-200 hover:shadow-md transition-shadow overflow-hidden relative"
+              style={{ borderLeftWidth: 3, borderLeftColor: accent }}>
+              <p className={`font-bold text-stone-800 ${isUnlimitedPool && isString ? 'text-2xl' : 'text-3xl'}`}>{value}</p>
+              <p className="text-stone-500 text-xs mt-1">{s.label}</p>
+              {s.hint && (
+                <p className="text-stone-400 text-xs mt-0.5">{s.hint}</p>
+              )}
+            </Link>
+          )
+        })}
       </div>
 
       {/* Recent packages */}
