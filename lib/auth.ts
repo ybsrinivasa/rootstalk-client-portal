@@ -121,3 +121,16 @@ export function hasRole(user: CPUser | null, ...roles: string[]): boolean {
   if (!user) return false
   return user.roles.some(r => r.status === 'ACTIVE' && roles.includes(r.role_type))
 }
+
+/** Publish-rights helper (2026-05-30). Only Subject Experts can
+ *  publish CCA / PG / SP / SR. CMs can edit content but cannot push
+ *  it LIVE — matches the backend's `_assert_can_publish_client_advisory`
+ *  gate. CA falls through unless they also carry an SE portal role
+ *  (multi-role is supported for non-CA roles only).
+ *
+ *  Used to hide Publish buttons / hide preview-page Publish CTAs.
+ *  Surfaces the same rule client-side so the user doesn't get to
+ *  the click → 403 round-trip. */
+export function canPublishAdvisory(user: CPUser | null): boolean {
+  return hasPortalRole(user, 'SUBJECT_EXPERT')
+}

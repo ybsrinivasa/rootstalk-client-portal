@@ -181,6 +181,12 @@ interface Props {
    *  the "auto-calculated server-side" stub. */
   timelineWindow?: { from_value: number; to_value: number }
   cropCoshId: string
+  /** PG / CHA-SP authoring: practice isn't crop-bound but the
+   *  parent recommendation carries area_or_plant — pass it so the
+   *  element form picks up VOLUME_PER_PLANT + VOLUME_PER_PLANT_UNIT
+   *  on plant-wise PGs. Ignored when cropCoshId is set (CCA path
+   *  derives measure from the crop). 2026-05-30 */
+  areaOrPlant?: 'AREA_WISE' | 'PLANT_WISE' | null
   existingPractice?: ExistingPractice
   pipe: PipeContext
   /** Rule 1 (2026-05-22): Common Name cosh_ids already used by peer
@@ -204,7 +210,8 @@ interface Props {
 
 export function PracticeFormModal({
   open, mode, timelineId, contextSubtitle, timelineWindow, cropCoshId,
-  existingPractice, pipe, usedCommonNames, hiddenL0Types, onClose, onSaved,
+  areaOrPlant, existingPractice, pipe, usedCommonNames, hiddenL0Types,
+  onClose, onSaved,
 }: Props) {
   const endpoints = practiceEndpoints(pipe)
 
@@ -279,6 +286,7 @@ export function PracticeFormModal({
     }
     const qs = new URLSearchParams()
     if (cropCoshId) qs.set('crop_cosh_id', cropCoshId)
+    if (!cropCoshId && areaOrPlant) qs.set('area_or_plant', areaOrPlant)
     const suffix = qs.toString() ? `?${qs}` : ''
     api.get<{ elements: L2ElementField[]; is_special_input?: boolean; frequency_based?: boolean }>(
       `/practice-taxonomy/elements/${encodeURIComponent(practiceForm.l2_type)}${suffix}`,
@@ -309,7 +317,7 @@ export function PracticeFormModal({
         setL2Spec([]); setElementValues({}); setOptionsByField({})
         setL2Meta({ is_special_input: false, frequency_based: false })
       })
-  }, [practiceForm.l2_type, cropCoshId, existingPractice, mode])
+  }, [practiceForm.l2_type, cropCoshId, areaOrPlant, existingPractice, mode])
 
   // L2-level dropdowns (no cascade parent).
   useEffect(() => {

@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
-import { getClient } from '@/lib/auth'
+import { canPublishAdvisory, getClient, getUser } from '@/lib/auth'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
@@ -101,6 +101,7 @@ export default function SpDetailPage() {
   const client = getClient()
   const clientId = client?.id
   const colour = client?.primary_colour || '#1A5C2A'
+  const canPublish = canPublishAdvisory(getUser())
 
   const [sp, setSp] = useState<SP | null>(null)
   const [problemName, setProblemName] = useState('')
@@ -520,7 +521,7 @@ export default function SpDetailPage() {
               ↓ Import from PG
             </button>
           )}
-          {sp.status === 'DRAFT' && (
+          {sp.status === 'DRAFT' && canPublish && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}
               title={!readiness?.ready ? 'Resolve the items below first' : ''}
@@ -528,6 +529,11 @@ export default function SpDetailPage() {
               style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
               {publishing ? 'Publishing…' : '✓ Publish'}
             </button>
+          )}
+          {sp.status === 'DRAFT' && !canPublish && (
+            <span className="text-xs text-slate-500 italic px-2 py-2.5">
+              Publishing requires the Subject Expert role.
+            </span>
           )}
         </div>
       </div>

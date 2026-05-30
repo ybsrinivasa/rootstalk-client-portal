@@ -2,7 +2,7 @@
 import { useEffect, useState, FormEvent, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
-import { getClient } from '@/lib/auth'
+import { canPublishAdvisory, getClient, getUser } from '@/lib/auth'
 import PackageCalendar from '@/components/cca/PackageCalendar'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
@@ -169,6 +169,7 @@ export default function PackageDetailPage() {
   const client = getClient()
   const clientId = client?.id
   const colour = client?.primary_colour || '#1A5C2A'
+  const canPublish = canPublishAdvisory(getUser())
 
   const [pkg, setPkg] = useState<Package | null>(null)
   // Crop friendly name lookup — fetched once from /client/{cid}/crops
@@ -1094,7 +1095,7 @@ export default function PackageDetailPage() {
             className="border border-slate-300 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-50">
             ✎ Set signature
           </button>
-          {pkg.status === 'DRAFT' && (
+          {pkg.status === 'DRAFT' && canPublish && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}
               title={!readiness?.ready ? 'Resolve the items below first' : ''}
@@ -1102,6 +1103,11 @@ export default function PackageDetailPage() {
               style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
               {publishing ? 'Publishing…' : '✓ Publish'}
             </button>
+          )}
+          {pkg.status === 'DRAFT' && !canPublish && (
+            <span className="text-xs text-slate-500 italic px-2 py-2.5">
+              Publishing requires the Subject Expert role.
+            </span>
           )}
           {/* Batch HH (2026-05-19) — restore a package that was
               auto-INACTIVATED because its districts were removed
@@ -1111,7 +1117,8 @@ export default function PackageDetailPage() {
               packages recover via re-adding the crop in Setup,
               not via this button. */}
           {pkg.status === 'INACTIVE'
-            && pkg.cascade_inactivated_reason === 'locations_cleared_by_cascade' && (
+            && pkg.cascade_inactivated_reason === 'locations_cleared_by_cascade'
+            && canPublish && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}
               title={!readiness?.ready

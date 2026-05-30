@@ -17,7 +17,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
-import { getClient } from '@/lib/auth'
+import { canPublishAdvisory, getClient, getUser } from '@/lib/auth'
 
 type SRStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE'
 
@@ -158,7 +158,8 @@ export default function QAPreviewPage() {
     )
   }
 
-  const canPublish = sr.status === 'DRAFT'
+  const canPublish = sr.status === 'DRAFT' && canPublishAdvisory(getUser())
+  const draftButNoPublishRights = sr.status === 'DRAFT' && !canPublishAdvisory(getUser())
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
@@ -174,6 +175,11 @@ export default function QAPreviewPage() {
               style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
               Publish
             </button>
+          )}
+          {draftButNoPublishRights && (
+            <span className="text-xs text-slate-500 italic">
+              Publishing requires the Subject Expert role.
+            </span>
           )}
         </div>
       </div>

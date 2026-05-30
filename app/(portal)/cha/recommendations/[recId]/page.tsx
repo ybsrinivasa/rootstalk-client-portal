@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
-import { getClient } from '@/lib/auth'
+import { canPublishAdvisory, getClient, getUser } from '@/lib/auth'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
@@ -86,6 +86,7 @@ export default function RecDetailPage() {
   const client = getClient()
   const clientId = client?.id
   const colour = client?.primary_colour || '#1A5C2A'
+  const canPublish = canPublishAdvisory(getUser())
 
   const [rec, setRec] = useState<Rec | null>(null)
   const [problemName, setProblemName] = useState('')
@@ -539,7 +540,7 @@ export default function RecDetailPage() {
           {importError && (
             <p className="text-xs text-red-600">{importError}</p>
           )}
-          {rec.status === 'DRAFT' && (
+          {rec.status === 'DRAFT' && canPublish && (
             <button onClick={() => setShowPublishConfirm(true)}
               disabled={publishing || !readiness?.ready}
               title={!readiness?.ready ? 'Resolve the items below first' : ''}
@@ -547,6 +548,11 @@ export default function RecDetailPage() {
               style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
               {publishing ? 'Publishing…' : '✓ Publish'}
             </button>
+          )}
+          {rec.status === 'DRAFT' && !canPublish && (
+            <span className="text-xs text-slate-500 italic px-2 py-2.5">
+              Publishing requires the Subject Expert role.
+            </span>
           )}
         </div>
       </div>
@@ -857,6 +863,7 @@ export default function RecDetailPage() {
         mode={editingPractice ? 'edit' : 'create'}
         timelineId={showAddPractice || ''}
         cropCoshId={''}
+        areaOrPlant={rec.area_or_plant}
         existingPractice={editingPractice?.practice as ExistingPractice | undefined}
         contextSubtitle={(() => {
           if (!showAddPractice) return undefined
