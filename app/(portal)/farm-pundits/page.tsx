@@ -13,6 +13,12 @@ interface Pundit {
   // hidden when false; clicking it would otherwise 409 with
   // `promoter_pundit_requires_facilitator_promoter`.
   can_be_promoter_pundit: boolean
+  /** 2026-05-31 — distinguishes the two P-P paths.
+   *  REGISTERED_PUNDIT: a real FarmPundit who was designated as P-P
+   *  via the existing FarmPundits-tab toggle. FM_PROMOTER: a phantom
+   *  CFP row backing an FM-side ClientPromoter.is_promoter_pundit
+   *  flag (Sanjay's path — no separate Pundit registration). */
+  source: 'REGISTERED_PUNDIT' | 'FM_PROMOTER'
   round_robin_sequence: number | null; active_query_count: number
   onboarded_at: string
 }
@@ -99,7 +105,7 @@ export default function FarmPunditsPage() {
   const clientId = client?.id
   const colour = client?.primary_colour || '#1A5C2A'
 
-  const [tab, setTab] = useState<'pundits' | 'search' | 'queries'>('pundits')
+  const [tab, setTab] = useState<'pundits' | 'promoter-pundits' | 'search' | 'queries'>('pundits')
   const [pundits, setPundits] = useState<Pundit[]>([])
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([])
   const [rejectedInvitations, setRejectedInvitations] = useState<PendingInvitation[]>([])
@@ -337,7 +343,8 @@ export default function FarmPunditsPage() {
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
         {([
-          ['pundits', `My Experts (${pundits.length}${pendingInvitations.length > 0 ? ` · ${pendingInvitations.length} pending` : ''})`],
+          ['pundits', `My Experts (${pundits.filter(p => p.source !== 'FM_PROMOTER').length}${pendingInvitations.length > 0 ? ` · ${pendingInvitations.length} pending` : ''})`],
+          ['promoter-pundits', `Promoter-Pundits (${pundits.filter(p => p.is_promoter_pundit).length})`],
           ['search', 'Find Experts'],
           ['queries', `Queries (${queries.length})`],
         ] as const).map(([t, label]) => (
@@ -432,11 +439,11 @@ export default function FarmPunditsPage() {
             </div>
           )}
 
-          {pundits.length === 0 && pendingInvitations.length === 0 && rejectedInvitations.length === 0 ? (
+          {pundits.filter(p => p.source !== 'FM_PROMOTER').length === 0 && pendingInvitations.length === 0 && rejectedInvitations.length === 0 ? (
             <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
-              <p className="text-slate-500 text-sm">No FarmPundits yet. Use the "Find Experts" tab to search and invite them.</p>
+              <p className="text-slate-500 text-sm">No FarmPundits yet. Use the &quot;Find Experts&quot; tab to search and invite them.</p>
             </div>
-          ) : pundits.length > 0 ? (
+          ) : pundits.filter(p => p.source !== 'FM_PROMOTER').length > 0 ? (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
@@ -449,7 +456,7 @@ export default function FarmPunditsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {pundits.map(p => (
+                  {pundits.filter(p => p.source !== 'FM_PROMOTER').map(p => (
                     <tr key={p.id} className="hover:bg-slate-50">
                       <td className="px-5 py-3.5">
                         <p className="font-medium text-slate-800">{p.name || '—'}</p>
@@ -538,6 +545,68 @@ export default function FarmPunditsPage() {
           ) : null}
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700 leading-relaxed">
             <strong>Promoter-Pundit (PP)</strong> — A facilitator who is also a FarmPundit. Queries from farmers they personally assigned get routed to them directly (not via round-robin).
+          </div>
+        </div>
+      ) : tab === 'promoter-pundits' ? (
+        <div className="space-y-4">
+          {/* Read-only roster — assignment lives on the Field Manager
+              page, not here. CA sees who's currently routable as a P-P. */}
+          {pundits.filter(p => p.is_promoter_pundit).length === 0 ? (
+            <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
+              <p className="text-slate-500 text-sm">No Promoter-Pundits yet.</p>
+              <p className="text-slate-400 text-xs mt-2 leading-relaxed max-w-md mx-auto">
+                Promoter-Pundits are designated by the Field Manager from the Promoter list. They receive farmer queries from the round-robin chain alongside any registered FarmPundits.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Promoter-Pundit</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden sm:table-cell">Path</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Active queries</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {pundits.filter(p => p.is_promoter_pundit).map(p => (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="px-5 py-3.5">
+                        <p className="font-medium text-slate-800">{p.name || '—'}</p>
+                        {p.phone && (
+                          <p className="text-xs text-slate-500 font-mono mt-0.5">{p.phone}</p>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 hidden sm:table-cell">
+                        {p.source === 'REGISTERED_PUNDIT' ? (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
+                            Registered Pundit
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700">
+                            Promoter (FM-assigned)
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          p.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {p.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-right tabular-nums text-slate-600 hidden md:table-cell">
+                        {p.active_query_count}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700 leading-relaxed">
+            <strong>Read-only.</strong> Designation lives on the Field Manager page — a Promoter is marked as a P-P from there. Registered Pundits with P-P status appear here for completeness.
           </div>
         </div>
       ) : tab === 'search' ? (

@@ -6,6 +6,11 @@ import { getClient } from '@/lib/auth'
 interface Promoter {
   id: string; user_id: string; name: string | null; phone: string | null
   promoter_type: string; status: string; is_promoter: boolean
+  /** 2026-05-31 — FM-side Promoter-Pundit designation. Toggled via
+   *  PUT /client/{cid}/field-manager/promoters/{pid}/promoter-pundit.
+   *  Mutually exclusive with the FarmPundit-path P-P flag at this
+   *  client. */
+  is_promoter_pundit: boolean
   // R9 (2026-05-29): Promoter-invitation lifecycle on the same row.
   // FACILITATOR: NONE → PENDING → (ACCEPTED|DECLINED).
   // DEALER:     NONE → ACCEPTED (auto-accept on request, no handshake).
@@ -177,6 +182,30 @@ export default function FieldManagerPage() {
     }
   }
 
+  async function togglePromoterPundit(p: Promoter) {
+    const turningOn = !p.is_promoter_pundit
+    const verb = turningOn ? 'Mark' : 'Unmark'
+    if (!confirm(
+      `${verb} ${p.name || 'this person'} as a Promoter-Pundit?\n\n` +
+      (turningOn
+        ? 'They will receive query routing as a P-P alongside any registered FarmPundits. No need for them to register separately as a FarmPundit.'
+        : 'They will stop receiving query routing as a P-P. Existing assignments are unaffected.'),
+    )) return
+    try {
+      await api.put(
+        `/client/${clientId}/field-manager/promoters/${p.id}/promoter-pundit`,
+        { is_promoter_pundit: turningOn },
+      )
+      load()
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string'
+        ? detail
+        : (detail as { message?: string })?.message || 'Could not update Promoter-Pundit designation.'
+      alert(msg)
+    }
+  }
+
   async function checkPhone(phone: string) {
     const trimmed = phone.trim()
     if (!trimmed || !clientId) {
@@ -242,6 +271,11 @@ export default function FieldManagerPage() {
                         ★ Promoter
                       </span>
                     )}
+                    {p.is_promoter_pundit && (
+                      <span className="inline-block mt-1 ml-1 text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-full font-medium">
+                        ✦ Promoter-Pundit
+                      </span>
+                    )}
                     {p.promoter_request_status === 'PENDING' && (
                       <span className="inline-block mt-1 ml-1 text-xs bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">
                         Invitation pending
@@ -269,6 +303,16 @@ export default function FieldManagerPage() {
                           className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 whitespace-nowrap">
                           📍 View on Map
                         </a>
+                      )}
+                      {p.status === 'ACTIVE' && p.is_promoter && (
+                        <button onClick={() => togglePromoterPundit(p)}
+                          className={`text-xs px-2 py-1 rounded-lg whitespace-nowrap ${
+                            p.is_promoter_pundit
+                              ? 'border border-purple-200 text-purple-700 hover:bg-purple-50'
+                              : 'border border-purple-200 text-purple-600 hover:bg-purple-50'
+                          }`}>
+                          {p.is_promoter_pundit ? 'Unmark P-P' : 'Mark as P-P'}
+                        </button>
                       )}
                       {p.status === 'ACTIVE' && p.is_promoter && (
                         <button onClick={() => revokePromoter(p)}
