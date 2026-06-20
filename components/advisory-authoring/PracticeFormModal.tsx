@@ -865,6 +865,28 @@ export function PracticeFormModal({
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
+          {/* 2026-06-20 — Same warning, mirrored just above the
+              action buttons so the SE sees it at the save moment
+              (the modal is tall; the field-level banner can scroll
+              out of view). */}
+          {volumeWarning && (
+            <div className={`rounded-md border px-3 py-2 text-xs ${
+              volumeWarning.verdict === 'unsupported_combo'
+                ? 'bg-amber-50 border-amber-300 text-amber-900'
+                : 'bg-yellow-50 border-yellow-200 text-yellow-800'
+            }`}>
+              <p className="font-semibold mb-0.5">
+                {volumeWarning.verdict === 'unsupported_combo'
+                  ? '⚠ Dosage unit & application method combination unsupported'
+                  : '⚠ Application method has no volume formulas'}
+              </p>
+              <p>{volumeWarning.message}</p>
+              <p className="text-[11px] mt-1 opacity-75">
+                You can still save this practice. The dealer will enter quantities manually at order time.
+              </p>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose}
               className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
