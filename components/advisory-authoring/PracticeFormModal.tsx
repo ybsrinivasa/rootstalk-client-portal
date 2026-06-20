@@ -389,11 +389,6 @@ export function PracticeFormModal({
   useEffect(() => {
     const method = elementValues['APPLICATION_METHOD'] || ''
     const dosageUnit = elementValues['DOSAGE_UNIT'] || ''
-    // eslint-disable-next-line no-console
-    console.log('[volume-formula-check] effect fired', {
-      l2: practiceForm.l2_type, timelineId, method, dosageUnit,
-      allElementKeys: Object.keys(elementValues),
-    })
     if (!practiceForm.l2_type || !timelineId || !method || !dosageUnit) {
       setVolumeWarning(null)
       return
