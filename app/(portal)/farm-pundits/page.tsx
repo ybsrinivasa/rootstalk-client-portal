@@ -6,13 +6,11 @@ import { getClient } from '@/lib/auth'
 
 interface Pundit {
   id: string; pundit_id: string; name: string | null; phone: string | null
-  role: string; status: string
-  is_promoter_pundit: boolean
-  // True only when the Pundit also has an ACTIVE Facilitator-Promoter
-  // row at this client (spec §14.2 / M5). The Mark-PP button is
-  // hidden when false; clicking it would otherwise 409 with
-  // `promoter_pundit_requires_facilitator_promoter`.
-  can_be_promoter_pundit: boolean
+  // 2026-06-23 — PROMOTER_PUNDIT is now a first-class role; the
+  // previous `is_promoter_pundit` boolean column was dropped. Read
+  // `role === 'PROMOTER_PUNDIT'` to discriminate.
+  role: 'PRIMARY' | 'PANEL' | 'PROMOTER_PUNDIT'
+  status: string
   /** 2026-05-31 — distinguishes the two P-P paths.
    *  REGISTERED_PUNDIT: a real FarmPundit who was designated as P-P
    *  via the existing FarmPundits-tab toggle. FM_PROMOTER: a phantom
@@ -62,10 +60,9 @@ interface FullPunditProfile {
   crop_groups: CoshNamedRef[]
   languages: CoshNamedRef[]
   support_areas: SupportArea[]
-  role: string
+  role: 'PRIMARY' | 'PANEL' | 'PROMOTER_PUNDIT'
   status: string
   round_robin_sequence: number | null
-  is_promoter_pundit: boolean
   onboarded_at: string
 }
 interface CoshOption { cosh_id: string; name: string }
@@ -294,10 +291,11 @@ export default function FarmPunditsPage() {
     }
   }
 
-  async function togglePromoterPundit(cpId: string, current: boolean) {
-    await api.put(`/client/${clientId}/pundits/${cpId}/promoter-pundit`, { is_promoter_pundit: !current })
-    load()
-  }
+  // 2026-06-23 — togglePromoterPundit removed. Regular pundits
+  // (PRIMARY / PANEL) can no longer become Promoter-Pundits and vice
+  // versa. The CA portal's PP roster is now strictly read-only;
+  // designation happens via the Field Manager's Promoter list
+  // (FM-side toggle creates a phantom CFP row with role=PROMOTER_PUNDIT).
 
   // Reusable multi-select pill block — selected values fill with the
   // role colour, unselected sit on a muted border. Options now come
@@ -343,8 +341,8 @@ export default function FarmPunditsPage() {
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
         {([
-          ['pundits', `My Experts (${pundits.filter(p => p.source !== 'FM_PROMOTER').length}${pendingInvitations.length > 0 ? ` · ${pendingInvitations.length} pending` : ''})`],
-          ['promoter-pundits', `Promoter-Pundits (${pundits.filter(p => p.is_promoter_pundit).length})`],
+          ['pundits', `My Experts (${pundits.filter(p => p.role !== 'PROMOTER_PUNDIT').length}${pendingInvitations.length > 0 ? ` · ${pendingInvitations.length} pending` : ''})`],
+          ['promoter-pundits', `Promoter-Pundits (${pundits.filter(p => p.role === 'PROMOTER_PUNDIT').length})`],
           ['search', 'Find Experts'],
           ['queries', `Queries (${queries.length})`],
         ] as const).map(([t, label]) => (
@@ -456,14 +454,11 @@ export default function FarmPunditsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {pundits.filter(p => p.source !== 'FM_PROMOTER').map(p => (
+                  {pundits.filter(p => p.role !== 'PROMOTER_PUNDIT').map(p => (
                     <tr key={p.id} className="hover:bg-slate-50">
                       <td className="px-5 py-3.5">
                         <p className="font-medium text-slate-800">{p.name || '—'}</p>
                         <p className="text-xs text-slate-400 font-mono">{p.phone || '—'}</p>
-                        {p.is_promoter_pundit && (
-                          <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">Promoter-Pundit</span>
-                        )}
                       </td>
                       <td className="px-5 py-3.5 hidden sm:table-cell">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${p.role === 'PRIMARY' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
@@ -484,22 +479,11 @@ export default function FarmPunditsPage() {
                             className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 whitespace-nowrap">
                             View profile
                           </button>
-                          {/* Mark PP: only offered when the Pundit
-                              also has an ACTIVE Facilitator-Promoter
-                              row at this client (server-side M5 gate
-                              mirrors this). Remove PP is always
-                              allowed when the flag is already on. */}
-                          {p.is_promoter_pundit ? (
-                            <button onClick={() => togglePromoterPundit(p.id, p.is_promoter_pundit)}
-                              className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
-                              Remove PP
-                            </button>
-                          ) : p.can_be_promoter_pundit ? (
-                            <button onClick={() => togglePromoterPundit(p.id, p.is_promoter_pundit)}
-                              className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
-                              Mark PP
-                            </button>
-                          ) : null}
+                          {/* 2026-06-23 — Mark/Remove PP buttons
+                              removed from the My Experts row. Regular
+                              pundits cannot become Promoter-Pundits
+                              and vice versa; PP designation lives
+                              exclusively on the Field Manager page. */}
                           {p.status === 'ACTIVE' && (
                             <button onClick={() => deactivate(p.id)}
                               className="text-xs px-2 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50">
@@ -551,7 +535,7 @@ export default function FarmPunditsPage() {
         <div className="space-y-4">
           {/* Read-only roster — assignment lives on the Field Manager
               page, not here. CA sees who's currently routable as a P-P. */}
-          {pundits.filter(p => p.is_promoter_pundit).length === 0 ? (
+          {pundits.filter(p => p.role === 'PROMOTER_PUNDIT').length === 0 ? (
             <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-200">
               <p className="text-slate-500 text-sm">No Promoter-Pundits yet.</p>
               <p className="text-slate-400 text-xs mt-2 leading-relaxed max-w-md mx-auto">
@@ -570,7 +554,7 @@ export default function FarmPunditsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {pundits.filter(p => p.is_promoter_pundit).map(p => (
+                  {pundits.filter(p => p.role === 'PROMOTER_PUNDIT').map(p => (
                     <tr key={p.id} className="hover:bg-slate-50">
                       <td className="px-5 py-3.5">
                         <p className="font-medium text-slate-800">{p.name || '—'}</p>
@@ -871,7 +855,7 @@ export default function FarmPunditsPage() {
                   {viewingProfile.round_robin_sequence != null && (
                     <div><span className="uppercase tracking-wide font-semibold">Round-robin:</span> #{viewingProfile.round_robin_sequence}</div>
                   )}
-                  {viewingProfile.is_promoter_pundit && (
+                  {viewingProfile.role === 'PROMOTER_PUNDIT' && (
                     <div><span className="uppercase tracking-wide font-semibold text-purple-700">Promoter-Pundit</span></div>
                   )}
                 </div>
