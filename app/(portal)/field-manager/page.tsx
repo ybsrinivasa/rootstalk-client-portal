@@ -134,17 +134,15 @@ export default function FieldManagerPage() {
   }
 
   // R9 (2026-05-29): the FM "make Promoter" action now branches on
-  // promoter_type. For DEALERs the backend auto-accepts (one-step).
-  // For FACILITATORs it sets the row to PENDING and the Facilitator
-  // must accept via the PWA. The teardown endpoint (revoke-promoter)
-  // is symmetric for both types and works from any state.
+  // 2026-06-23 — Both DEALER and FACILITATOR now use a two-sided
+  // handshake (dealer auto-accept was retired by user direction). The
+  // backend sets the row to PENDING and the user accepts via their
+  // PWA dashboard. The teardown endpoint (revoke-promoter) is
+  // symmetric for both types and works from any state.
   async function requestPromoter(p: Promoter) {
-    const isFacilitator = p.promoter_type === 'FACILITATOR'
-    const consequence = isFacilitator
-      ? 'They will receive an invitation in the PWA. Until they accept, they are not yet a Promoter.'
-      : 'They will be able to assign packages on behalf of this company.'
-    const verb = isFacilitator ? 'Send a Promoter invitation to' : 'Mark'
-    if (!confirm(`${verb} ${p.name || 'this person'}? ${consequence}`)) return
+    const consequence =
+      'They will receive an invitation on their dashboard. Until they accept, they are not yet a Promoter.'
+    if (!confirm(`Send a Promoter invitation to ${p.name || 'this person'}? ${consequence}`)) return
     try {
       await api.put(
         `/client/${clientId}/field-manager/promoters/${p.id}/request-promoter`,
@@ -160,13 +158,14 @@ export default function FieldManagerPage() {
   }
 
   async function revokePromoter(p: Promoter) {
-    const isFacilitator = p.promoter_type === 'FACILITATOR'
+    // 2026-06-23 — Both DEALER and FACILITATOR use the two-sided
+    // handshake now, so the teardown semantics are identical.
     const consequence = p.promoter_request_status === 'PENDING'
       ? 'The pending invitation will be withdrawn.'
       : 'They will stop being able to assign packages on behalf of this company. Existing assignments are unaffected.'
     const verb = p.promoter_request_status === 'PENDING'
       ? 'Revoke the pending Promoter invitation for'
-      : (isFacilitator ? 'End the Promoter role for' : 'Unmark')
+      : 'End the Promoter role for'
     if (!confirm(`${verb} ${p.name || 'this person'}? ${consequence}`)) return
     try {
       await api.put(
@@ -317,7 +316,7 @@ export default function FieldManagerPage() {
                       {p.status === 'ACTIVE' && p.is_promoter && (
                         <button onClick={() => revokePromoter(p)}
                           className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
-                          {p.promoter_type === 'FACILITATOR' ? 'End Promoter Role' : 'Unmark Promoter'}
+                          End Promoter Role
                         </button>
                       )}
                       {p.status === 'ACTIVE' && !p.is_promoter && p.promoter_request_status === 'PENDING' && (
@@ -329,9 +328,9 @@ export default function FieldManagerPage() {
                       {p.status === 'ACTIVE' && !p.is_promoter && p.promoter_request_status !== 'PENDING' && (
                         <button onClick={() => requestPromoter(p)}
                           className="text-xs px-2 py-1 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 whitespace-nowrap">
-                          {p.promoter_type === 'FACILITATOR'
-                            ? (p.promoter_request_status === 'DECLINED' ? 'Re-invite as Promoter' : 'Invite as Promoter')
-                            : 'Mark as Promoter'}
+                          {p.promoter_request_status === 'DECLINED'
+                            ? 'Re-send Promoter request'
+                            : 'Send Promoter request'}
                         </button>
                       )}
                       {p.status === 'ACTIVE' ? (
