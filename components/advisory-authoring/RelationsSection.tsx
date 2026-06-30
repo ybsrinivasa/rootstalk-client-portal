@@ -21,7 +21,7 @@
 // 39B / 39C-rev2 / 39C-checks / 39C-checks2 / 39C-checks4 /
 // 39C-bugfix1) — only the URL plumbing and prop shape changed.
 
-import { useEffect, useState, FormEvent } from 'react'
+import { useEffect, useState, FormEvent, type ReactNode } from 'react'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { relationEndpoints, type PipeContext } from '@/lib/advisory-pipe'
@@ -565,33 +565,79 @@ export function RelationsSection({
                 if (!p) return pid.slice(0, 8)
                 return practiceLabel(p)
               }
-              const renderParts = (): string => {
-                const partTexts: string[] = []
-                for (const part of rel.parts) {
-                  const optTexts: string[] = []
+              // 2026-06-30 — Parens-aware structured renderer that always
+              // wins over `rel.expression`. The old path echoed the SE's
+              // raw typed expression (e.g. "A OR B AND C") with no
+              // grouping cues, and the leading relation_type chip
+              // ("OR" / "AND") pre-empted comprehension before the
+              // reader had parsed the structure. Now we always derive
+              // the displayed text from `rel.parts` (the canonical
+              // shape) with explicit parens on every nested group:
+              //
+              //   pure-AND        →  A AND B AND C
+              //   pure-OR         →  A OR B
+              //   COMPLEX_OR      →  A OR (B AND C)
+              //   AND-of-OR       →  (A OR B) AND C
+              //   nested          →  (A OR B) AND (C OR D)
+              //
+              // We also drop the relation_type chip — the text speaks
+              // for itself. IF relations still get a small marker via
+              // the conditional render above.
+              const renderRichParts = (): ReactNode[] => {
+                const segments: ReactNode[] = []
+                rel.parts.forEach((part, partIdx) => {
+                  const optSegments: ReactNode[] = []
                   for (const opt of part) {
                     if (opt.length === 0) continue
-                    if (opt.length === 1) optTexts.push(labelFor(opt[0]))
-                    else optTexts.push('(' + opt.map(labelFor).join(' + ') + ')')
+                    if (opt.length === 1) {
+                      optSegments.push(labelFor(opt[0]))
+                    } else {
+                      // Compound Option: positions are AND-joined inside
+                      // a single OR alternative. Always wrap so the
+                      // boundary is unambiguous.
+                      const inner: ReactNode[] = []
+                      opt.forEach((pid, posIdx) => {
+                        if (posIdx > 0) inner.push(<strong key={`p${posIdx}`} className="text-blue-700"> AND </strong>)
+                        inner.push(labelFor(pid))
+                      })
+                      optSegments.push(<>({inner})</>)
+                    }
                   }
-                  if (optTexts.length === 0) continue
-                  partTexts.push(optTexts.length === 1 ? optTexts[0] : optTexts.join(' or '))
-                }
-                const outer = rel.relation_type === 'OR' ? ' or ' : ' + '
-                return partTexts.join(outer)
+                  if (optSegments.length === 0) return
+                  // Part is OR-joined if it has >1 Option. Wrap in parens
+                  // when the outer relation will join multiple Parts
+                  // with AND (otherwise "A OR B AND C" loses grouping).
+                  const partNeedsWrap = optSegments.length > 1 && rel.parts.length > 1
+                  let partNode: ReactNode
+                  if (optSegments.length === 1) {
+                    partNode = optSegments[0]
+                  } else {
+                    const joined: ReactNode[] = []
+                    optSegments.forEach((seg, i) => {
+                      if (i > 0) joined.push(<strong key={`o${i}`} className="text-amber-700"> OR </strong>)
+                      joined.push(<span key={`s${i}`}>{seg}</span>)
+                    })
+                    partNode = partNeedsWrap ? <>({joined})</> : <>{joined}</>
+                  }
+                  if (partIdx > 0) {
+                    // Multiple Parts → outer joiner is AND for non-OR
+                    // relations, OR for OR relations.
+                    const joiner = rel.relation_type === 'OR' ? ' OR ' : ' AND '
+                    const joinerColour = rel.relation_type === 'OR' ? 'text-amber-700' : 'text-blue-700'
+                    segments.push(<strong key={`j${partIdx}`} className={joinerColour}>{joiner}</strong>)
+                  }
+                  segments.push(<span key={`pp${partIdx}`}>{partNode}</span>)
+                })
+                return segments
               }
-              const text = rel.expression || renderParts()
-              const typeColour = rel.relation_type === 'AND'
-                ? 'bg-blue-100 text-blue-700'
-                : rel.relation_type === 'OR'
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-purple-100 text-purple-700'
               return (
                 <div key={rel.id} className="flex items-start gap-2 text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${typeColour} shrink-0`}>
-                    {rel.relation_type}
-                  </span>
-                  <span className="text-slate-700 flex-1 min-w-0 break-words">{text}</span>
+                  <span className="text-slate-700 flex-1 min-w-0 break-words">{renderRichParts()}</span>
+                  {rel.relation_type === 'IF' && rel.conditional && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-700 shrink-0">
+                      IF
+                    </span>
+                  )}
                   <button onClick={() => handleDeleteRelation(rel.id)}
                     className="text-slate-300 hover:text-red-500 shrink-0"
                     title="Delete Relation">
