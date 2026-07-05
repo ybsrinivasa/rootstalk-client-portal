@@ -45,6 +45,14 @@ export interface CPClient {
    *  pre-payment-model login won't have it; UI should tolerate
    *  `undefined` gracefully and refetch on next login. */
   payment_model?: 'COMPANY_PAYS' | 'FARMER_PAYS'
+  /** 2026-07-05 — Manufacturer flag. Gates the /qr sidebar entry
+   *  (in combination with seed-flavour). Optional for the same
+   *  cached-CPClient reason above. */
+  is_manufacturer?: boolean
+  /** 2026-07-05 — Cosh input_manufacturers cosh_id — deterministic
+   *  link for the QR Brand Portfolio picker. NULL until SA links it.
+   */
+  cosh_manufacturer_id?: string | null
 }
 
 export interface CPUserWithClient extends CPUser {

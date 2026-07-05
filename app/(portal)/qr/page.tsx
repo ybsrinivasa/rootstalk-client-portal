@@ -5,7 +5,8 @@ import api from '@/lib/api'
 
 interface PortfolioItem { id: string; product_type: string; brand_cosh_id: string | null; variety_id: string | null; display_name: string }
 interface QRCode { id: string; product_type: string; product_display_name: string; batch_lot_number: string; manufacture_date: string; expiry_date: string; status: string; created_at: string; scan_count: number; mismatch_count: number }
-interface BrandSearchResult { cosh_id: string; name: string; manufacturer: string | null; product_type: string }
+interface BrandCandidate { cosh_id: string; name: string; product_type: string | null }
+interface BrandCandidatesResponse { brands: BrandCandidate[]; cosh_manufacturer_linked: boolean }
 interface MismatchEntry { scan_id: string; scanned_at: string; farmer_name: string | null; farmer_district: string | null; expected_product: string; scanned_brand_cosh_id: string | null; batch_lot_number: string; scan_attempt: number }
 interface BulkResult { summary: { generated: number; skipped_duplicates: number; failed: number }; rows: { row: number; status: string; reason?: string; display_name: string }[] }
 
@@ -22,10 +23,11 @@ export default function QRModulePage() {
   const [mismatches, setMismatches] = useState<MismatchEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [showGenerate, setShowGenerate] = useState(false)
-  const [showSearch, setShowSearch] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<BrandSearchResult[]>([])
-  const [searching, setSearching] = useState(false)
+  const [candidates, setCandidates] = useState<BrandCandidate[]>([])
+  const [candidatesLoading, setCandidatesLoading] = useState(false)
+  const [candidatesUnlinkedError, setCandidatesUnlinkedError] = useState(false)
+  const [candidateProductType, setCandidateProductType] = useState<Record<string, string>>({})
+  const [addingCoshId, setAddingCoshId] = useState<string | null>(null)
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
   const [generateForm, setGenerateForm] = useState({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '' })
   const [saving, setSaving] = useState(false)
@@ -46,22 +48,48 @@ export default function QRModulePage() {
 
   useEffect(() => { load() }, [clientId])
 
-  async function searchBrands() {
-    if (!clientId || !searchQuery.trim()) return
-    setSearching(true)
+  // 2026-07-05 — Replaces the fragile "type your Cosh manufacturer
+  // name" search with an auto-loaded list keyed off the client's
+  // deterministic Client.cosh_manufacturer_id link. If the SA hasn't
+  // set that link yet, we surface a clean "ask SA" message instead
+  // of a broken UI.
+  async function loadCandidates() {
+    if (!clientId) return
+    setCandidatesLoading(true)
+    setCandidatesUnlinkedError(false)
     try {
-      const { data } = await api.post<BrandSearchResult[]>(`/client/${clientId}/qr/portfolio/search`, { manufacturer_name: searchQuery })
-      setSearchResults(data)
-    } finally { setSearching(false) }
+      const { data } = await api.get<BrandCandidatesResponse>(
+        `/client/${clientId}/qr/portfolio/candidates`,
+      )
+      setCandidates(data.brands || [])
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      if (status === 409) {
+        setCandidatesUnlinkedError(true)
+        setCandidates([])
+      } else {
+        setCandidates([])
+      }
+    } finally {
+      setCandidatesLoading(false)
+    }
   }
 
-  async function addToPortfolio(brand: BrandSearchResult) {
+  useEffect(() => { loadCandidates() }, [clientId])
+
+  async function addCandidateToPortfolio(brand: BrandCandidate) {
     if (!clientId) return
-    await api.post(`/client/${clientId}/qr/portfolio`, {
-      product_type: brand.product_type,
-      brand_cosh_id: brand.cosh_id,
-    })
-    load()
+    const productType = candidateProductType[brand.cosh_id] || 'PESTICIDE'
+    setAddingCoshId(brand.cosh_id)
+    try {
+      await api.post(`/client/${clientId}/qr/portfolio`, {
+        product_type: productType,
+        brand_cosh_id: brand.cosh_id,
+      })
+      load()
+    } finally {
+      setAddingCoshId(null)
+    }
   }
 
   async function removeFromPortfolio(id: string) {
@@ -224,46 +252,75 @@ export default function QRModulePage() {
         {/* Brand Portfolio tab */}
         {tab === 'portfolio' && (
           <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-100 p-5">
-              <h3 className="font-semibold text-gray-800 mb-3">Search and Add Brands</h3>
-              <p className="text-xs text-gray-400 mb-3">Enter your company name as it appears in Cosh to find all your registered brands.</p>
-              <div className="flex gap-2">
-                <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && searchBrands()}
-                  placeholder="Enter manufacturer name…"
-                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30" />
-                <button onClick={searchBrands} disabled={searching}
-                  className="px-4 py-2 bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-green-800">
-                  {searching ? 'Searching…' : 'Search'}
-                </button>
+            {/* 2026-07-05 — Auto-loaded pesticide/fertilizer brand
+                candidates. Client → Cosh manufacturer link is set by
+                the SA at approval time (or later); we walk the
+                tradename_manufacturer connect server-side. If the
+                link is missing, show a clean "ask SA" message rather
+                than a broken search field. Seed varieties come from
+                RootsTalk and don't surface here. */}
+            {candidatesUnlinkedError ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+                <h3 className="font-semibold text-amber-900 mb-1">Cosh manufacturer not linked</h3>
+                <p className="text-sm text-amber-800">
+                  Your company hasn&apos;t been linked to a Cosh manufacturer yet, so we can&apos;t auto-load your brand list.
+                  Please ask your RootsTalk contact to open your Company Profile in the Super Admin portal and set the Cosh Manufacturer.
+                </p>
               </div>
-              {searchResults.length > 0 && (
-                <div className="mt-4 border border-gray-100 rounded-xl divide-y divide-gray-50 max-h-64 overflow-y-auto">
-                  {searchResults.map(b => {
-                    const inPortfolio = portfolio.some(p => p.brand_cosh_id === b.cosh_id)
-                    return (
-                      <div key={b.cosh_id} className="flex items-center justify-between px-4 py-3">
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800">{b.name}</p>
-                          <p className="text-xs text-gray-400">{b.product_type} · {b.manufacturer}</p>
-                        </div>
-                        {inPortfolio ? (
-                          <span className="text-xs text-green-600 font-medium">✓ In portfolio</span>
-                        ) : (
-                          <button onClick={() => addToPortfolio(b)}
-                            className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200">
-                            Add
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })}
+            ) : (
+              <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Your Cosh Brands</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Pesticide &amp; Fertilizer brands registered to your company in Cosh. Pick a product type and add the ones you distribute.
+                    </p>
+                  </div>
+                  <button onClick={loadCandidates} disabled={candidatesLoading}
+                    className="text-xs text-green-700 hover:text-green-900 font-medium disabled:opacity-50">
+                    {candidatesLoading ? 'Loading…' : 'Refresh'}
+                  </button>
                 </div>
-              )}
-              {searchResults.length === 0 && searchQuery && !searching && (
-                <p className="text-xs text-gray-400 mt-3">No brands found. Try a different name variant or ask Neytiri to add the brand to Cosh.</p>
-              )}
-            </div>
+                {!candidatesLoading && candidates.length === 0 && (
+                  <p className="text-xs text-gray-400 mt-3">
+                    No brands found under your Cosh manufacturer entry yet.
+                    New brands appear here once RootsTalk adds them to Cosh.
+                  </p>
+                )}
+                {candidates.length > 0 && (
+                  <div className="mt-1 border border-gray-100 rounded-xl divide-y divide-gray-50 max-h-96 overflow-y-auto">
+                    {candidates.map(b => {
+                      const inPortfolio = portfolio.some(p => p.brand_cosh_id === b.cosh_id)
+                      return (
+                        <div key={b.cosh_id} className="flex items-center justify-between gap-3 px-4 py-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-gray-800">{b.name}</p>
+                          </div>
+                          {inPortfolio ? (
+                            <span className="text-xs text-green-600 font-medium shrink-0">✓ In portfolio</span>
+                          ) : (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <select
+                                value={candidateProductType[b.cosh_id] || 'PESTICIDE'}
+                                onChange={e => setCandidateProductType(m => ({ ...m, [b.cosh_id]: e.target.value }))}
+                                className="text-xs border border-gray-200 rounded-lg px-2 py-1.5">
+                                <option value="PESTICIDE">Pesticide</option>
+                                <option value="FERTILISER">Fertiliser</option>
+                              </select>
+                              <button onClick={() => addCandidateToPortfolio(b)}
+                                disabled={addingCoshId === b.cosh_id}
+                                className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200 disabled:opacity-50">
+                                {addingCoshId === b.cosh_id ? '…' : 'Add'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {portfolio.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-100">

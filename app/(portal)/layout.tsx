@@ -122,6 +122,12 @@ interface NavItem {
   Icon: React.ComponentType
   caOnly?: boolean
   seedOnly?: boolean
+  /** 2026-07-05 — QR Product Authentication is meaningful only for
+   *  clients who put branded product into the supply chain: either
+   *  pesticide/fertilizer manufacturers (is_manufacturer=true) or
+   *  seed companies (org_type includes SEED_COMPANY_COSH_ID). Both
+   *  paths coexist for Bayer-shaped clients. */
+  manufacturerOrSeedOnly?: boolean
   group: string
 }
 
@@ -139,7 +145,7 @@ const ALL_NAV: NavItem[] = [
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
-  { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA' },
+  { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA', manufacturerOrSeedOnly: true },
   { href: '/farm-pundits',       label: 'FarmPundits',       Icon: IconFarmPundits,  group: 'PORTAL', caOnly: true },
   { href: '/users',              label: 'Users',             Icon: IconUsers,        group: 'PORTAL' },
   { href: '/setup',              label: 'Setup',             Icon: IconSetup,        group: 'PORTAL' },
@@ -185,6 +191,7 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   const isSeedClient = client?.org_type_cosh_ids?.includes(
     '4b0847f9-a590-452f-9129-ee0e2d946dd9',
   ) ?? false
+  const isManufacturer = client?.is_manufacturer ?? false
 
   // CA is exclusive (Batch K) — sees everything. CONTENT_MANAGER
   // (Batch Q, 2026-05-18) is the synthesised role for a CM who
@@ -195,6 +202,7 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   if (roles.includes('CA') || roles.includes('CONTENT_MANAGER')) {
     return ALL_NAV.filter(item => {
       if (item.seedOnly && !isSeedClient) return false
+      if (item.manufacturerOrSeedOnly && !(isManufacturer || isSeedClient)) return false
       return true
     })
   }
@@ -217,6 +225,7 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   return ALL_NAV.filter(item => {
     if (!allowedSet.has(item.href)) return false
     if (item.seedOnly && !isSeedClient) return false
+    if (item.manufacturerOrSeedOnly && !(isManufacturer || isSeedClient)) return false
     if (item.caOnly) return false
     return true
   })
