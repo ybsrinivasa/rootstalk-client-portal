@@ -7,6 +7,9 @@ interface PortfolioItem { id: string; product_type: string; brand_cosh_id: strin
 interface QRCode { id: string; product_type: string; product_display_name: string; batch_lot_number: string; manufacture_date: string; expiry_date: string; status: string; created_at: string; scan_count: number; mismatch_count: number }
 interface BrandCandidate { cosh_id: string; name: string; product_type: string | null }
 interface BrandCandidatesResponse { brands: BrandCandidate[]; cosh_manufacturer_linked: boolean }
+interface CropCandidate { cosh_id: string; name: string; variety_count: number }
+interface VarietyCandidate { id: string; name: string; crop_cosh_id: string }
+interface VarietyCandidatesResponse { crops: CropCandidate[]; varieties: VarietyCandidate[]; is_seed_client: boolean }
 interface MismatchEntry { scan_id: string; scanned_at: string; farmer_name: string | null; farmer_district: string | null; expected_product: string; scanned_brand_cosh_id: string | null; batch_lot_number: string; scan_attempt: number }
 interface BulkResult { summary: { generated: number; skipped_duplicates: number; failed: number }; rows: { row: number; status: string; reason?: string; display_name: string }[] }
 
@@ -17,6 +20,7 @@ type Tab = typeof TABS[number]
 export default function QRModulePage() {
   const client = getClient()
   const clientId = client?.id
+  const isManufacturer = client?.is_manufacturer ?? false
   const [tab, setTab] = useState<Tab>('codes')
   const [codes, setCodes] = useState<QRCode[]>([])
   const [portfolio, setPortfolio] = useState<PortfolioItem[]>([])
@@ -26,8 +30,19 @@ export default function QRModulePage() {
   const [candidates, setCandidates] = useState<BrandCandidate[]>([])
   const [candidatesLoading, setCandidatesLoading] = useState(false)
   const [candidatesUnlinkedError, setCandidatesUnlinkedError] = useState(false)
+  // Belt-and-suspenders: the cached CPClient may predate Phase 1 and
+  // not have is_manufacturer. The candidates endpoint's
+  // cosh_manufacturer_linked field disambiguates: false on a 200
+  // means "not a manufacturer" — hide the Brands section then.
+  const [showBrandsSection, setShowBrandsSection] = useState(false)
   const [candidateProductType, setCandidateProductType] = useState<Record<string, string>>({})
   const [addingCoshId, setAddingCoshId] = useState<string | null>(null)
+  const [isSeedClient, setIsSeedClient] = useState(false)
+  const [crops, setCrops] = useState<CropCandidate[]>([])
+  const [selectedCropId, setSelectedCropId] = useState<string>('')
+  const [varieties, setVarieties] = useState<VarietyCandidate[]>([])
+  const [varietiesLoading, setVarietiesLoading] = useState(false)
+  const [addingVarietyId, setAddingVarietyId] = useState<string | null>(null)
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
   const [generateForm, setGenerateForm] = useState({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '' })
   const [saving, setSaving] = useState(false)
@@ -62,11 +77,15 @@ export default function QRModulePage() {
         `/client/${clientId}/qr/portfolio/candidates`,
       )
       setCandidates(data.brands || [])
+      setShowBrandsSection(data.cosh_manufacturer_linked || isManufacturer)
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status
       if (status === 409) {
         setCandidatesUnlinkedError(true)
         setCandidates([])
+        // 409 means is_manufacturer=True but cosh_manufacturer_id is
+        // NULL — still a manufacturer, so keep the section visible.
+        setShowBrandsSection(true)
       } else {
         setCandidates([])
       }
@@ -76,6 +95,57 @@ export default function QRModulePage() {
   }
 
   useEffect(() => { loadCandidates() }, [clientId])
+
+  // 2026-07-05 — Seed-side companion to loadCandidates. Fetches the
+  // client's populated-crops list once on mount; variety fetches
+  // happen only after the CA picks a crop from the dropdown. The
+  // endpoint returns is_seed_client=false for manufacturer-only
+  // clients — we hide the whole section in that case.
+  async function loadCropCandidates() {
+    if (!clientId) return
+    try {
+      const { data } = await api.get<VarietyCandidatesResponse>(
+        `/client/${clientId}/qr/portfolio/varieties/candidates`,
+      )
+      setIsSeedClient(data.is_seed_client)
+      setCrops(data.crops || [])
+    } catch {
+      setIsSeedClient(false)
+      setCrops([])
+    }
+  }
+  useEffect(() => { loadCropCandidates() }, [clientId])
+
+  async function loadVarietiesForCrop(cropId: string) {
+    if (!clientId || !cropId) { setVarieties([]); return }
+    setVarietiesLoading(true)
+    try {
+      const { data } = await api.get<VarietyCandidatesResponse>(
+        `/client/${clientId}/qr/portfolio/varieties/candidates?crop_cosh_id=${encodeURIComponent(cropId)}`,
+      )
+      setVarieties(data.varieties || [])
+    } catch {
+      setVarieties([])
+    } finally {
+      setVarietiesLoading(false)
+    }
+  }
+
+  useEffect(() => { loadVarietiesForCrop(selectedCropId) }, [selectedCropId, clientId])
+
+  async function addVarietyToPortfolio(variety: VarietyCandidate) {
+    if (!clientId) return
+    setAddingVarietyId(variety.id)
+    try {
+      await api.post(`/client/${clientId}/qr/portfolio`, {
+        product_type: 'SEED',
+        variety_id: variety.id,
+      })
+      load()
+    } finally {
+      setAddingVarietyId(null)
+    }
+  }
 
   async function addCandidateToPortfolio(brand: BrandCandidate) {
     if (!clientId) return
@@ -185,7 +255,7 @@ export default function QRModulePage() {
           {TABS.map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-5 py-3 text-sm font-medium capitalize border-b-2 transition-colors ${tab === t ? 'border-green-700 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
-              {t === 'codes' ? `QR Codes (${codes.length})` : t === 'portfolio' ? `Brand Portfolio (${portfolio.length})` : `Mismatches (${mismatches.length})`}
+              {t === 'codes' ? `QR Codes (${codes.length})` : t === 'portfolio' ? `Portfolio (${portfolio.length})` : `Mismatches (${mismatches.length})`}
             </button>
           ))}
         </div>
@@ -249,17 +319,13 @@ export default function QRModulePage() {
           )
         )}
 
-        {/* Brand Portfolio tab */}
+        {/* Portfolio tab */}
         {tab === 'portfolio' && (
           <div className="space-y-4">
-            {/* 2026-07-05 — Auto-loaded pesticide/fertilizer brand
-                candidates. Client → Cosh manufacturer link is set by
-                the SA at approval time (or later); we walk the
-                tradename_manufacturer connect server-side. If the
-                link is missing, show a clean "ask SA" message rather
-                than a broken search field. Seed varieties come from
-                RootsTalk and don't surface here. */}
-            {candidatesUnlinkedError ? (
+            {/* Cosh Brands section — pesticide/fertilizer. Auto-loaded
+                via the Client → cosh_manufacturer_id link the SA sets
+                at approval time. Hidden for pure seed clients. */}
+            {showBrandsSection && (candidatesUnlinkedError ? (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
                 <h3 className="font-semibold text-amber-900 mb-1">Cosh manufacturer not linked</h3>
                 <p className="text-sm text-amber-800">
@@ -318,6 +384,77 @@ export default function QRModulePage() {
                       )
                     })}
                   </div>
+                )}
+              </div>
+            ))}
+
+            {/* Seed Varieties section — crop-scoped picker sourced from
+                RootsTalk's seed_varieties (not Cosh). Only rendered for
+                seed-flavour clients; Bayer-shaped clients see this
+                alongside the Cosh Brands section above. */}
+            {isSeedClient && (
+              <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Your Seed Varieties</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Varieties you&apos;ve entered in Seed → Varieties. Pick a crop to see its varieties, then add the ones you want to authenticate.
+                    </p>
+                  </div>
+                  <button onClick={loadCropCandidates}
+                    className="text-xs text-green-700 hover:text-green-900 font-medium">
+                    Refresh
+                  </button>
+                </div>
+                {crops.length === 0 ? (
+                  <p className="text-xs text-amber-600 mt-3">
+                    No varieties entered yet. Add varieties in <span className="font-semibold">Seed → Varieties</span> to see them here.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Crop</label>
+                      <select value={selectedCropId}
+                        onChange={e => setSelectedCropId(e.target.value)}
+                        className="w-full max-w-xs border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none">
+                        <option value="">Select a crop…</option>
+                        {crops.map(c => (
+                          <option key={c.cosh_id} value={c.cosh_id}>
+                            {c.name} ({c.variety_count})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {selectedCropId && (
+                      varietiesLoading ? (
+                        <div className="h-16 bg-gray-50 rounded-xl animate-pulse" />
+                      ) : varieties.length === 0 ? (
+                        <p className="text-xs text-gray-400 mt-2">No active varieties for this crop.</p>
+                      ) : (
+                        <div className="border border-gray-100 rounded-xl divide-y divide-gray-50 max-h-96 overflow-y-auto">
+                          {varieties.map(v => {
+                            const inPortfolio = portfolio.some(p => p.variety_id === v.id)
+                            return (
+                              <div key={v.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-semibold text-gray-800">{v.name}</p>
+                                </div>
+                                {inPortfolio ? (
+                                  <span className="text-xs text-green-600 font-medium shrink-0">✓ In portfolio</span>
+                                ) : (
+                                  <button onClick={() => addVarietyToPortfolio(v)}
+                                    disabled={addingVarietyId === v.id}
+                                    className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200 disabled:opacity-50 shrink-0">
+                                    {addingVarietyId === v.id ? '…' : 'Add'}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    )}
+                  </>
                 )}
               </div>
             )}
