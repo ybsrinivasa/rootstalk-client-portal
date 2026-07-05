@@ -6,6 +6,7 @@ import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-authoring/PracticeFormModal'
+import TranslationReview from '@/components/TranslationReview'
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import { practiceShortLabel } from '@/lib/practice-label'
@@ -646,6 +647,10 @@ export default function StandardResponseDetailPage() {
                   onChange={e => setEditSRForm(f => ({ ...f, question_text: e.target.value }))}
                   required rows={3}
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
+                <TranslationReview
+                  entityType="standard_response.question_text"
+                  entityId={srId}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Visibility</label>

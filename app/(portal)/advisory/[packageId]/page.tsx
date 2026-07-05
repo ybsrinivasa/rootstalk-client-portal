@@ -8,6 +8,7 @@ import { PracticeFormModal, type ExistingPractice } from '@/components/advisory-
 import { RelationsSection } from '@/components/advisory-authoring/RelationsSection'
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import { useReadOnlyGuard } from '@/components/advisory-authoring/ReadOnlyGuard'
+import TranslationReview from '@/components/TranslationReview'
 import { VersionHistorySection, type LineageRow as SharedLineageRow } from '@/components/advisory-authoring/LineageSection'
 import { practiceShortLabel } from '@/lib/practice-label'
 import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
@@ -1770,6 +1771,12 @@ export default function PackageDetailPage() {
                   onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
                   rows={3}
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 resize-none" />
+                {pkg?.id && (
+                  <TranslationReview
+                    entityType="package.description"
+                    entityId={pkg.id}
+                  />
+                )}
               </div>
 
               {/* Status toggle. DRAFT → INACTIVE allowed (discards

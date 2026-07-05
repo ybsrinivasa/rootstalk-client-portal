@@ -23,6 +23,11 @@ import { useEffect, useState, FormEvent } from 'react'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { practiceEndpoints, type PipeContext } from '@/lib/advisory-pipe'
+import TranslationReview from '@/components/TranslationReview'
+
+// Mirror of app/services/translation_ancestry.py TRANSLATABLE_ELEMENT_TYPES.
+// Keep the two in sync — a diverging list here would render dead widgets.
+const TRANSLATABLE_ELEMENT_TYPES = new Set(['INSTRUCTIONS', 'TITLE', 'DESCRIPTION'])
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -44,6 +49,10 @@ export interface L2ElementField {
 }
 
 interface PracticeElement {
+  // Phase T-3 (2026-07-05): server exposes Element.id so the
+  // TranslationReview widget can bind per-element translations.
+  // Optional — new-add elements don't have an id until saved.
+  id?: string
   element_type: string
   cosh_ref?: string | null
   value?: string | null
@@ -845,6 +854,26 @@ export function PracticeFormModal({
                   </div>
                 )
               })}
+
+              {/* Phase T-3 (2026-07-05) — Translation review for
+                  existing text-shaped elements. Only appears for
+                  elements that are TRANSLATABLE (INSTRUCTIONS /
+                  TITLE / DESCRIPTION) AND have an id (already saved
+                  once). Fresh-add elements skip the widget because
+                  there's nothing to translate yet. */}
+              {mode === 'edit' && existingPractice?.elements
+                ?.filter(el => el.id && TRANSLATABLE_ELEMENT_TYPES.has(el.element_type))
+                .map(el => (
+                  <div key={`tr-${el.id}`} className="pt-3 border-t border-slate-100">
+                    <p className="text-[11px] text-slate-500 mb-1">
+                      {el.element_type} translations
+                    </p>
+                    <TranslationReview
+                      entityType="element.value"
+                      entityId={el.id!}
+                    />
+                  </div>
+                ))}
             </div>
           )}
 
