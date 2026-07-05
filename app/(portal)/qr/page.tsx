@@ -13,7 +13,6 @@ interface VarietyCandidatesResponse { crops: CropCandidate[]; varieties: Variety
 interface MismatchEntry { scan_id: string; scanned_at: string; farmer_name: string | null; farmer_district: string | null; expected_product: string; scanned_brand_cosh_id: string | null; batch_lot_number: string; scan_attempt: number }
 interface BulkResult { summary: { generated: number; skipped_duplicates: number; failed: number }; rows: { row: number; status: string; reason?: string; display_name: string }[] }
 
-const PRODUCT_TYPES = ['PESTICIDE', 'FERTILISER', 'SEED']
 const TABS = ['codes', 'portfolio', 'mismatches'] as const
 type Tab = typeof TABS[number]
 
@@ -47,6 +46,14 @@ export default function QRModulePage() {
   const [generateForm, setGenerateForm] = useState({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '' })
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Product types available to this client, derived from what the two
+  // candidate endpoints say. Pure manufacturer sees [PESTICIDE,
+  // FERTILISER]; pure seed sees [SEED]; Bayer-shaped sees all three.
+  const productTypes: string[] = [
+    ...(showBrandsSection ? ['PESTICIDE', 'FERTILISER'] : []),
+    ...(isSeedClient ? ['SEED'] : []),
+  ]
 
   const load = async () => {
     if (!clientId) return
@@ -225,7 +232,16 @@ export default function QRModulePage() {
               Bulk Upload
               <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleBulkUpload} />
             </label>
-            <button onClick={() => setShowGenerate(true)} className="px-4 py-2 bg-green-700 text-white text-sm font-semibold rounded-lg hover:bg-green-800">
+            <button onClick={() => {
+                // Seed the modal's product_type from what this client
+                // actually has. Otherwise a pure-seed client opens the
+                // modal with PESTICIDE preselected and an empty picker.
+                const seedType = productTypes[0] || 'PESTICIDE'
+                setGenerateForm(f => ({ ...f, product_type: seedType }))
+                setShowGenerate(true)
+              }}
+              disabled={productTypes.length === 0}
+              className="px-4 py-2 bg-green-700 text-white text-sm font-semibold rounded-lg hover:bg-green-800 disabled:opacity-40 disabled:cursor-not-allowed">
               + Generate QR
             </button>
           </div>
@@ -524,7 +540,11 @@ export default function QRModulePage() {
                 <select value={generateForm.product_type}
                   onChange={e => setGenerateForm(f => ({ ...f, product_type: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none">
-                  {PRODUCT_TYPES.map(t => <option key={t}>{t}</option>)}
+                  {productTypes.length === 0 ? (
+                    <option value="">No product types available yet</option>
+                  ) : (
+                    productTypes.map(t => <option key={t}>{t}</option>)
+                  )}
                 </select>
               </div>
               <div>
@@ -541,7 +561,7 @@ export default function QRModulePage() {
                   ))}
                 </select>
                 {portfolio.filter(p => p.product_type === generateForm.product_type).length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1">No brands in portfolio for this type. Add via Brand Portfolio tab.</p>
+                  <p className="text-xs text-amber-600 mt-1">Nothing in portfolio for this type. Add from the Portfolio tab.</p>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
