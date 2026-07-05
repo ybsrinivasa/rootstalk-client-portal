@@ -209,9 +209,9 @@ export default function QRModulePage() {
     load()
   }
 
-  function downloadTemplate() {
+  function downloadTemplate(kind: 'pesticide' | 'seed') {
     if (!clientId) return
-    window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/client/${clientId}/qr/bulk-template`, '_blank')
+    window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/client/${clientId}/qr/bulk-template?kind=${kind}`, '_blank')
   }
 
   const STATUS_COLOUR: Record<string, string> = { ACTIVE: 'bg-green-100 text-green-700', INACTIVE: 'bg-gray-100 text-gray-500' }
@@ -224,14 +224,40 @@ export default function QRModulePage() {
             <h1 className="text-2xl font-bold text-gray-900">QR Codes</h1>
             <p className="text-sm text-gray-500 mt-1">Product authentication and dealer verification</p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={downloadTemplate} className="px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
-              CSV Template
-            </button>
-            <label className="px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-              Bulk Upload
-              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleBulkUpload} />
-            </label>
+          <div className="flex gap-2 flex-wrap justify-end">
+            {/* 2026-07-05 — Templates split by kind so the CA gets a
+                pre-shaped CSV that matches what they're uploading.
+                Pesticide/Fertilizer and Seed have different columns
+                (Trade Name vs Variety Name, Manufacture vs Production,
+                Batch vs Lot) and different sample rows. Bayer-shaped
+                clients see both pairs; single-flavour clients see
+                only their relevant pair. Upload endpoint is one and
+                the same — column-heading fallbacks handle mixed
+                inputs. */}
+            {showBrandsSection && (
+              <>
+                <button onClick={() => downloadTemplate('pesticide')}
+                  className="px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+                  Template — P/F
+                </button>
+                <label className="px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                  Bulk Upload — P/F
+                  <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleBulkUpload} />
+                </label>
+              </>
+            )}
+            {isSeedClient && (
+              <>
+                <button onClick={() => downloadTemplate('seed')}
+                  className="px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+                  Template — Seed
+                </button>
+                <label className="px-3 py-2 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                  Bulk Upload — Seed
+                  <input type="file" accept=".csv" className="hidden" onChange={handleBulkUpload} />
+                </label>
+              </>
+            )}
             <button onClick={() => {
                 // Seed the modal's product_type from what this client
                 // actually has. Otherwise a pure-seed client opens the
