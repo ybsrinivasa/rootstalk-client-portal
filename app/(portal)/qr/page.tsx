@@ -45,6 +45,7 @@ export default function QRModulePage() {
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
   const [generateForm, setGenerateForm] = useState({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '' })
   const [saving, setSaving] = useState(false)
+  const [printStyle, setPrintStyle] = useState<'color' | 'mono' | 'raw'>('color')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Product types available to this client, derived from what the two
@@ -194,7 +195,10 @@ export default function QRModulePage() {
 
   function downloadQR(id: string, format: string, size: string) {
     if (!clientId) return
-    window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/client/${clientId}/qr/codes/${id}/download?format=${format}&size=${size}`, '_blank')
+    const params = new URLSearchParams({
+      format, size, style: printStyle, label: String(printStyle !== 'raw'),
+    })
+    window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/client/${clientId}/qr/codes/${id}/download?${params}`, '_blank')
   }
 
   async function handleBulkUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -311,7 +315,33 @@ export default function QRModulePage() {
               <p className="text-gray-500 font-medium">No QR codes generated yet</p>
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-gray-100 divide-y divide-gray-50">
+            <>
+              {/* Print-style selector — applies to every download in
+                  this session. Color for glossy labels; Mono for
+                  black-only printers that render bitmap + text; Raw
+                  for CIJ / dot-matrix that only rasterise dots
+                  (govt-mandated seed-pouch QR use case). */}
+              <div className="mb-3 flex items-center gap-3 flex-wrap">
+                <p className="text-xs font-medium text-gray-500">Print style:</p>
+                {(['color', 'mono', 'raw'] as const).map(s => (
+                  <button key={s} onClick={() => setPrintStyle(s)}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                      printStyle === s
+                        ? 'bg-green-700 text-white'
+                        : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}>
+                    {s === 'color' ? 'Color (label)' : s === 'mono' ? 'Mono (label)' : 'Raw (no logo, no text)'}
+                  </button>
+                ))}
+                <p className="text-[11px] text-gray-400 ml-auto">
+                  {printStyle === 'raw'
+                    ? 'For dot-matrix / CIJ printers — pure black dots only.'
+                    : printStyle === 'mono'
+                    ? 'For mono printers that can print bitmap + text.'
+                    : 'For glossy printed labels — default.'}
+                </p>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-100 divide-y divide-gray-50">
               {codes.map(code => (
                 <div key={code.id} className="px-5 py-4">
                   <div className="flex items-start justify-between gap-4">
@@ -357,7 +387,8 @@ export default function QRModulePage() {
                   </div>
                 </div>
               ))}
-            </div>
+              </div>
+            </>
           )
         )}
 

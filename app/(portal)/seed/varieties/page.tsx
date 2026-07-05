@@ -62,6 +62,7 @@ interface DusOptionPart {
 interface Variety {
   id: string; name: string; crop_cosh_id: string; variety_type: string
   description_points: string[]; photos: string[]; status: string
+  cultivation_notes: string | null
   dus_characters: DusCharacter[]
   pop_assignments: { package_id: string; status: string }[]
 }
@@ -103,6 +104,7 @@ const emptyForm = (cropCoshId: string) => ({
   variety_type: 'SEED',
   description_points: [''],
   photos: [] as string[],
+  cultivation_notes: '',
   dus_characters: [] as DusCharacter[],
 })
 
@@ -388,6 +390,7 @@ function SeedVarietiesContent() {
     try {
       const payload = {
         ...form,
+        cultivation_notes: form.cultivation_notes.trim() || null,
         description_points: form.description_points.filter(p => p.trim()),
         // Keep rows that EITHER carry the new cosh_id shape (post
         // Batch W) OR a legacy free-text part+character pair.
@@ -487,6 +490,7 @@ function SeedVarietiesContent() {
       variety_type: v.variety_type,
       description_points: v.description_points.length > 0 ? v.description_points : [''],
       photos: v.photos,
+      cultivation_notes: v.cultivation_notes || '',
       dus_characters: v.dus_characters || [],
     })
     // Batch Y (2026-05-19) — pre-check the packages this variety is
@@ -699,6 +703,26 @@ function SeedVarietiesContent() {
                       + Add point
                     </button>
                   </div>
+                </div>
+
+                {/* Cultivation notes — 2026-07-05. Govt-mandated
+                    seed-pouch QR write-up. Shows below product
+                    details on the public verify page when the QR
+                    resolves to this variety. Plain text; kept
+                    optional so pre-existing varieties don't need
+                    a mass-fill exercise. */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Cultivation Notes
+                    <span className="ml-2 text-[10px] text-slate-400 font-normal">
+                      (Shown on the public QR verify page for this variety.)
+                    </span>
+                  </label>
+                  <textarea value={form.cultivation_notes}
+                    onChange={e => setForm(f => ({ ...f, cultivation_notes: e.target.value }))}
+                    rows={4}
+                    placeholder="e.g. Sowing time: October–November. Seed rate: 20 kg/ha. Row spacing: 45 cm. Prefers well-drained loamy soil. Irrigate at 25, 45 and 65 days after sowing."
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
                 </div>
 
                 {/* DUS Characters — cascading dropdowns from Cosh
