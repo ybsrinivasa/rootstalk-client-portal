@@ -4,7 +4,6 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { getClient, getToken } from '@/lib/auth'
-import TranslationReview from '@/components/TranslationReview'
 
 // Crop-scoped variety management (Batch O+, 2026-05-18). The crop
 // is picked on the parent /seed page; this page receives it via the
@@ -704,16 +703,6 @@ function SeedVarietiesContent() {
                       + Add point
                     </button>
                   </div>
-                  {/* Phase T-3 translation review — only meaningful
-                      after the variety exists. First save triggers
-                      background translation; the widget polls briefly
-                      to catch the fresh rows. */}
-                  {selected && (
-                    <TranslationReview
-                      entityType="seed_variety.description_points"
-                      entityId={selected.id}
-                    />
-                  )}
                 </div>
 
                 {/* Cultivation notes — 2026-07-05. Govt-mandated
