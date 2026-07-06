@@ -193,12 +193,35 @@ export default function QRModulePage() {
     load()
   }
 
-  function downloadQR(id: string, format: string, size: string) {
+  async function downloadQR(id: string, format: string, size: string) {
+    // 2026-07-06 — Was `window.open(url)`. That opens the URL in a
+    // new browser tab without the Authorization header, so the API
+    // returned {"detail":"Not authenticated"}. Fetching via `api`
+    // attaches the JWT interceptor, then we materialise the blob
+    // and trigger a save-as via a synthetic anchor click.
     if (!clientId) return
     const params = new URLSearchParams({
       format, size, style: printStyle, label: String(printStyle !== 'raw'),
     })
-    window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/client/${clientId}/qr/codes/${id}/download?${params}`, '_blank')
+    try {
+      const res = await api.get<Blob>(
+        `/client/${clientId}/qr/codes/${id}/download?${params}`,
+        { responseType: 'blob' },
+      )
+      const disposition = (res.headers['content-disposition'] || '') as string
+      const fnameMatch = disposition.match(/filename="?([^";]+)"?/)
+      const fname = fnameMatch ? fnameMatch[1] : `qr-${id}.${format.toLowerCase()}`
+      const blobUrl = window.URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = fname
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(blobUrl)
+    } catch {
+      alert('Download failed. Please try again.')
+    }
   }
 
   async function handleBulkUpload(e: React.ChangeEvent<HTMLInputElement>) {
