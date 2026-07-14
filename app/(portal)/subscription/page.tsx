@@ -77,7 +77,9 @@ interface PoolBalance {
 
 interface PoolSummary {
   purchased_total: number
-  consumed_total: number
+  consumed_total: number       // net = gross - refunded
+  consumed_gross: number
+  refunded_total: number
   active_subscriptions: number
 }
 
@@ -425,7 +427,12 @@ export default function SubscriptionPage() {
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
             <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Total Consumed</p>
             <p className="text-2xl font-bold text-slate-900 mt-1">{summary.consumed_total.toLocaleString('en-IN')}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Farmer subscriptions ever assigned by promoters.</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Farmer subscriptions assigned by promoters, net of refunds.
+              {summary.refunded_total > 0 && (
+                <> {' '}({summary.consumed_gross.toLocaleString('en-IN')} assigned − {summary.refunded_total.toLocaleString('en-IN')} refunded)</>
+              )}
+            </p>
           </div>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
             <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Currently Active</p>
