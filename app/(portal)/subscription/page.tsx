@@ -74,6 +74,20 @@ interface PoolBalance {
   enterprise_to_date?: string | null
 }
 
+interface PoolSummary {
+  purchased_total: number
+  consumed_total: number
+  active_subscriptions: number
+}
+
+interface PoolHistoryRow {
+  id: string
+  purchased_at: string
+  units_purchased: number
+  amount_paid_paise: number | null
+  note: string | null
+}
+
 function formatClosureDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
 }
@@ -128,6 +142,10 @@ export default function SubscriptionPage() {
   const [allocError, setAllocError] = useState('')
   const [allocBusy, setAllocBusy] = useState<string>('')   // promoter_user_id currently being mutated
   const [newPromoterPhone, setNewPromoterPhone] = useState('')
+
+  // Lifetime summary + purchase history (2026-07-14)
+  const [summary, setSummary] = useState<PoolSummary | null>(null)
+  const [history, setHistory] = useState<PoolHistoryRow[]>([])
   const [newPromoterUnits, setNewPromoterUnits] = useState('')
   const [newPromoterBusy, setNewPromoterBusy] = useState(false)
 
@@ -152,9 +170,37 @@ export default function SubscriptionPage() {
       .finally(() => setAllocLoading(false))
   }
 
-  useEffect(() => {
+  const loadSummary = () => {
+    if (!clientId) return
+    api.get<PoolSummary>(`/client/${clientId}/subscription-pool/summary`)
+      .then(r => setSummary(r.data))
+      .catch(() => setSummary(null))
+  }
+
+  const loadHistory = () => {
+    if (!clientId) return
+    api.get<PoolHistoryRow[]>(`/client/${clientId}/subscription-pool/history`)
+      .then(r => setHistory(r.data))
+      .catch(() => setHistory([]))
+  }
+
+  const refreshAll = () => {
     loadBalance()
     loadAllocations()
+    loadSummary()
+    loadHistory()
+  }
+
+  useEffect(() => {
+    refreshAll()
+    // Refresh whenever the page regains focus so a subscription that
+    // was consumed on the promoter PWA (a different tab / another
+    // teammate's session) reflects on the CA within one tab-switch,
+    // without a websocket for a cadence this low.
+    const onFocus = () => refreshAll()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId])
 
   // ── Promoter allocation actions ─────────────────────────────────────────
@@ -170,6 +216,8 @@ export default function SubscriptionPage() {
         { units: delta },
       )
       loadAllocations()
+      loadBalance()   // company unallocated moved in either direction
+      loadSummary()
     } catch (err: unknown) {
       setAllocError(extractErrorMessage(err, `Could not ${kind}.`))
     } finally {
@@ -197,6 +245,8 @@ export default function SubscriptionPage() {
       )
       setNewPromoterPhone(''); setNewPromoterUnits('')
       loadAllocations()
+      loadBalance()
+      loadSummary()
     } catch (err: unknown) {
       setAllocError(extractErrorMessage(err, 'Could not add this promoter.'))
     } finally {
@@ -276,6 +326,8 @@ export default function SubscriptionPage() {
             setBalance(verified.balance)
             setUnits('100')
             loadAllocations()  // company unallocated balance just grew
+            loadSummary()      // purchased_total climbs
+            loadHistory()      // new SubscriptionPool row appears at top
           } catch (err: unknown) {
             setError(extractErrorMessage(err, 'Payment verification failed. Contact support with your Razorpay payment ID.'))
           } finally {
@@ -350,14 +402,37 @@ export default function SubscriptionPage() {
           </>
         ) : (
           <>
-            <p className="text-white/70 text-sm">Available Units</p>
+            <p className="text-white/70 text-sm">Available to Allocate</p>
             <p className="text-5xl font-bold mt-1">{loading ? '…' : balance?.toLocaleString()}</p>
             <p className="text-white/60 text-sm mt-2">
-              Each unit allows one farmer to subscribe to one Package of Practices
+              Units in the pool that are not yet allocated to any promoter.
             </p>
           </>
         )}
       </div>
+
+      {/* Lifetime rollup strip — visible in both EL and non-EL modes so
+          the CA always has the "since day one" view of purchases and
+          consumption. Hidden while summary is still loading. */}
+      {summary && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Total Purchased</p>
+            <p className="text-2xl font-bold text-slate-900 mt-1">{summary.purchased_total.toLocaleString('en-IN')}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Since day one · includes any SA-granted units.</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Total Consumed</p>
+            <p className="text-2xl font-bold text-slate-900 mt-1">{summary.consumed_total.toLocaleString('en-IN')}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Farmer subscriptions ever assigned by promoters.</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Currently Active</p>
+            <p className="text-2xl font-bold text-slate-900 mt-1">{summary.active_subscriptions.toLocaleString('en-IN')}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Live farmer subscriptions running right now.</p>
+          </div>
+        </div>
+      )}
 
       {/* How it works — hidden during EL since units don't apply */}
       {!unlimited && (
@@ -553,6 +628,51 @@ export default function SubscriptionPage() {
         </div>
       </div>
       )}
+
+      {/* Purchase history — date-wise ledger. Shown always (even during
+          EL, since the ledger is factual history of units-in events). */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
+        <h3 className="font-semibold text-slate-800 mb-1">Purchase History</h3>
+        <p className="text-xs text-slate-400 mb-4">
+          Every top-up added to your pool, newest first.
+        </p>
+        {history.length === 0 ? (
+          <p className="text-sm text-slate-500">No purchases yet.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-slate-500 text-left">
+                  <th className="px-2 py-1.5 font-medium">Date</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Units</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Amount</th>
+                  <th className="px-2 py-1.5 font-medium">Reference</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(h => (
+                  <tr key={h.id} className="border-t border-slate-50">
+                    <td className="px-2 py-2 text-slate-700 whitespace-nowrap">
+                      {new Date(h.purchased_at).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="px-2 py-2 text-right font-semibold text-slate-900">
+                      +{h.units_purchased.toLocaleString('en-IN')}
+                    </td>
+                    <td className="px-2 py-2 text-right text-slate-700 whitespace-nowrap">
+                      {h.amount_paid_paise != null
+                        ? `₹${formatINR(h.amount_paid_paise / 100)}`
+                        : <span className="text-slate-400">—</span>}
+                    </td>
+                    <td className="px-2 py-2 text-slate-500 text-xs break-all">
+                      {h.note || <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
