@@ -405,6 +405,12 @@ export function PracticeFormModal({
           method,
           dosage_unit: dosageUnit,
         })
+        // 2026-07-14 — pass COMMON_NAME so the backend can also flag
+        // the phase-mismatch case (ml/L dosage on a common name whose
+        // only brands are solid formulations, etc.). Mirror of the
+        // SA-portal edit.
+        const commonNameRef = elementValues['COMMON_NAME'] || ''
+        if (commonNameRef) qs.set('common_name', commonNameRef)
         const { data } = await api.get<{ verdict: string; message: string | null }>(
           `/practice-taxonomy/check-volume-formula?${qs}`,
         )
@@ -421,6 +427,7 @@ export function PracticeFormModal({
     timelineId,
     elementValues['APPLICATION_METHOD'],
     elementValues['DOSAGE_UNIT'],
+    elementValues['COMMON_NAME'],
   ])
 
   // Brand cascade — Common Name → MFR / TN bidirectional + F / a.i.
