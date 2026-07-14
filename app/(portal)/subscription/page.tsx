@@ -52,6 +52,7 @@ interface PromoterAllocationRow {
   allocated_total: number
   reclaimed_total: number
   consumed_total: number
+  refunded_total: number
 }
 
 interface AllocationsResponse {
@@ -710,10 +711,10 @@ function PromoterRow({
         )}
       </td>
       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
-        {row.allocated_total.toLocaleString('en-IN')}
+        {(row.allocated_total - row.reclaimed_total).toLocaleString('en-IN')}
       </td>
       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
-        {row.consumed_total.toLocaleString('en-IN')}
+        {(row.consumed_total - row.refunded_total).toLocaleString('en-IN')}
       </td>
       <td className="px-2 py-2.5 text-right tabular-nums font-semibold text-slate-900">
         {row.units_balance.toLocaleString('en-IN')}
