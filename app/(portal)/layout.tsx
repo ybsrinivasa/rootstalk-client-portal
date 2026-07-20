@@ -173,7 +173,12 @@ const ROLE_NAV: Record<string, string[]> = {
   // error surfacing.
   SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/seed'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager'],
-  CLIENT_RM:        ['/dashboard', '/alerts', '/field-manager'],
+  // CLIENT_RM scoped to Alerts (2026-07-20 user direction). Previously
+  // also had /field-manager access; the backend gate
+  // _assert_ca_or_field_manager now rejects CLIENT_RM on those
+  // endpoints, so keeping the sidebar link would produce a 403 on
+  // every click. Alerts is the RM's whole surface.
+  CLIENT_RM:        ['/dashboard', '/alerts'],
   // Legacy: pre Batch X migration, SDM was its own role. Kept here
   // for any straggler accounts; safe no-op now.
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
