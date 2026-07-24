@@ -71,6 +71,14 @@ function IconQR() {
     </svg>
   )
 }
+function IconTraining() {
+  return (
+    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
+    </svg>
+  )
+}
 function IconUsers() {
   return (
     <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
@@ -146,6 +154,11 @@ const ALL_NAV: NavItem[] = [
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
   { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA', manufacturerOrSeedOnly: true },
+  // 2026-07-24 — Training Sandbox V1. CA-only surface for starting/
+  // ending a 12-day practice session. Shows current session status
+  // + counts + End button, or a Start button when no session is
+  // running. Backend endpoints in app/modules/clients/training_router.py.
+  { href: '/training',           label: 'Training Sandbox',  Icon: IconTraining,     group: 'DATA', caOnly: true },
   { href: '/farm-pundits',       label: 'FarmPundits',       Icon: IconFarmPundits,  group: 'PORTAL', caOnly: true },
   { href: '/users',              label: 'Users',             Icon: IconUsers,        group: 'PORTAL' },
   { href: '/setup',              label: 'Setup',             Icon: IconSetup,        group: 'PORTAL' },
