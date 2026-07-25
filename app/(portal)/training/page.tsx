@@ -19,7 +19,14 @@
 // Backend endpoints:
 //   GET  /client/{cid}/training/current   — session + counts (or {}).
 //   POST /client/{cid}/training/start     — creates the child.
-//   POST /client/{cid}/training/end       — flips to WINDING_DOWN.
+//   POST /client/{cid}/training/end       — HARD close (cascade-deletes now).
+//   2026-07-25 — Switched from soft to hard close per team feedback:
+//   the DB unique index covers both ACTIVE + WINDING_DOWN, so the
+//   old soft-close blocked the CA from starting a fresh session for
+//   ~25h. Hard-close runs the cascade synchronously and frees the
+//   unique-index slot within seconds. WINDING_DOWN state is now
+//   unreachable via the End button (still reachable via the 12-day
+//   auto-expiry sweep, which keeps its 24h grace).
 
 import { useCallback, useEffect, useState } from 'react'
 import { getClient } from '@/lib/auth'
@@ -111,7 +118,7 @@ export default function TrainingSandboxPage() {
 
   const onEnd = useCallback(async () => {
     if (!clientId || busy) return
-    if (!confirm('End the training session now? In-flight orders and queries have 24 hours to complete; after that the sandbox is cleared.')) return
+    if (!confirm('End the training session now? All practice subscriptions, orders, and queries under it will be cleared immediately. This cannot be undone.')) return
     setBusy('end'); setError('')
     try {
       await api.post(`/client/${clientId}/training/end`, {})
@@ -154,8 +161,9 @@ export default function TrainingSandboxPage() {
           <p className="text-sm text-slate-600 mt-2 max-w-md mx-auto">
             Start one when your team is ready. The session lasts 12
             days from creation; after that it winds down over 24 hours
-            and everything under it (subscriptions, orders, queries) is
-            cleared automatically.
+            and everything under it (subscriptions, orders, queries)
+            is cleared automatically. You can also end it earlier at
+            any time — the clear happens immediately.
           </p>
           <button
             onClick={onStart}
