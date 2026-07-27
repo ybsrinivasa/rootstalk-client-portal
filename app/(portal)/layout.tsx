@@ -115,6 +115,13 @@ function IconCard() {
     </svg>
   )
 }
+function IconReports() {
+  return (
+    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a1 1 0 011-1h4a1 1 0 011 1v6m-7 0h8m-8 0H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v11a2 2 0 01-2 2h-3M9 7h1m4 0h1m-6 4h1m4 0h1" />
+    </svg>
+  )
+}
 function IconTrash() {
   return (
     <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
@@ -141,6 +148,13 @@ interface NavItem {
 
 const ALL_NAV: NavItem[] = [
   { href: '/dashboard',          label: 'Dashboard',                Icon: IconHome,         group: 'PORTAL' },
+  // 2026-07-27 — Client Reports Phase 1 (vertical slice). Today the
+  // entry points at /reports/subscriptions because that's the only
+  // subject wired end-to-end; when the Overview page lands, flip
+  // href to /reports. Backend: app/modules/reports/dashboard_router.py.
+  // Access: CA, REPORT_USER, SA-email, CM(EDIT) — see
+  // _assert_client_report_reader in app/modules/reports/access.py.
+  { href: '/reports/subscriptions', label: 'Reports',               Icon: IconReports,      group: 'PORTAL' },
   // 2026-05-17 — one entry per pipe (mirror of SA Global CCA's
   // single "CCA · Crops" entry pattern). Each entry is the
   // drill-down entry point; deeper pages (packages / timelines /
@@ -196,7 +210,7 @@ const ROLE_NAV: Record<string, string[]> = {
   // for any straggler accounts; safe no-op now.
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
   PRODUCT_MANAGER:  ['/dashboard', '/qr'],
-  REPORT_USER:      ['/dashboard'],
+  REPORT_USER:      ['/dashboard', '/reports/subscriptions'],
 }
 
 const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
