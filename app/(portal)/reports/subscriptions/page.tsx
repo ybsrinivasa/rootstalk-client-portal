@@ -139,16 +139,25 @@ function SubscriptionsReportInner() {
         </p>
       </header>
 
-      {/* Filter chip row */}
+      {/* Filter chip row.
+          Native <select> would auto-size to the WIDEST option in its
+          dropdown (long package names blew the Package chip to full
+          width, wrapping the row). We layer the select as an invisible
+          overlay on top of the label so the pill sizes to the DISPLAYED
+          text — short — while keeping every native affordance
+          (keyboard, mobile picker, ARIA). */}
       <div className="flex flex-wrap gap-2 items-center">
         {CHIPS.map(chip => {
           const opts = options?.[chip.optionsKey] ?? []
           const value = filterValues[chip.urlKey]
           const isSet = !!value
+          const selectedLabel = isSet
+            ? (opts.find(o => o.id === value)?.name ?? value)
+            : chip.allLabel
           return (
-            <label
+            <div
               key={chip.urlKey}
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors ${
+              className={`relative inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors ${
                 isSet
                   ? 'border-slate-800 bg-slate-800 text-white'
                   : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
@@ -157,31 +166,34 @@ function SubscriptionsReportInner() {
               <span className={`text-xs uppercase tracking-wider ${isSet ? 'text-white/70' : 'text-slate-400'}`}>
                 {chip.label}
               </span>
+              <span className="max-w-[10rem] truncate">
+                {selectedLabel}
+              </span>
               <select
                 value={value}
                 onChange={(e) => updateFilter(chip.urlKey, e.target.value)}
-                className={`bg-transparent border-0 outline-none appearance-none pr-1 text-sm ${
-                  isSet ? 'text-white' : 'text-slate-700'
-                }`}
+                aria-label={`Filter by ${chip.label}`}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               >
-                <option value="" className="text-slate-700">{chip.allLabel}</option>
+                <option value="">{chip.allLabel}</option>
                 {opts.map(o => (
-                  <option key={o.id} value={o.id} className="text-slate-700">
-                    {o.name}
-                  </option>
+                  <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
               </select>
               {isSet && (
                 <button
                   type="button"
-                  onClick={(e) => { e.preventDefault(); updateFilter(chip.urlKey, '') }}
-                  className="text-white/70 hover:text-white leading-none"
+                  onClick={(e) => {
+                    e.preventDefault(); e.stopPropagation()
+                    updateFilter(chip.urlKey, '')
+                  }}
+                  className="relative z-10 text-white/70 hover:text-white leading-none"
                   aria-label={`Clear ${chip.label} filter`}
                 >
                   ×
                 </button>
               )}
-            </label>
+            </div>
           )
         })}
         {anyFilter && (
