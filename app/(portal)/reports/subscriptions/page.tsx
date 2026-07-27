@@ -2,6 +2,11 @@
 
 // Client Reports — Subscriptions drill (Phase 1, vertical slice).
 //
+// Filters (2026-07-27): Crop · State · District · Package. Selected
+// values persist in the URL so a Report User can bookmark or share
+// a specific view. Period chip lands with the subs_new metric —
+// ACTIVE right-now has no period semantics.
+//
 // The only backend metric wired today is ACTIVE
 // (GET /client/{cid}/reports/subscriptions?metric=ACTIVE). Renders
 // the number in client.primary_colour so managers see "their own"
@@ -11,7 +16,8 @@
 // queries.py; add tabs / cards to this page then. Keep the current
 // page honest: nothing on screen we can't back with real data.
 
-import { useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
@@ -21,21 +27,79 @@ interface SubsActiveResponse {
   farmers: number
 }
 
+interface FilterOption {
+  id: string
+  name: string
+}
+
+interface FilterOptionsResponse {
+  crops: FilterOption[]
+  states: FilterOption[]
+  districts: FilterOption[]
+  packages: FilterOption[]
+}
+
+// URL param key ↔ backend query param + user-facing label
+const CHIPS = [
+  { urlKey: 'crop',     apiKey: 'crop_cosh_id',     optionsKey: 'crops' as const,     label: 'Crop',     allLabel: 'All crops' },
+  { urlKey: 'state',    apiKey: 'state_cosh_id',    optionsKey: 'states' as const,    label: 'State',    allLabel: 'All states' },
+  { urlKey: 'district', apiKey: 'district_cosh_id', optionsKey: 'districts' as const, label: 'District', allLabel: 'All districts' },
+  { urlKey: 'package',  apiKey: 'package_id',       optionsKey: 'packages' as const,  label: 'Package',  allLabel: 'All packages' },
+] as const
+
 export default function SubscriptionsReportPage() {
+  // useSearchParams needs a Suspense boundary for static prerendering
+  // in Next 15. See: https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout
+  return (
+    <Suspense fallback={<div className="text-slate-400 text-sm">Loading…</div>}>
+      <SubscriptionsReportInner />
+    </Suspense>
+  )
+}
+
+function SubscriptionsReportInner() {
   const client = getClient()
   const clientId = client?.id
   const accent = client?.primary_colour || '#1A5C2A'
 
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Filter values read straight from the URL — no local state to
+  // fall out of sync with the URL bar.
+  const filterValues = useMemo(
+    () => Object.fromEntries(
+      CHIPS.map(c => [c.urlKey, searchParams.get(c.urlKey) || '']),
+    ) as Record<typeof CHIPS[number]['urlKey'], string>,
+    [searchParams],
+  )
+
   const [data, setData] = useState<SubsActiveResponse | null>(null)
+  const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Fetch filter chip options once per client.
+  useEffect(() => {
+    if (!clientId) return
+    api
+      .get<FilterOptionsResponse>(`/client/${clientId}/reports/filter-options`)
+      .then(({ data }) => setOptions(data))
+      .catch(() => { /* filter chips will just be empty; page still works */ })
+  }, [clientId])
+
+  // Fetch metric whenever any filter changes.
   useEffect(() => {
     if (!clientId) return
     setLoading(true); setError('')
+    const q = new URLSearchParams({ metric: 'ACTIVE' })
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) q.set(chip.apiKey, v)
+    }
     api
       .get<SubsActiveResponse>(
-        `/client/${clientId}/reports/subscriptions?metric=ACTIVE`,
+        `/client/${clientId}/reports/subscriptions?${q.toString()}`,
       )
       .then(({ data }) => setData(data))
       .catch((err) =>
@@ -44,7 +108,21 @@ export default function SubscriptionsReportPage() {
         ),
       )
       .finally(() => setLoading(false))
-  }, [clientId])
+  }, [clientId, filterValues])
+
+  const updateFilter = useCallback((urlKey: string, value: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (value) params.set(urlKey, value)
+    else params.delete(urlKey)
+    const qs = params.toString()
+    router.replace(qs ? `?${qs}` : '?')
+  }, [router, searchParams])
+
+  const clearAll = useCallback(() => {
+    router.replace('?')
+  }, [router])
+
+  const anyFilter = CHIPS.some(c => filterValues[c.urlKey])
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -60,6 +138,62 @@ export default function SubscriptionsReportPage() {
           and cleaned-up entries are excluded automatically.
         </p>
       </header>
+
+      {/* Filter chip row */}
+      <div className="flex flex-wrap gap-2 items-center">
+        {CHIPS.map(chip => {
+          const opts = options?.[chip.optionsKey] ?? []
+          const value = filterValues[chip.urlKey]
+          const isSet = !!value
+          return (
+            <label
+              key={chip.urlKey}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors ${
+                isSet
+                  ? 'border-slate-800 bg-slate-800 text-white'
+                  : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
+              }`}
+            >
+              <span className={`text-xs uppercase tracking-wider ${isSet ? 'text-white/70' : 'text-slate-400'}`}>
+                {chip.label}
+              </span>
+              <select
+                value={value}
+                onChange={(e) => updateFilter(chip.urlKey, e.target.value)}
+                className={`bg-transparent border-0 outline-none appearance-none pr-1 text-sm ${
+                  isSet ? 'text-white' : 'text-slate-700'
+                }`}
+              >
+                <option value="" className="text-slate-700">{chip.allLabel}</option>
+                {opts.map(o => (
+                  <option key={o.id} value={o.id} className="text-slate-700">
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              {isSet && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); updateFilter(chip.urlKey, '') }}
+                  className="text-white/70 hover:text-white leading-none"
+                  aria-label={`Clear ${chip.label} filter`}
+                >
+                  ×
+                </button>
+              )}
+            </label>
+          )
+        })}
+        {anyFilter && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 ml-1"
+          >
+            Clear all
+          </button>
+        )}
+      </div>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
