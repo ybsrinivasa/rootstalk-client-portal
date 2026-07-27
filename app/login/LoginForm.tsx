@@ -1,7 +1,7 @@
 'use client'
 import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { login, getToken, setClient, CPClient } from '@/lib/auth'
+import { login, getToken, getUser, setClient, landingRouteForUser, CPClient } from '@/lib/auth'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 
@@ -41,7 +41,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (getToken()) router.replace('/dashboard')
+    if (getToken()) router.replace(landingRouteForUser(getUser()))
   }, [router])
 
   // Branded entry: auto-fetch the company's branding so the
@@ -104,7 +104,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
             }
         setClient(authoritative)
       }
-      router.replace('/dashboard')
+      router.replace(landingRouteForUser(me))
     } catch (err: unknown) {
       setError(extractErrorMessage(err, 'Invalid email or password.'))
     } finally { setLoading(false) }
@@ -152,7 +152,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
             }
         setClient(authoritative)
       }
-      router.replace('/dashboard')
+      router.replace(landingRouteForUser(getUser()))
     } catch (err: unknown) {
       setError(extractErrorMessage(err, 'Invalid or expired code'))
     } finally { setLoading(false) }

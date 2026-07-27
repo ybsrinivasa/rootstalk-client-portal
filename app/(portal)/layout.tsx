@@ -210,7 +210,12 @@ const ROLE_NAV: Record<string, string[]> = {
   // for any straggler accounts; safe no-op now.
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
   PRODUCT_MANAGER:  ['/dashboard', '/qr'],
-  REPORT_USER:      ['/dashboard', '/reports/subscriptions'],
+  // REPORT_USER does NOT get /dashboard — the dashboard fetches
+  // packages/pool/alerts, all behind _assert_can_view_client_advisory
+  // (SUBJECT_EXPERT + CA + CM-EDIT only). A REPORT_USER-only account
+  // would 403 on every tile. Post-login lands them straight on
+  // /reports/subscriptions via landingRouteForUser (see lib/auth.ts).
+  REPORT_USER:      ['/reports/subscriptions'],
 }
 
 const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
