@@ -17,7 +17,7 @@
 // page honest: nothing on screen we can't back with real data.
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
@@ -63,6 +63,7 @@ function SubscriptionsReportInner() {
   const accent = client?.primary_colour || '#1A5C2A'
 
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
 
   // Filter values read straight from the URL — no local state to
@@ -110,17 +111,20 @@ function SubscriptionsReportInner() {
       .finally(() => setLoading(false))
   }, [clientId, filterValues])
 
+  // NOTE: router.replace() needs the pathname when the query is empty.
+  // Passing just "?" is a no-op — the browser treats it as the same
+  // URL and skips the navigation, so the chip clear never re-renders.
   const updateFilter = useCallback((urlKey: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString())
     if (value) params.set(urlKey, value)
     else params.delete(urlKey)
     const qs = params.toString()
-    router.replace(qs ? `?${qs}` : '?')
-  }, [router, searchParams])
+    router.replace(qs ? `${pathname}?${qs}` : pathname)
+  }, [router, pathname, searchParams])
 
   const clearAll = useCallback(() => {
-    router.replace('?')
-  }, [router])
+    router.replace(pathname)
+  }, [router, pathname])
 
   const anyFilter = CHIPS.some(c => filterValues[c.urlKey])
 
@@ -151,8 +155,13 @@ function SubscriptionsReportInner() {
           const opts = options?.[chip.optionsKey] ?? []
           const value = filterValues[chip.urlKey]
           const isSet = !!value
+          // While options are loading, show a placeholder instead of
+          // the raw UUID from the URL — otherwise the chip briefly
+          // renders "…4116-4d01-8c06-…" before the friendly name resolves.
           const selectedLabel = isSet
-            ? (opts.find(o => o.id === value)?.name ?? value)
+            ? (options
+                ? (opts.find(o => o.id === value)?.name ?? value)
+                : '…')
             : chip.allLabel
           return (
             <div
@@ -169,11 +178,18 @@ function SubscriptionsReportInner() {
               <span className="max-w-[10rem] truncate">
                 {selectedLabel}
               </span>
+              {/* Select overlay: covers the LABEL + VALUE area only,
+                  leaving the × button (when present) outside so the
+                  clear click never falls through to the select. When
+                  no × is showing, right-0 makes the overlay fill the
+                  whole pill so opening the dropdown works everywhere. */}
               <select
                 value={value}
                 onChange={(e) => updateFilter(chip.urlKey, e.target.value)}
                 aria-label={`Filter by ${chip.label}`}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                className={`absolute top-0 bottom-0 left-0 opacity-0 cursor-pointer ${
+                  isSet ? 'right-8' : 'right-0'
+                }`}
               >
                 <option value="">{chip.allLabel}</option>
                 {opts.map(o => (
@@ -187,7 +203,7 @@ function SubscriptionsReportInner() {
                     e.preventDefault(); e.stopPropagation()
                     updateFilter(chip.urlKey, '')
                   }}
-                  className="relative z-10 text-white/70 hover:text-white leading-none"
+                  className="relative z-10 text-white/70 hover:text-white leading-none px-1"
                   aria-label={`Clear ${chip.label} filter`}
                 >
                   ×
