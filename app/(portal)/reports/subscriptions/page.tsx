@@ -16,8 +16,8 @@
 // queries.py; add tabs / cards to this page then. Keep the current
 // page honest: nothing on screen we can't back with real data.
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useState } from 'react'
+import { usePathname, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
@@ -57,23 +57,31 @@ export default function SubscriptionsReportPage() {
   )
 }
 
+type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
+
+const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
+
 function SubscriptionsReportInner() {
   const client = getClient()
   const clientId = client?.id
   const accent = client?.primary_colour || '#1A5C2A'
 
-  const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  // Filter values read straight from the URL — no local state to
-  // fall out of sync with the URL bar.
-  const filterValues = useMemo(
-    () => Object.fromEntries(
-      CHIPS.map(c => [c.urlKey, searchParams.get(c.urlKey) || '']),
-    ) as Record<typeof CHIPS[number]['urlKey'], string>,
-    [searchParams],
-  )
+  // Filter values live in local state; URL is a side-effect for
+  // bookmarking. We deliberately do NOT drive the UI through
+  // useRouter/useSearchParams — Next 15 shallow-navigation on the same
+  // pathname was skipping re-renders and the chip clears did nothing
+  // (2026-07-27 staging bug). window.history.replaceState updates the
+  // URL bar without touching the router, and useState guarantees the
+  // re-render.
+  const [filterValues, setFilterValues] = useState<FilterValues>(() => ({
+    crop:     searchParams.get('crop')     || '',
+    state:    searchParams.get('state')    || '',
+    district: searchParams.get('district') || '',
+    package:  searchParams.get('package')  || '',
+  }))
 
   const [data, setData] = useState<SubsActiveResponse | null>(null)
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
@@ -111,20 +119,27 @@ function SubscriptionsReportInner() {
       .finally(() => setLoading(false))
   }, [clientId, filterValues])
 
-  // NOTE: router.replace() needs the pathname when the query is empty.
-  // Passing just "?" is a no-op — the browser treats it as the same
-  // URL and skips the navigation, so the chip clear never re-renders.
-  const updateFilter = useCallback((urlKey: string, value: string) => {
-    const params = new URLSearchParams(searchParams.toString())
-    if (value) params.set(urlKey, value)
-    else params.delete(urlKey)
+  // Sync URL bar to filter state so bookmarks + shares keep working.
+  useEffect(() => {
+    const params = new URLSearchParams()
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) params.set(chip.urlKey, v)
+    }
     const qs = params.toString()
-    router.replace(qs ? `${pathname}?${qs}` : pathname)
-  }, [router, pathname, searchParams])
+    const target = qs ? `${pathname}?${qs}` : pathname
+    if (window.location.pathname + window.location.search !== target) {
+      window.history.replaceState(null, '', target)
+    }
+  }, [pathname, filterValues])
+
+  const updateFilter = useCallback((urlKey: keyof FilterValues, value: string) => {
+    setFilterValues(prev => ({ ...prev, [urlKey]: value }))
+  }, [])
 
   const clearAll = useCallback(() => {
-    router.replace(pathname)
-  }, [router, pathname])
+    setFilterValues(EMPTY_FILTERS)
+  }, [])
 
   const anyFilter = CHIPS.some(c => filterValues[c.urlKey])
 
