@@ -37,7 +37,6 @@ interface OrdersItemsResponse {
 interface OrdersBrandMixResponse {
   locked: number
   unlocked: number
-  no_brand: number
 }
 
 interface FilterOption {
@@ -272,10 +271,8 @@ function ItemsCard({
   )
 }
 
-// Brand mix palette. Locked = brand accent (the "clean" case —
-// specific SKU chosen). Unlocked = amber (matches Routing / Items
-// palette — dealer typed something free-form, a Missing Brand
-// candidate). No-brand = slate-400 (neutral, missing data).
+// Brand mix palette. Locked = brand accent (specific SKU tied).
+// Unlocked = amber (matches Routing/Items pattern — no SKU yet).
 function BrandMixCard({
   data, loading, accent, periodLabel,
 }: {
@@ -284,11 +281,10 @@ function BrandMixCard({
   accent: string
   periodLabel: string
 }) {
-  const total = data ? data.locked + data.unlocked + data.no_brand : 0
+  const total = data ? data.locked + data.unlocked : 0
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0)
   const LOCKED_COLOUR   = accent
   const UNLOCKED_COLOUR = VIA_FACILITATOR_COLOUR
-  const NO_BRAND_COLOUR = PENDING_COLOUR
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
       <p className="text-sm font-medium text-slate-500">Brand Mix</p>
@@ -314,32 +310,23 @@ function BrandMixCard({
               />
               {data.unlocked.toLocaleString()} unlocked
             </span>
-            <span className="flex items-center gap-1.5 text-slate-600">
-              <span
-                className="inline-block w-2 h-2 rounded-full"
-                style={{ backgroundColor: NO_BRAND_COLOUR }}
-              />
-              {data.no_brand.toLocaleString()} no-brand
-            </span>
           </div>
           {total > 0 && (
             <div
               className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-slate-100"
-              aria-label={
-                `${data.locked} locked, ${data.unlocked} unlocked, ${data.no_brand} no-brand`
-              }
+              aria-label={`${data.locked} locked, ${data.unlocked} unlocked`}
             >
               <div className="h-full" style={{ width: `${pct(data.locked)}%`,   backgroundColor: LOCKED_COLOUR }} />
               <div className="h-full" style={{ width: `${pct(data.unlocked)}%`, backgroundColor: UNLOCKED_COLOUR }} />
-              <div className="h-full" style={{ width: `${pct(data.no_brand)}%`, backgroundColor: NO_BRAND_COLOUR }} />
             </div>
           )}
         </>
       ) : null}
       <p className="mt-3 text-xs text-slate-400">
-        {periodLabel}. Locked = specific SKU chosen; Unlocked =
-        dealer typed a free-text brand not linked to a SKU;
-        No-brand = neither field filled (often not yet fulfilled).
+        {periodLabel}. Locked = a specific SKU is tied to the item
+        (from advisory, or picked by the dealer at fulfilment).
+        Unlocked = no specific SKU is tied — advisory left the
+        brand open, or the item isn't fulfilled yet.
       </p>
     </div>
   )
