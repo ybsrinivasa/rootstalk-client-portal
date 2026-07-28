@@ -36,7 +36,8 @@ interface OrdersItemsResponse {
 
 interface OrdersBrandMixResponse {
   locked: number
-  unlocked: number
+  recommended: number
+  open: number
 }
 
 interface FilterOption {
@@ -271,8 +272,10 @@ function ItemsCard({
   )
 }
 
-// Brand mix palette. Locked = brand accent (specific SKU tied).
-// Unlocked = amber (matches Routing/Items pattern — no SKU yet).
+// Brand mix palette. Locked = brand accent (direct business the
+// client captured). Recommended = amber (SE guided but dealer can
+// substitute). Open = slate (dealer's free choice). Classification
+// is on SE AUTHORING intent (Practice), not on what the dealer sold.
 function BrandMixCard({
   data, loading, accent, periodLabel,
 }: {
@@ -281,10 +284,11 @@ function BrandMixCard({
   accent: string
   periodLabel: string
 }) {
-  const total = data ? data.locked + data.unlocked : 0
+  const total = data ? data.locked + data.recommended + data.open : 0
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0)
-  const LOCKED_COLOUR   = accent
-  const UNLOCKED_COLOUR = VIA_FACILITATOR_COLOUR
+  const LOCKED_COLOUR      = accent
+  const RECOMMENDED_COLOUR = VIA_FACILITATOR_COLOUR
+  const OPEN_COLOUR        = PENDING_COLOUR
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
       <p className="text-sm font-medium text-slate-500">Brand Mix</p>
@@ -306,27 +310,38 @@ function BrandMixCard({
             <span className="flex items-center gap-1.5 text-slate-600">
               <span
                 className="inline-block w-2 h-2 rounded-full"
-                style={{ backgroundColor: UNLOCKED_COLOUR }}
+                style={{ backgroundColor: RECOMMENDED_COLOUR }}
               />
-              {data.unlocked.toLocaleString()} unlocked
+              {data.recommended.toLocaleString()} recommended
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: OPEN_COLOUR }}
+              />
+              {data.open.toLocaleString()} open
             </span>
           </div>
           {total > 0 && (
             <div
               className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-slate-100"
-              aria-label={`${data.locked} locked, ${data.unlocked} unlocked`}
+              aria-label={
+                `${data.locked} locked, ${data.recommended} recommended, ${data.open} open`
+              }
             >
-              <div className="h-full" style={{ width: `${pct(data.locked)}%`,   backgroundColor: LOCKED_COLOUR }} />
-              <div className="h-full" style={{ width: `${pct(data.unlocked)}%`, backgroundColor: UNLOCKED_COLOUR }} />
+              <div className="h-full" style={{ width: `${pct(data.locked)}%`,      backgroundColor: LOCKED_COLOUR }} />
+              <div className="h-full" style={{ width: `${pct(data.recommended)}%`, backgroundColor: RECOMMENDED_COLOUR }} />
+              <div className="h-full" style={{ width: `${pct(data.open)}%`,        backgroundColor: OPEN_COLOUR }} />
             </div>
           )}
         </>
       ) : null}
       <p className="mt-3 text-xs text-slate-400">
-        {periodLabel}. Locked = a specific SKU is tied to the item
-        (from advisory, or picked by the dealer at fulfilment).
-        Unlocked = no specific SKU is tied — advisory left the
-        brand open, or the item isn't fulfilled yet.
+        {periodLabel}. Classified by what your Subject Expert
+        authored on the practice — Locked = dealer must sell your
+        specific brand (direct business); Recommended = you named a
+        brand, dealer can substitute; Open = only the common name,
+        dealer picks freely.
       </p>
     </div>
   )
