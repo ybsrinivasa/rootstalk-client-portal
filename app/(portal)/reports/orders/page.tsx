@@ -23,6 +23,11 @@ interface OrdersCountResponse {
   farmers: number
 }
 
+interface OrdersRoutingResponse {
+  direct: number
+  via_facilitator: number
+}
+
 interface FilterOption {
   id: string
   name: string
@@ -92,6 +97,59 @@ function periodDates(
   return {}
 }
 
+function RoutingCard({
+  data, loading, accent, periodLabel,
+}: {
+  data: OrdersRoutingResponse | null
+  loading: boolean
+  accent: string
+  periodLabel: string
+}) {
+  const total = data ? data.direct + data.via_facilitator : 0
+  const directPct = total > 0 ? Math.round((data!.direct / total) * 100) : 0
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+      <p className="text-sm font-medium text-slate-500">Order Routing</p>
+      {loading ? (
+        <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
+      ) : data ? (
+        <>
+          <div className="mt-3 flex items-baseline gap-6">
+            <div>
+              <p className="text-3xl font-bold tabular-nums" style={{ color: accent }}>
+                {data.direct.toLocaleString()}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">Direct</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold tabular-nums text-slate-700">
+                {data.via_facilitator.toLocaleString()}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">Via Facilitator</p>
+            </div>
+          </div>
+          {total > 0 && (
+            <div
+              className="mt-4 flex h-2 w-full overflow-hidden rounded-full bg-slate-200"
+              aria-label={`Direct ${directPct}%, Via Facilitator ${100 - directPct}%`}
+            >
+              <div
+                className="h-full"
+                style={{ width: `${directPct}%`, backgroundColor: accent }}
+              />
+              <div className="h-full bg-slate-500" style={{ width: `${100 - directPct}%` }} />
+            </div>
+          )}
+        </>
+      ) : null}
+      <p className="mt-3 text-xs text-slate-400">
+        {periodLabel}. Direct = farmer ordered from a dealer straight;
+        Via Facilitator = a facilitator forwarded the order.
+      </p>
+    </div>
+  )
+}
+
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
 
@@ -125,6 +183,7 @@ function OrdersReportInner() {
   const [customTo,   setCustomTo]   = useState<string>(() => searchParams.get('to')   || '')
 
   const [count, setCount] = useState<OrdersCountResponse | null>(null)
+  const [routing, setRouting] = useState<OrdersRoutingResponse | null>(null)
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -140,20 +199,27 @@ function OrdersReportInner() {
   useEffect(() => {
     if (!clientId) return
     setLoading(true); setError('')
-    const q = new URLSearchParams()
+    const filterParams = new URLSearchParams()
     for (const chip of CHIPS) {
       const v = filterValues[chip.urlKey]
-      if (v) q.set(chip.apiKey, v)
+      if (v) filterParams.set(chip.apiKey, v)
     }
     const { from, to } = periodDates(period, customFrom, customTo)
-    if (from) q.set('period_from', from.toISOString())
-    if (to)   q.set('period_to',   to.toISOString())
-    q.set('metric', 'COUNT')
-    api
-      .get<OrdersCountResponse>(
-        `/client/${clientId}/reports/orders?${q.toString()}`,
-      )
-      .then(({ data }) => setCount(data))
+    if (from) filterParams.set('period_from', from.toISOString())
+    if (to)   filterParams.set('period_to',   to.toISOString())
+    const url = (metric: 'COUNT' | 'ROUTING') => {
+      const q = new URLSearchParams(filterParams)
+      q.set('metric', metric)
+      return `/client/${clientId}/reports/orders?${q.toString()}`
+    }
+    Promise.all([
+      api.get<OrdersCountResponse>(url('COUNT')),
+      api.get<OrdersRoutingResponse>(url('ROUTING')),
+    ])
+      .then(([countRes, routingRes]) => {
+        setCount(countRes.data)
+        setRouting(routingRes.data)
+      })
       .catch((err) =>
         setError(extractErrorMessage(err, 'Could not load orders report.')),
       )
@@ -358,11 +424,18 @@ function OrdersReportInner() {
             Approved / Completed).
           </p>
         </div>
+
+        <RoutingCard
+          data={routing}
+          loading={loading}
+          accent={accent}
+          periodLabel={periodLabel}
+        />
       </div>
 
       <p className="text-xs text-slate-400">
         Coming next — items, brand mix (Locked / Unlocked / No-brand),
-        routing (Direct vs Via Facilitator), and sale conversion.
+        and sale conversion.
       </p>
     </div>
   )
