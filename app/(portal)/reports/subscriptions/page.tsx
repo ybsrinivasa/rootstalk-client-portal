@@ -19,6 +19,40 @@ import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
 import { ExportCsvButton } from '@/components/reports/export-button'
+import { DrillPanel, type MetricConfig } from '@/components/reports/drill-panel'
+
+// Subscriptions drill metrics. Active is point-in-time, so TIME is
+// deliberately absent from its supported dimensions (backend also
+// enforces).
+const SUBS_DRILL_METRICS: readonly MetricConfig[] = [
+  {
+    key: 'ACTIVE',
+    label: 'Active',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE'],
+    renderRow: (r) => ({
+      primary: r.subscriptions,
+      caption: `${r.farmers.toLocaleString()} farmer${r.farmers === 1 ? '' : 's'}`,
+    }),
+  },
+  {
+    key: 'TOTAL',
+    label: 'Total',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'TIME'],
+    renderRow: (r) => ({
+      primary: r.subscriptions,
+      caption: `${r.farmers.toLocaleString()} farmer${r.farmers === 1 ? '' : 's'}`,
+    }),
+  },
+  {
+    key: 'NEW',
+    label: 'New',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'TIME'],
+    renderRow: (r) => ({
+      primary: r.relationships,
+      caption: `${r.farmers.toLocaleString()} first-time farmer${r.farmers === 1 ? '' : 's'}`,
+    }),
+  },
+]
 
 interface SubsMetricResponse {
   subscriptions: number
@@ -527,9 +561,30 @@ function SubscriptionsReportInner() {
         />
       </div>
 
+      {clientId && (() => {
+        const baseQuery = new URLSearchParams()
+        for (const chip of CHIPS) {
+          const v = filterValues[chip.urlKey]
+          if (v) baseQuery.set(chip.apiKey, v)
+        }
+        const { from, to } = periodDates(period, customFrom, customTo)
+        if (from) baseQuery.set('period_from', from.toISOString())
+        if (to)   baseQuery.set('period_to',   to.toISOString())
+        return (
+          <DrillPanel
+            clientId={clientId}
+            endpoint={`/client/${clientId}/reports/subscriptions`}
+            baseQuery={baseQuery}
+            metrics={SUBS_DRILL_METRICS}
+            accent={accent}
+            heading="Subscriptions broken down by"
+          />
+        )
+      })()}
+
       <p className="text-xs text-slate-400">
-        Coming next — order metrics (count, routing, brand mix, sale
-        conversion) and drill views by crop, district, and package.
+        Active is a point-in-time snapshot, so its Time dimension is
+        deliberately unavailable. Total and New support all four.
       </p>
     </div>
   )
