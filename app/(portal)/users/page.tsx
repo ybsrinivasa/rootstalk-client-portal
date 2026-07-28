@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, FormEvent } from 'react'
+import { useEffect, useMemo, useState, FormEvent } from 'react'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
@@ -99,6 +99,14 @@ export default function UsersPage() {
   const [editForm, setEditForm] = useState({
     name: '', designation: '', professional_profile: '',
   })
+
+  // 2026-07-28 — Edit Roles modal. Multi-select checkboxes, pre-checked
+  // with the user's current ACTIVE roles. Save reconciles the exact
+  // set via PUT /users/{uid}/roles.
+  const [editingRoles, setEditingRoles] = useState<{
+    userId: string; name: string; email: string; roles: string[];
+  } | null>(null)
+  const [savingRoles, setSavingRoles] = useState(false)
 
   // Batch X (2026-05-19) — per-client privilege holders + assign UI.
   // Visible only for Seed Companies (currently the only privilege).
@@ -226,6 +234,80 @@ export default function UsersPage() {
     } finally { setSavingEdit(false) }
   }
 
+  // Group PortalUser rows by user.id — the API returns one row per
+  // (user, role) pair (Batch K multi-role), which would show duplicates
+  // in the table. Grouping collapses to one row per user with all role
+  // pills. "anyActive" drives the status pill and the Deactivate/
+  // Reactivate button's target state.
+  const grouped = useMemo(() => {
+    type G = {
+      userId: string; name: string | null; email: string | null
+      designation: string | null; professional_profile: string | null
+      roles: string[]; anyActive: boolean; createdAt: string
+    }
+    const byId = new Map<string, G>()
+    for (const u of users) {
+      let g = byId.get(u.id)
+      if (!g) {
+        g = {
+          userId: u.id, name: u.name, email: u.email,
+          designation: u.designation, professional_profile: u.professional_profile,
+          roles: [], anyActive: false, createdAt: u.created_at,
+        }
+        byId.set(u.id, g)
+      }
+      g.roles.push(u.role)
+      if (u.status === 'ACTIVE') g.anyActive = true
+    }
+    return Array.from(byId.values())
+  }, [users])
+
+  function openEditRoles(g: {
+    userId: string; name: string | null; email: string | null; roles: string[];
+  }) {
+    setEditingRoles({
+      userId: g.userId,
+      name: g.name || '',
+      email: g.email || '',
+      // Only offer roles the picker knows about — CA is deliberately
+      // NOT in ROLES, so a CA user's row won't reach this handler.
+      roles: g.roles.filter(r => ROLES.some(x => x.value === r)),
+    })
+    setError('')
+  }
+
+  function toggleEditingRole(role: string) {
+    setEditingRoles(prev => prev && ({
+      ...prev,
+      roles: prev.roles.includes(role)
+        ? prev.roles.filter(r => r !== role)
+        : [...prev.roles, role],
+    }))
+  }
+
+  async function handleSaveRoles(e: FormEvent) {
+    e.preventDefault()
+    if (!editingRoles) return
+    if (editingRoles.roles.length === 0) {
+      setError('Pick at least one role. To remove the user entirely, use the Deactivate button.')
+      return
+    }
+    setSavingRoles(true); setError('')
+    try {
+      await api.put(
+        `/client/${clientId}/users/${editingRoles.userId}/roles`,
+        { roles: editingRoles.roles },
+      )
+      setEditingRoles(null)
+      setSuccess(`${editingRoles.name || editingRoles.email} roles updated.`)
+      load()
+    } catch (err: unknown) {
+      setError(extractErrorMessage(err, 'Failed to update roles.'))
+    } finally {
+      setSavingRoles(false)
+    }
+  }
+
   async function toggleStatus(userId: string, currentStatus: string) {
     if (!clientId) return
     const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
@@ -327,49 +409,68 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {users.map(user => (
-                <tr key={user.id} className="hover:bg-slate-50">
-                  <td className="px-5 py-3.5">
-                    <p className="font-medium text-slate-800">{user.name || '—'}</p>
-                    <p className="text-xs text-slate-400">{user.email}</p>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_COLOUR[user.role] || 'bg-slate-100 text-slate-600'}`}>
-                      {ROLE_LABEL[user.role] || user.role}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${user.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                      {user.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-400 text-xs hidden sm:table-cell">
-                    {new Date(user.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <div className="flex justify-end gap-2">
-                      {user.role !== 'CA' && (
-                        <button onClick={() => openEdit(user)}
-                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-slate-200 text-slate-600 hover:bg-slate-50">
-                          ✎ Edit
-                        </button>
-                      )}
-                      {user.role !== 'CA' && (
-                        <button
-                          onClick={() => toggleStatus(user.id, user.status)}
-                          disabled={toggling === user.id}
-                          className={`text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 transition-colors ${
-                            user.status === 'ACTIVE'
-                              ? 'border border-red-100 text-red-500 hover:bg-red-50'
-                              : 'border border-green-200 text-green-600 hover:bg-green-50'
-                          }`}>
-                          {toggling === user.id ? '…' : user.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {grouped.map(g => {
+                const isCA = g.roles.includes('CA')
+                const status = g.anyActive ? 'ACTIVE' : 'INACTIVE'
+                return (
+                  <tr key={g.userId} className="hover:bg-slate-50">
+                    <td className="px-5 py-3.5">
+                      <p className="font-medium text-slate-800">{g.name || '—'}</p>
+                      <p className="text-xs text-slate-400">{g.email}</p>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex flex-wrap gap-1">
+                        {g.roles.map(r => (
+                          <span key={r} className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_COLOUR[r] || 'bg-slate-100 text-slate-600'}`}>
+                            {ROLE_LABEL[r] || r}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                        {status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-slate-400 text-xs hidden sm:table-cell">
+                      {new Date(g.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex justify-end gap-2 flex-wrap">
+                        {!isCA && (
+                          <button onClick={() => openEditRoles(g)}
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium border border-slate-200 text-slate-600 hover:bg-slate-50">
+                            Roles
+                          </button>
+                        )}
+                        {!isCA && (
+                          <button onClick={() => openEdit({
+                            id: g.userId, name: g.name, email: g.email,
+                            role: g.roles[0], status,
+                            designation: g.designation, professional_profile: g.professional_profile,
+                            created_at: g.createdAt,
+                          } as PortalUser)}
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium border border-slate-200 text-slate-600 hover:bg-slate-50">
+                            ✎ Bio
+                          </button>
+                        )}
+                        {!isCA && (
+                          <button
+                            onClick={() => toggleStatus(g.userId, status)}
+                            disabled={toggling === g.userId}
+                            className={`text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 transition-colors ${
+                              status === 'ACTIVE'
+                                ? 'border border-red-100 text-red-500 hover:bg-red-50'
+                                : 'border border-green-200 text-green-600 hover:bg-green-50'
+                            }`}>
+                            {toggling === g.userId ? '…' : status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -532,6 +633,66 @@ export default function UsersPage() {
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                   style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                   {savingEdit ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Roles Modal — reconciles the user's ACTIVE roles at
+          this client to the exact selected set via a single PUT.
+          Same checkbox pattern as the invite form. */}
+      {editingRoles && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-md">
+            <div className="px-6 pt-5 pb-3 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900">Edit Roles</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {editingRoles.name || editingRoles.email}
+              </p>
+            </div>
+            <form onSubmit={handleSaveRoles} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Roles
+                </label>
+                <div className="border border-slate-200 rounded-xl px-3 py-2 space-y-1.5">
+                  {ROLES.map(r => {
+                    const checked = editingRoles.roles.includes(r.value)
+                    return (
+                      <label
+                        key={r.value}
+                        className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer py-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleEditingRole(r.value)}
+                          className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                        />
+                        {r.label}
+                      </label>
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Unchecking a role deactivates that assignment. To remove
+                  the user entirely, use the Deactivate button on their row.
+                </p>
+              </div>
+
+              {error && <p className="text-sm text-red-600">{error}</p>}
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => { setEditingRoles(null); setError('') }}
+                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingRoles || editingRoles.roles.length === 0}
+                  className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
+                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  {savingRoles ? 'Saving…' : 'Save Roles'}
                 </button>
               </div>
             </form>
