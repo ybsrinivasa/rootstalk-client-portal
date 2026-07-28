@@ -73,10 +73,22 @@ export default function UsersPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  // 2026-07-28 — Multi-role invite: `roles` is an array of role
+  // values. Backend enforces per-role add via one POST each; the
+  // handler loops and reports partial-failure honestly.
   const [form, setForm] = useState({
-    email: '', name: '', role: 'SUBJECT_EXPERT', password: '',
+    email: '', name: '', roles: [] as string[], password: '',
     designation: '', professional_profile: '',
   })
+
+  function toggleRole(role: string) {
+    setForm(f => ({
+      ...f,
+      roles: f.roles.includes(role)
+        ? f.roles.filter(r => r !== role)
+        : [...f.roles, role],
+    }))
+  }
 
   // Edit-user modal (Batch D, 2026-05-18). Holds the user being
   // edited + the editable fields (name + bio). Role and email
@@ -128,25 +140,61 @@ export default function UsersPage() {
 
   async function handleInvite(e: FormEvent) {
     e.preventDefault()
+    if (form.roles.length === 0) {
+      setError('Pick at least one role.')
+      return
+    }
     setInviting(true); setError(''); setSuccess('')
-    try {
-      // Only send bio fields when adding a Subject Expert. The
-      // backend column lives on User so other roles could carry
-      // it too — we just don't expose the inputs for them yet.
-      const body = form.role === 'SUBJECT_EXPERT'
-        ? form
-        : { ...form, designation: '', professional_profile: '' }
-      await api.post(`/client/${clientId}/users`, body)
-      setSuccess(`${form.name || form.email} has been added as ${ROLES.find(r => r.value === form.role)?.label}.`)
+
+    // Backend accepts one role per POST. Loop sequentially so a
+    // partial failure (e.g. CA-exclusivity 409 on a specific role)
+    // surfaces with a clear "added X, failed Y" message rather than
+    // being swallowed. Bio fields only travel when SUBJECT_EXPERT
+    // is one of the roles.
+    const includesSE = form.roles.includes('SUBJECT_EXPERT')
+    const baseBody = {
+      email: form.email,
+      name: form.name,
+      password: form.password,
+      designation: includesSE ? form.designation : '',
+      professional_profile: includesSE ? form.professional_profile : '',
+    }
+    const added: string[] = []
+    let failedRole: string | null = null
+    let failedMessage = ''
+    for (const role of form.roles) {
+      try {
+        await api.post(`/client/${clientId}/users`, { ...baseBody, role })
+        added.push(role)
+      } catch (err: unknown) {
+        failedRole = role
+        failedMessage = extractErrorMessage(err, 'Failed to add role.')
+        break
+      }
+    }
+
+    const addedLabels = added
+      .map(r => ROLES.find(x => x.value === r)?.label)
+      .filter(Boolean)
+      .join(', ')
+
+    if (failedRole) {
+      const failedLabel = ROLES.find(x => x.value === failedRole)?.label ?? failedRole
+      if (added.length > 0) {
+        setError(`Added ${addedLabels}. Failed on ${failedLabel}: ${failedMessage}`)
+      } else {
+        setError(failedMessage)
+      }
+    } else {
+      setSuccess(`${form.name || form.email} added as: ${addedLabels}.`)
       setShowInvite(false)
       setForm({
-        email: '', name: '', role: 'SUBJECT_EXPERT', password: '',
+        email: '', name: '', roles: [], password: '',
         designation: '', professional_profile: '',
       })
-      load()
-    } catch (err: unknown) {
-      setError(extractErrorMessage(err, 'Failed to add user.'))
-    } finally { setInviting(false) }
+    }
+    load()
+    setInviting(false)
   }
 
   function openEdit(user: PortalUser) {
@@ -349,11 +397,32 @@ export default function UsersPage() {
                   className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Role</label>
-                <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Roles
+                </label>
+                <div className="border border-slate-200 rounded-xl px-3 py-2 space-y-1.5">
+                  {ROLES.map(r => {
+                    const checked = form.roles.includes(r.value)
+                    return (
+                      <label
+                        key={r.value}
+                        className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer py-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleRole(r.value)}
+                          className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                        />
+                        {r.label}
+                      </label>
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  A user can hold multiple roles. CA is exclusive and is
+                  managed separately.
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Temporary Password</label>
@@ -365,8 +434,9 @@ export default function UsersPage() {
 
               {/* Subject Expert bio (Batch D, 2026-05-18). Surfaced
                   on the farmer PWA next to the author's name on
-                  practice cards. Optional at create time. */}
-              {form.role === 'SUBJECT_EXPERT' && (
+                  practice cards. Optional at create time. Shown when
+                  SUBJECT_EXPERT is one of the selected roles. */}
+              {form.roles.includes('SUBJECT_EXPERT') && (
                 <div className="space-y-4 pt-2 border-t border-slate-100">
                   <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
                     Author bio <span className="text-slate-300">(optional)</span>
@@ -396,7 +466,7 @@ export default function UsersPage() {
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
                   Cancel
                 </button>
-                <button type="submit" disabled={inviting}
+                <button type="submit" disabled={inviting || form.roles.length === 0}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
                   style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
                   {inviting ? 'Adding…' : 'Add User'}
