@@ -22,7 +22,7 @@ import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 
-interface SubsActiveResponse {
+interface SubsMetricResponse {
   subscriptions: number
   farmers: number
 }
@@ -57,6 +57,39 @@ export default function SubscriptionsReportPage() {
   )
 }
 
+function MetricCard({
+  label, hint, data, loading, accent,
+}: {
+  label: string
+  hint: string
+  data: SubsMetricResponse | null
+  loading: boolean
+  accent: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+      {loading ? (
+        <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
+      ) : data ? (
+        <>
+          <p
+            className="mt-3 text-5xl font-bold tabular-nums"
+            style={{ color: accent }}
+          >
+            {data.subscriptions.toLocaleString()}
+          </p>
+          <p className="mt-2 text-sm text-slate-600">
+            {data.farmers.toLocaleString()}{' '}
+            {data.farmers === 1 ? 'farmer' : 'farmers'}
+          </p>
+        </>
+      ) : null}
+      <p className="mt-3 text-xs text-slate-400">{hint}</p>
+    </div>
+  )
+}
+
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
@@ -83,7 +116,8 @@ function SubscriptionsReportInner() {
     package:  searchParams.get('package')  || '',
   }))
 
-  const [data, setData] = useState<SubsActiveResponse | null>(null)
+  const [active, setActive] = useState<SubsMetricResponse | null>(null)
+  const [total, setTotal] = useState<SubsMetricResponse | null>(null)
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -97,20 +131,28 @@ function SubscriptionsReportInner() {
       .catch(() => { /* filter chips will just be empty; page still works */ })
   }, [clientId])
 
-  // Fetch metric whenever any filter changes.
+  // Fetch both metrics whenever any filter changes.
   useEffect(() => {
     if (!clientId) return
     setLoading(true); setError('')
-    const q = new URLSearchParams({ metric: 'ACTIVE' })
+    const filterParams = new URLSearchParams()
     for (const chip of CHIPS) {
       const v = filterValues[chip.urlKey]
-      if (v) q.set(chip.apiKey, v)
+      if (v) filterParams.set(chip.apiKey, v)
     }
-    api
-      .get<SubsActiveResponse>(
-        `/client/${clientId}/reports/subscriptions?${q.toString()}`,
-      )
-      .then(({ data }) => setData(data))
+    const url = (metric: 'ACTIVE' | 'TOTAL') => {
+      const q = new URLSearchParams(filterParams)
+      q.set('metric', metric)
+      return `/client/${clientId}/reports/subscriptions?${q.toString()}`
+    }
+    Promise.all([
+      api.get<SubsMetricResponse>(url('ACTIVE')),
+      api.get<SubsMetricResponse>(url('TOTAL')),
+    ])
+      .then(([activeRes, totalRes]) => {
+        setActive(activeRes.data)
+        setTotal(totalRes.data)
+      })
       .catch((err) =>
         setError(
           extractErrorMessage(err, 'Could not load subscriptions report.'),
@@ -244,29 +286,26 @@ function SubscriptionsReportInner() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
-        <p className="text-sm font-medium text-slate-500">Active Subscriptions</p>
-        {loading ? (
-          <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
-        ) : data ? (
-          <>
-            <p
-              className="mt-3 text-5xl font-bold tabular-nums"
-              style={{ color: accent }}
-            >
-              {data.subscriptions.toLocaleString()}
-            </p>
-            <p className="mt-2 text-sm text-slate-600">
-              {data.farmers.toLocaleString()}{' '}
-              {data.farmers === 1 ? 'farmer' : 'farmers'}
-            </p>
-          </>
-        ) : null}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MetricCard
+          label="Active Subscriptions"
+          hint="Currently ACTIVE (excludes lapsed, cancelled, unsubscribed)."
+          data={active}
+          loading={loading}
+          accent={accent}
+        />
+        <MetricCard
+          label="Total Subscriptions"
+          hint="Every subscription ever created, any status."
+          data={total}
+          loading={loading}
+          accent={accent}
+        />
       </div>
 
       <p className="text-xs text-slate-400">
-        More metrics — New and Total subscriptions, trends over time, drills
-        by crop, district, and package — arrive in the next few builds.
+        More metrics — New subscriptions, trends over time, drills by
+        crop, district, and package — arrive in the next few builds.
       </p>
     </div>
   )
