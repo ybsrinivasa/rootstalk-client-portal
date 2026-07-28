@@ -28,6 +28,12 @@ interface OrdersRoutingResponse {
   via_facilitator: number
 }
 
+interface OrdersItemsResponse {
+  items_total: number
+  items_approved: number
+  items_rejected: number
+}
+
 interface FilterOption {
   id: string
   name: string
@@ -178,6 +184,56 @@ function RoutingCard({
   )
 }
 
+// Semantic colours for approved / rejected. Green + amber (same
+// amber as the routing card so the palette stays coherent) rather
+// than pure red — the report is informational, not alarming.
+const APPROVED_COLOUR = '#16A34A'   // green-600
+const REJECTED_COLOUR = VIA_FACILITATOR_COLOUR
+
+function ItemsCard({
+  data, loading, accent, periodLabel,
+}: {
+  data: OrdersItemsResponse | null
+  loading: boolean
+  accent: string
+  periodLabel: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+      <p className="text-sm font-medium text-slate-500">Items</p>
+      {loading ? (
+        <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
+      ) : data ? (
+        <>
+          <p className="mt-3 text-5xl font-bold tabular-nums" style={{ color: accent }}>
+            {data.items_total.toLocaleString()}
+          </p>
+          <div className="mt-3 flex items-center gap-4 text-sm">
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: APPROVED_COLOUR }}
+              />
+              {data.items_approved.toLocaleString()} approved
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: REJECTED_COLOUR }}
+              />
+              {data.items_rejected.toLocaleString()} rejected
+            </span>
+          </div>
+        </>
+      ) : null}
+      <p className="mt-3 text-xs text-slate-400">
+        {periodLabel}. Total counts every real item; items removed
+        from the order or rerouted to a new one are excluded.
+      </p>
+    </div>
+  )
+}
+
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
 
@@ -212,6 +268,7 @@ function OrdersReportInner() {
 
   const [count, setCount] = useState<OrdersCountResponse | null>(null)
   const [routing, setRouting] = useState<OrdersRoutingResponse | null>(null)
+  const [items, setItems] = useState<OrdersItemsResponse | null>(null)
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -235,7 +292,7 @@ function OrdersReportInner() {
     const { from, to } = periodDates(period, customFrom, customTo)
     if (from) filterParams.set('period_from', from.toISOString())
     if (to)   filterParams.set('period_to',   to.toISOString())
-    const url = (metric: 'COUNT' | 'ROUTING') => {
+    const url = (metric: 'COUNT' | 'ROUTING' | 'ITEMS') => {
       const q = new URLSearchParams(filterParams)
       q.set('metric', metric)
       return `/client/${clientId}/reports/orders?${q.toString()}`
@@ -243,10 +300,12 @@ function OrdersReportInner() {
     Promise.all([
       api.get<OrdersCountResponse>(url('COUNT')),
       api.get<OrdersRoutingResponse>(url('ROUTING')),
+      api.get<OrdersItemsResponse>(url('ITEMS')),
     ])
-      .then(([countRes, routingRes]) => {
+      .then(([countRes, routingRes, itemsRes]) => {
         setCount(countRes.data)
         setRouting(routingRes.data)
+        setItems(itemsRes.data)
       })
       .catch((err) =>
         setError(extractErrorMessage(err, 'Could not load orders report.')),
@@ -459,11 +518,18 @@ function OrdersReportInner() {
           accent={accent}
           periodLabel={periodLabel}
         />
+
+        <ItemsCard
+          data={items}
+          loading={loading}
+          accent={accent}
+          periodLabel={periodLabel}
+        />
       </div>
 
       <p className="text-xs text-slate-400">
-        Coming next — items, brand mix (Locked / Unlocked / No-brand),
-        and sale conversion.
+        Coming next — brand mix (Locked / Unlocked / No-brand) and
+        sale conversion.
       </p>
     </div>
   )
