@@ -34,6 +34,12 @@ interface OrdersItemsResponse {
   items_rejected: number
 }
 
+interface OrdersBrandMixResponse {
+  locked: number
+  unlocked: number
+  no_brand: number
+}
+
 interface FilterOption {
   id: string
   name: string
@@ -266,6 +272,79 @@ function ItemsCard({
   )
 }
 
+// Brand mix palette. Locked = brand accent (the "clean" case —
+// specific SKU chosen). Unlocked = amber (matches Routing / Items
+// palette — dealer typed something free-form, a Missing Brand
+// candidate). No-brand = slate-400 (neutral, missing data).
+function BrandMixCard({
+  data, loading, accent, periodLabel,
+}: {
+  data: OrdersBrandMixResponse | null
+  loading: boolean
+  accent: string
+  periodLabel: string
+}) {
+  const total = data ? data.locked + data.unlocked + data.no_brand : 0
+  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0)
+  const LOCKED_COLOUR   = accent
+  const UNLOCKED_COLOUR = VIA_FACILITATOR_COLOUR
+  const NO_BRAND_COLOUR = PENDING_COLOUR
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+      <p className="text-sm font-medium text-slate-500">Brand Mix</p>
+      {loading ? (
+        <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
+      ) : data ? (
+        <>
+          <p className="mt-3 text-5xl font-bold tabular-nums" style={{ color: accent }}>
+            {total.toLocaleString()}
+          </p>
+          <div className="mt-3 flex items-center gap-x-4 gap-y-1 flex-wrap text-sm">
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: LOCKED_COLOUR }}
+              />
+              {data.locked.toLocaleString()} locked
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: UNLOCKED_COLOUR }}
+              />
+              {data.unlocked.toLocaleString()} unlocked
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: NO_BRAND_COLOUR }}
+              />
+              {data.no_brand.toLocaleString()} no-brand
+            </span>
+          </div>
+          {total > 0 && (
+            <div
+              className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-slate-100"
+              aria-label={
+                `${data.locked} locked, ${data.unlocked} unlocked, ${data.no_brand} no-brand`
+              }
+            >
+              <div className="h-full" style={{ width: `${pct(data.locked)}%`,   backgroundColor: LOCKED_COLOUR }} />
+              <div className="h-full" style={{ width: `${pct(data.unlocked)}%`, backgroundColor: UNLOCKED_COLOUR }} />
+              <div className="h-full" style={{ width: `${pct(data.no_brand)}%`, backgroundColor: NO_BRAND_COLOUR }} />
+            </div>
+          )}
+        </>
+      ) : null}
+      <p className="mt-3 text-xs text-slate-400">
+        {periodLabel}. Locked = specific SKU chosen; Unlocked =
+        dealer typed a free-text brand not linked to a SKU;
+        No-brand = neither field filled (often not yet fulfilled).
+      </p>
+    </div>
+  )
+}
+
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
 
@@ -301,6 +380,7 @@ function OrdersReportInner() {
   const [count, setCount] = useState<OrdersCountResponse | null>(null)
   const [routing, setRouting] = useState<OrdersRoutingResponse | null>(null)
   const [items, setItems] = useState<OrdersItemsResponse | null>(null)
+  const [brandMix, setBrandMix] = useState<OrdersBrandMixResponse | null>(null)
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -324,7 +404,7 @@ function OrdersReportInner() {
     const { from, to } = periodDates(period, customFrom, customTo)
     if (from) filterParams.set('period_from', from.toISOString())
     if (to)   filterParams.set('period_to',   to.toISOString())
-    const url = (metric: 'COUNT' | 'ROUTING' | 'ITEMS') => {
+    const url = (metric: 'COUNT' | 'ROUTING' | 'ITEMS' | 'BRAND_MIX') => {
       const q = new URLSearchParams(filterParams)
       q.set('metric', metric)
       return `/client/${clientId}/reports/orders?${q.toString()}`
@@ -333,11 +413,13 @@ function OrdersReportInner() {
       api.get<OrdersCountResponse>(url('COUNT')),
       api.get<OrdersRoutingResponse>(url('ROUTING')),
       api.get<OrdersItemsResponse>(url('ITEMS')),
+      api.get<OrdersBrandMixResponse>(url('BRAND_MIX')),
     ])
-      .then(([countRes, routingRes, itemsRes]) => {
+      .then(([countRes, routingRes, itemsRes, brandRes]) => {
         setCount(countRes.data)
         setRouting(routingRes.data)
         setItems(itemsRes.data)
+        setBrandMix(brandRes.data)
       })
       .catch((err) =>
         setError(extractErrorMessage(err, 'Could not load orders report.')),
@@ -557,11 +639,17 @@ function OrdersReportInner() {
           accent={accent}
           periodLabel={periodLabel}
         />
+
+        <BrandMixCard
+          data={brandMix}
+          loading={loading}
+          accent={accent}
+          periodLabel={periodLabel}
+        />
       </div>
 
       <p className="text-xs text-slate-400">
-        Coming next — brand mix (Locked / Unlocked / No-brand) and
-        sale conversion.
+        Coming next — sale conversion.
       </p>
     </div>
   )
