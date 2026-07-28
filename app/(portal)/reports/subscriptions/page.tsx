@@ -18,6 +18,7 @@ import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
+import { ExportCsvButton } from '@/components/reports/export-button'
 
 interface SubsMetricResponse {
   subscriptions: number
@@ -316,20 +317,43 @@ function SubscriptionsReportInner() {
 
   const anyFilter = CHIPS.some(c => filterValues[c.urlKey]) || period !== 'this-month'
 
+  // Export URL mirrors the fetch URL construction — same chips,
+  // same period — so CSV always matches what's on-screen.
+  const exportUrl = (() => {
+    const q = new URLSearchParams()
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) q.set(chip.apiKey, v)
+    }
+    const { from, to } = periodDates(period, customFrom, customTo)
+    if (from) q.set('period_from', from.toISOString())
+    if (to)   q.set('period_to',   to.toISOString())
+    const qs = q.toString()
+    return `/client/${clientId}/reports/subscriptions/export.csv${qs ? '?' + qs : ''}`
+  })()
+  const shortName = client?.short_name || 'client'
+  const stamp = toYmd(new Date()).replace(/-/g, '')
+  const exportFallbackName = `${shortName}-subscriptions-${stamp}.csv`
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-          Reports
-        </p>
-        <h1 className="text-2xl font-bold text-slate-900 mt-1">
-          Subscriptions
-        </h1>
-        <p className="text-sm text-slate-600 mt-1">
-          A snapshot of your subscription base. Training-session subscriptions
-          and cleaned-up entries are excluded automatically.
-        </p>
-      </header>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <header>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            Reports
+          </p>
+          <h1 className="text-2xl font-bold text-slate-900 mt-1">
+            Subscriptions
+          </h1>
+          <p className="text-sm text-slate-600 mt-1">
+            A snapshot of your subscription base. Training-session subscriptions
+            and cleaned-up entries are excluded automatically.
+          </p>
+        </header>
+        {clientId && (
+          <ExportCsvButton href={exportUrl} fallbackFilename={exportFallbackName} />
+        )}
+      </div>
 
       <ReportSubjectTabs />
 

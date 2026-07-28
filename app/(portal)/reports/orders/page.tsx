@@ -17,6 +17,7 @@ import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
+import { ExportCsvButton } from '@/components/reports/export-button'
 
 interface OrdersCountResponse {
   orders: number
@@ -552,20 +553,39 @@ function OrdersReportInner() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-          Reports
-        </p>
-        <h1 className="text-2xl font-bold text-slate-900 mt-1">
-          Orders
-        </h1>
-        <p className="text-sm text-slate-600 mt-1">
-          Orders your farmers placed. Only orders that reached the
-          dealer (Sent and beyond) count — drafts, cancellations, and
-          expiries are excluded. Training and cleaned-up entries are
-          excluded automatically.
-        </p>
-      </header>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <header>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            Reports
+          </p>
+          <h1 className="text-2xl font-bold text-slate-900 mt-1">
+            Orders
+          </h1>
+          <p className="text-sm text-slate-600 mt-1">
+            Orders your farmers placed. Only orders that reached the
+            dealer (Sent and beyond) count — drafts, cancellations, and
+            expiries are excluded. Training and cleaned-up entries are
+            excluded automatically.
+          </p>
+        </header>
+        {clientId && (() => {
+          // Export URL mirrors the fetch URL construction so CSV
+          // always matches what's on-screen.
+          const q = new URLSearchParams()
+          for (const chip of CHIPS) {
+            const v = filterValues[chip.urlKey]
+            if (v) q.set(chip.apiKey, v)
+          }
+          const { from, to } = periodDates(period, customFrom, customTo)
+          if (from) q.set('period_from', from.toISOString())
+          if (to)   q.set('period_to',   to.toISOString())
+          const qs = q.toString()
+          const href = `/client/${clientId}/reports/orders/export.csv${qs ? '?' + qs : ''}`
+          const stamp = toYmd(new Date()).replace(/-/g, '')
+          const fallback = `${client?.short_name || 'client'}-orders-${stamp}.csv`
+          return <ExportCsvButton href={href} fallbackFilename={fallback} />
+        })()}
+      </div>
 
       <ReportSubjectTabs />
 
