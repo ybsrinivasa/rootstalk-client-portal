@@ -184,11 +184,13 @@ function RoutingCard({
   )
 }
 
-// Semantic colours for approved / rejected. Green + amber (same
-// amber as the routing card so the palette stays coherent) rather
-// than pure red — the report is informational, not alarming.
+// Semantic colours for the item split. Green + amber (same amber
+// as the Routing card so the palette stays coherent) rather than
+// pure red — the report is informational, not alarming. Slate for
+// pending stays neutral.
 const APPROVED_COLOUR = '#16A34A'   // green-600
 const REJECTED_COLOUR = VIA_FACILITATOR_COLOUR
+const PENDING_COLOUR  = '#94A3B8'   // slate-400
 
 function ItemsCard({
   data, loading, accent, periodLabel,
@@ -198,6 +200,15 @@ function ItemsCard({
   accent: string
   periodLabel: string
 }) {
+  // Third bucket = items whose story is still open OR closed
+  // without an approve/reject decision (skipped / not-needed /
+  // not-available). Label "pending" reads best for the common
+  // case; hint text below spells out the caveat.
+  const pending = data
+    ? Math.max(0, data.items_total - data.items_approved - data.items_rejected)
+    : 0
+  const total = data?.items_total ?? 0
+  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0)
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
       <p className="text-sm font-medium text-slate-500">Items</p>
@@ -208,7 +219,7 @@ function ItemsCard({
           <p className="mt-3 text-5xl font-bold tabular-nums" style={{ color: accent }}>
             {data.items_total.toLocaleString()}
           </p>
-          <div className="mt-3 flex items-center gap-4 text-sm">
+          <div className="mt-3 flex items-center gap-x-4 gap-y-1 flex-wrap text-sm">
             <span className="flex items-center gap-1.5 text-slate-600">
               <span
                 className="inline-block w-2 h-2 rounded-full"
@@ -223,12 +234,33 @@ function ItemsCard({
               />
               {data.items_rejected.toLocaleString()} rejected
             </span>
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: PENDING_COLOUR }}
+              />
+              {pending.toLocaleString()} pending
+            </span>
           </div>
+          {total > 0 && (
+            <div
+              className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-slate-100"
+              aria-label={
+                `${data.items_approved} approved, ${data.items_rejected} rejected, ${pending} pending`
+              }
+            >
+              <div className="h-full" style={{ width: `${pct(data.items_approved)}%`, backgroundColor: APPROVED_COLOUR }} />
+              <div className="h-full" style={{ width: `${pct(data.items_rejected)}%`, backgroundColor: REJECTED_COLOUR }} />
+              <div className="h-full" style={{ width: `${pct(pending)}%`, backgroundColor: PENDING_COLOUR }} />
+            </div>
+          )}
         </>
       ) : null}
       <p className="mt-3 text-xs text-slate-400">
-        {periodLabel}. Total counts every real item; items removed
-        from the order or rerouted to a new one are excluded.
+        {periodLabel}. Total counts every real item; REMOVED /
+        REROUTED bookkeeping is excluded. Pending covers items
+        still awaiting a decision plus items marked not-needed,
+        skipped, or unavailable.
       </p>
     </div>
   )
