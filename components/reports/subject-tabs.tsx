@@ -18,6 +18,7 @@ interface SubjectTab {
 }
 
 const TABS: SubjectTab[] = [
+  { href: '/reports',               label: 'Overview' },
   { href: '/reports/subscriptions', label: 'Subscriptions' },
   { href: '/reports/orders',        label: 'Orders' },
 ]
@@ -30,7 +31,11 @@ export function ReportSubjectTabs() {
       className="flex items-center gap-1 border-b border-slate-200"
     >
       {TABS.map(tab => {
-        const active = pathname === tab.href || pathname.startsWith(tab.href + '/')
+        // '/reports' matches EXACTLY (not startsWith) so it doesn't
+        // light up when we're on /reports/subscriptions.
+        const active = tab.href === '/reports'
+          ? pathname === '/reports'
+          : (pathname === tab.href || pathname.startsWith(tab.href + '/'))
         return (
           <Link
             key={tab.href}

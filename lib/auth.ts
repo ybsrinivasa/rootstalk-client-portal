@@ -143,21 +143,21 @@ export function canPublishAdvisory(user: CPUser | null): boolean {
   return hasPortalRole(user, 'SUBJECT_EXPERT')
 }
 
-/** Post-login landing route (2026-07-27). Dashboard is built around
- *  advisory content (packages / pool / alerts) and the endpoints it
- *  fetches are behind `_assert_can_view_client_advisory` — a
- *  REPORT_USER-only account gets 403 on every tile and bounces to
- *  /access-denied. So Report Users land on their actual home instead.
+/** Post-login landing route. Dashboard fetches packages/pool/alerts
+ *  behind `_assert_can_view_client_advisory` (SUBJECT_EXPERT + CA +
+ *  CM-EDIT only), so a REPORT_USER-only account 403s on every tile.
+ *  Send them to Reports instead.
  *
- *  Rule: if REPORT_USER is the ONLY portal role, land on
- *  /reports/subscriptions. Anyone with any other role (or multi-role
- *  including REPORT_USER + something else) lands on /dashboard as
- *  before — Dashboard works for them. */
+ *  Rule: if REPORT_USER is the ONLY portal role, land on /reports
+ *  (Overview). Anyone with any other role (or multi-role including
+ *  REPORT_USER + something else) lands on /dashboard.
+ *  2026-07-28 — target flipped from /reports/subscriptions to
+ *  /reports once the Overview page landed. */
 export function landingRouteForUser(user: CPUser | null): string {
   if (!user) return '/dashboard'
   const roles = user.portal_roles ?? (user.portal_role ? [user.portal_role] : [])
   if (roles.length === 1 && roles[0] === 'REPORT_USER') {
-    return '/reports/subscriptions'
+    return '/reports'
   }
   return '/dashboard'
 }

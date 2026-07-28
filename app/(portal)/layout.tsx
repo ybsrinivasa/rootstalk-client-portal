@@ -148,13 +148,12 @@ interface NavItem {
 
 const ALL_NAV: NavItem[] = [
   { href: '/dashboard',          label: 'Dashboard',                Icon: IconHome,         group: 'PORTAL' },
-  // 2026-07-27 — Client Reports Phase 1 (vertical slice). Today the
-  // entry points at /reports/subscriptions because that's the only
-  // subject wired end-to-end; when the Overview page lands, flip
-  // href to /reports. Backend: app/modules/reports/dashboard_router.py.
-  // Access: CA, REPORT_USER, SA-email, CM(EDIT) — see
-  // _assert_client_report_reader in app/modules/reports/access.py.
-  { href: '/reports/subscriptions', label: 'Reports',               Icon: IconReports,      group: 'PORTAL' },
+  // 2026-07-28 — Client Reports Phase 1. Sidebar lands on Overview
+  // (/reports); Subscriptions and Orders drills live under it via
+  // the ReportSubjectTabs sub-nav. Access: CA, REPORT_USER,
+  // SA-email, CM(EDIT) — see _assert_client_report_reader in
+  // app/modules/reports/access.py.
+  { href: '/reports',            label: 'Reports',           Icon: IconReports,      group: 'PORTAL' },
   // 2026-05-17 — one entry per pipe (mirror of SA Global CCA's
   // single "CCA · Crops" entry pattern). Each entry is the
   // drill-down entry point; deeper pages (packages / timelines /
@@ -214,8 +213,8 @@ const ROLE_NAV: Record<string, string[]> = {
   // packages/pool/alerts, all behind _assert_can_view_client_advisory
   // (SUBJECT_EXPERT + CA + CM-EDIT only). A REPORT_USER-only account
   // would 403 on every tile. Post-login lands them straight on
-  // /reports/subscriptions via landingRouteForUser (see lib/auth.ts).
-  REPORT_USER:      ['/reports/subscriptions'],
+  // /reports via landingRouteForUser (see lib/auth.ts).
+  REPORT_USER:      ['/reports'],
 }
 
 const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
