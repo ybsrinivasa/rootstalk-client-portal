@@ -43,7 +43,7 @@ export default function QRModulePage() {
   const [varietiesLoading, setVarietiesLoading] = useState(false)
   const [addingVarietyId, setAddingVarietyId] = useState<string | null>(null)
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
-  const [generateForm, setGenerateForm] = useState({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '' })
+  const [generateForm, setGenerateForm] = useState({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '', cultivation_practice: '' })
   const [saving, setSaving] = useState(false)
   const [printStyle, setPrintStyle] = useState<'color' | 'mono' | 'raw'>('color')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -182,7 +182,7 @@ export default function QRModulePage() {
     try {
       await api.post(`/client/${clientId}/qr/codes`, generateForm)
       setShowGenerate(false)
-      setGenerateForm({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '' })
+      setGenerateForm({ product_type: 'PESTICIDE', product_display_name: '', brand_cosh_id: '', variety_id: '', manufacture_date: '', expiry_date: '', batch_lot_number: '', cultivation_practice: '' })
       load()
     } finally { setSaving(false) }
   }
@@ -665,6 +665,17 @@ export default function QRModulePage() {
                   placeholder="e.g. BATCH-2026-001"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none" />
               </div>
+              {generateForm.product_type !== 'SEED' && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Cultivation Practice</label>
+                  <textarea value={generateForm.cultivation_practice}
+                    onChange={e => setGenerateForm(f => ({ ...f, cultivation_practice: e.target.value }))}
+                    rows={5}
+                    placeholder="Describe how this product should be applied or used in the field. Shown to the farmer on the QR verify page."
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-y" />
+                  <p className="text-xs text-gray-500 mt-1">Optional. Seed varieties already carry a cultivation write-up on the variety itself.</p>
+                </div>
+              )}
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={generateCode} disabled={saving || !generateForm.product_display_name || !generateForm.batch_lot_number}
