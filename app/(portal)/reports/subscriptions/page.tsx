@@ -51,16 +51,28 @@ const CHIPS = [
 // Period presets — the Period chip is a preset picker rather than a
 // UUID picker. Default is 'this-month' so the "New" card answers
 // "how many new farmers signed up this month?" out of the box.
+// 'custom' reveals two native date inputs below the chip row.
 const PERIOD_PRESETS = [
   { key: 'this-month', label: 'This month' },
   { key: 'last-month', label: 'Last month' },
   { key: 'last-90d',   label: 'Last 90 days' },
   { key: 'all',        label: 'All time' },
+  { key: 'custom',     label: 'Custom range' },
 ] as const
 
 type PeriodPreset = typeof PERIOD_PRESETS[number]['key']
 
-function periodDates(preset: PeriodPreset): { from?: Date; to?: Date } {
+// Format a Date as YYYY-MM-DD (local timezone) for <input type="date">.
+function toYmd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function periodDates(
+  preset: PeriodPreset, customFrom: string, customTo: string,
+): { from?: Date; to?: Date } {
   const now = new Date()
   if (preset === 'this-month') {
     return {
@@ -77,6 +89,18 @@ function periodDates(preset: PeriodPreset): { from?: Date; to?: Date } {
   if (preset === 'last-90d') {
     const from = new Date(); from.setDate(from.getDate() - 90); from.setHours(0, 0, 0, 0)
     const to = new Date()
+    return { from, to }
+  }
+  if (preset === 'custom') {
+    // Date-input value ("YYYY-MM-DD") + local midnight is the user's
+    // intent. To is INCLUSIVE from the user's view, so bump +1 day
+    // to match the backend's [from, to) half-open window semantics.
+    const from = customFrom ? new Date(`${customFrom}T00:00:00`) : undefined
+    let to: Date | undefined
+    if (customTo) {
+      to = new Date(`${customTo}T00:00:00`)
+      to.setDate(to.getDate() + 1)
+    }
     return { from, to }
   }
   return {}  // 'all' — no bounds
@@ -189,6 +213,8 @@ function SubscriptionsReportInner() {
     const p = searchParams.get('period') as PeriodPreset | null
     return p && PERIOD_PRESETS.some(x => x.key === p) ? p : 'this-month'
   })
+  const [customFrom, setCustomFrom] = useState<string>(() => searchParams.get('from') || '')
+  const [customTo,   setCustomTo]   = useState<string>(() => searchParams.get('to')   || '')
 
   const [active, setActive] = useState<SubsMetricResponse | null>(null)
   const [total, setTotal] = useState<SubsMetricResponse | null>(null)
@@ -215,7 +241,7 @@ function SubscriptionsReportInner() {
       const v = filterValues[chip.urlKey]
       if (v) filterParams.set(chip.apiKey, v)
     }
-    const { from, to } = periodDates(period)
+    const { from, to } = periodDates(period, customFrom, customTo)
     const url = (metric: 'ACTIVE' | 'TOTAL' | 'NEW') => {
       const q = new URLSearchParams(filterParams)
       q.set('metric', metric)
@@ -241,7 +267,7 @@ function SubscriptionsReportInner() {
         ),
       )
       .finally(() => setLoading(false))
-  }, [clientId, filterValues, period])
+  }, [clientId, filterValues, period, customFrom, customTo])
 
   // Sync URL bar to filter + period state so bookmarks + shares work.
   // Skip the 'this-month' default so ordinary URLs stay clean.
@@ -252,12 +278,16 @@ function SubscriptionsReportInner() {
       if (v) params.set(chip.urlKey, v)
     }
     if (period !== 'this-month') params.set('period', period)
+    if (period === 'custom') {
+      if (customFrom) params.set('from', customFrom)
+      if (customTo)   params.set('to',   customTo)
+    }
     const qs = params.toString()
     const target = qs ? `${pathname}?${qs}` : pathname
     if (window.location.pathname + window.location.search !== target) {
       window.history.replaceState(null, '', target)
     }
-  }, [pathname, filterValues, period])
+  }, [pathname, filterValues, period, customFrom, customTo])
 
   const updateFilter = useCallback((urlKey: keyof FilterValues, value: string) => {
     setFilterValues(prev => ({ ...prev, [urlKey]: value }))
@@ -266,7 +296,22 @@ function SubscriptionsReportInner() {
   const clearAll = useCallback(() => {
     setFilterValues(EMPTY_FILTERS)
     setPeriod('this-month')
+    setCustomFrom('')
+    setCustomTo('')
   }, [])
+
+  // Switching to Custom for the first time — seed the two inputs
+  // with this-month's range so the user has something to edit
+  // rather than staring at two empty date pickers.
+  const changePeriod = useCallback((next: PeriodPreset) => {
+    if (next === 'custom' && !customFrom && !customTo) {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), 1)
+      setCustomFrom(toYmd(start))
+      setCustomTo(toYmd(now))
+    }
+    setPeriod(next)
+  }, [customFrom, customTo])
 
   const anyFilter = CHIPS.some(c => filterValues[c.urlKey]) || period !== 'this-month'
 
@@ -366,7 +411,7 @@ function SubscriptionsReportInner() {
           </span>
           <select
             value={period}
-            onChange={(e) => setPeriod(e.target.value as PeriodPreset)}
+            onChange={(e) => changePeriod(e.target.value as PeriodPreset)}
             aria-label="Filter by Period"
             className="absolute inset-0 opacity-0 cursor-pointer"
           >
@@ -385,6 +430,42 @@ function SubscriptionsReportInner() {
           </button>
         )}
       </div>
+
+      {/* Custom date range — visible only when Custom is picked.
+          Native <input type="date"> gives a real calendar on every
+          modern browser + a proper wheel picker on mobile, no
+          dependency. "To" is inclusive from the user's view; we
+          bump it +1 day inside periodDates so backend's half-open
+          [from, to) semantics match. */}
+      {period === 'custom' && (
+        <div className="flex flex-wrap gap-3 items-center">
+          <label className="text-xs text-slate-500 flex items-center gap-2">
+            From
+            <input
+              type="date"
+              value={customFrom}
+              max={customTo || undefined}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm text-slate-700 bg-white"
+            />
+          </label>
+          <label className="text-xs text-slate-500 flex items-center gap-2">
+            To
+            <input
+              type="date"
+              value={customTo}
+              min={customFrom || undefined}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1 text-sm text-slate-700 bg-white"
+            />
+          </label>
+          {(!customFrom || !customTo) && (
+            <span className="text-xs text-amber-700">
+              Pick both dates to filter.
+            </span>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
@@ -411,7 +492,11 @@ function SubscriptionsReportInner() {
           data={newSubs}
           loading={loading}
           accent={accent}
-          periodLabel={PERIOD_PRESETS.find(p => p.key === period)?.label ?? 'This month'}
+          periodLabel={
+            period === 'custom' && customFrom && customTo
+              ? `${customFrom} → ${customTo}`
+              : (PERIOD_PRESETS.find(p => p.key === period)?.label ?? 'This month')
+          }
         />
       </div>
 
