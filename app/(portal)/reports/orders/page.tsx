@@ -1,16 +1,15 @@
 'use client'
 
-// Client Reports — Subscriptions drill (Phase 1).
+// Client Reports — Orders drill (Phase 1).
 //
 // Filters:
-//   Crop · State · District · Package — narrow subject scope.
-//   Period — bounds "New" only (Active / Total are point-in-time).
-// All filter state lives in local useState; URL is a side-effect
-// via window.history.replaceState (Next 15 router pitfall — see
-// feedback_next15_url_filter_state_pattern.md).
+//   Crop · State · District · Package · Period.
+// Period matters for every Orders metric (they're all time-bounded
+// event counts), so unlike the Subscriptions page — where Period
+// only bounded the New card — here Period always narrows the result.
 //
-// Metrics wired today: ACTIVE, TOTAL, NEW. Dimension drills come
-// as the *_by_dimension queries fill in on the backend.
+// Metric wired today: COUNT. ITEMS / BRAND_MIX / ROUTING /
+// CONVERSION fill in as the queries.py stubs land.
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
@@ -19,13 +18,8 @@ import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
 
-interface SubsMetricResponse {
-  subscriptions: number
-  farmers: number
-}
-
-interface SubsNewResponse {
-  relationships: number
+interface OrdersCountResponse {
+  orders: number
   farmers: number
 }
 
@@ -41,7 +35,6 @@ interface FilterOptionsResponse {
   packages: FilterOption[]
 }
 
-// URL param key ↔ backend query param + user-facing label
 const CHIPS = [
   { urlKey: 'crop',     apiKey: 'crop_cosh_id',     optionsKey: 'crops' as const,     label: 'Crop',     allLabel: 'All crops' },
   { urlKey: 'state',    apiKey: 'state_cosh_id',    optionsKey: 'states' as const,    label: 'State',    allLabel: 'All states' },
@@ -49,10 +42,6 @@ const CHIPS = [
   { urlKey: 'package',  apiKey: 'package_id',       optionsKey: 'packages' as const,  label: 'Package',  allLabel: 'All packages' },
 ] as const
 
-// Period presets — the Period chip is a preset picker rather than a
-// UUID picker. Default is 'this-month' so the "New" card answers
-// "how many new farmers signed up this month?" out of the box.
-// 'custom' reveals two native date inputs below the chip row.
 const PERIOD_PRESETS = [
   { key: 'this-month', label: 'This month' },
   { key: 'last-month', label: 'Last month' },
@@ -63,7 +52,6 @@ const PERIOD_PRESETS = [
 
 type PeriodPreset = typeof PERIOD_PRESETS[number]['key']
 
-// Format a Date as YYYY-MM-DD (local timezone) for <input type="date">.
 function toYmd(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -93,9 +81,6 @@ function periodDates(
     return { from, to }
   }
   if (preset === 'custom') {
-    // Date-input value ("YYYY-MM-DD") + local midnight is the user's
-    // intent. To is INCLUSIVE from the user's view, so bump +1 day
-    // to match the backend's [from, to) half-open window semantics.
     const from = customFrom ? new Date(`${customFrom}T00:00:00`) : undefined
     let to: Date | undefined
     if (customTo) {
@@ -104,92 +89,21 @@ function periodDates(
     }
     return { from, to }
   }
-  return {}  // 'all' — no bounds
+  return {}
 }
 
-export default function SubscriptionsReportPage() {
-  // useSearchParams needs a Suspense boundary for static prerendering
-  // in Next 15. See: https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout
+type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
+const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
+
+export default function OrdersReportPage() {
   return (
     <Suspense fallback={<div className="text-slate-400 text-sm">Loading…</div>}>
-      <SubscriptionsReportInner />
+      <OrdersReportInner />
     </Suspense>
   )
 }
 
-function MetricCard({
-  label, hint, data, loading, accent,
-}: {
-  label: string
-  hint: string
-  data: SubsMetricResponse | null
-  loading: boolean
-  accent: string
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
-      <p className="text-sm font-medium text-slate-500">{label}</p>
-      {loading ? (
-        <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
-      ) : data ? (
-        <>
-          <p
-            className="mt-3 text-5xl font-bold tabular-nums"
-            style={{ color: accent }}
-          >
-            {data.subscriptions.toLocaleString()}
-          </p>
-          <p className="mt-2 text-sm text-slate-600">
-            {data.farmers.toLocaleString()}{' '}
-            {data.farmers === 1 ? 'farmer' : 'farmers'}
-          </p>
-        </>
-      ) : null}
-      <p className="mt-3 text-xs text-slate-400">{hint}</p>
-    </div>
-  )
-}
-
-function NewSubscriptionsCard({
-  data, loading, accent, periodLabel,
-}: {
-  data: SubsNewResponse | null
-  loading: boolean
-  accent: string
-  periodLabel: string
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
-      <p className="text-sm font-medium text-slate-500">New Subscriptions</p>
-      {loading ? (
-        <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
-      ) : data ? (
-        <>
-          <p
-            className="mt-3 text-5xl font-bold tabular-nums"
-            style={{ color: accent }}
-          >
-            {data.relationships.toLocaleString()}
-          </p>
-          <p className="mt-2 text-sm text-slate-600">
-            {data.farmers.toLocaleString()}{' '}
-            first-time {data.farmers === 1 ? 'farmer' : 'farmers'}
-          </p>
-        </>
-      ) : null}
-      <p className="mt-3 text-xs text-slate-400">
-        {periodLabel}. First-time = farmer's very first subscription
-        within the current chip scope fell inside the window.
-      </p>
-    </div>
-  )
-}
-
-type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
-
-const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
-
-function SubscriptionsReportInner() {
+function OrdersReportInner() {
   const client = getClient()
   const clientId = client?.id
   const accent = client?.primary_colour || '#1A5C2A'
@@ -197,13 +111,6 @@ function SubscriptionsReportInner() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  // Filter values live in local state; URL is a side-effect for
-  // bookmarking. We deliberately do NOT drive the UI through
-  // useRouter/useSearchParams — Next 15 shallow-navigation on the same
-  // pathname was skipping re-renders and the chip clears did nothing
-  // (2026-07-27 staging bug). window.history.replaceState updates the
-  // URL bar without touching the router, and useState guarantees the
-  // re-render.
   const [filterValues, setFilterValues] = useState<FilterValues>(() => ({
     crop:     searchParams.get('crop')     || '',
     state:    searchParams.get('state')    || '',
@@ -217,14 +124,11 @@ function SubscriptionsReportInner() {
   const [customFrom, setCustomFrom] = useState<string>(() => searchParams.get('from') || '')
   const [customTo,   setCustomTo]   = useState<string>(() => searchParams.get('to')   || '')
 
-  const [active, setActive] = useState<SubsMetricResponse | null>(null)
-  const [total, setTotal] = useState<SubsMetricResponse | null>(null)
-  const [newSubs, setNewSubs] = useState<SubsNewResponse | null>(null)
+  const [count, setCount] = useState<OrdersCountResponse | null>(null)
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Fetch filter chip options once per client.
   useEffect(() => {
     if (!clientId) return
     api
@@ -233,45 +137,29 @@ function SubscriptionsReportInner() {
       .catch(() => { /* filter chips will just be empty; page still works */ })
   }, [clientId])
 
-  // Fetch all three metrics whenever any filter or the period changes.
   useEffect(() => {
     if (!clientId) return
     setLoading(true); setError('')
-    const filterParams = new URLSearchParams()
+    const q = new URLSearchParams()
     for (const chip of CHIPS) {
       const v = filterValues[chip.urlKey]
-      if (v) filterParams.set(chip.apiKey, v)
+      if (v) q.set(chip.apiKey, v)
     }
     const { from, to } = periodDates(period, customFrom, customTo)
-    const url = (metric: 'ACTIVE' | 'TOTAL' | 'NEW') => {
-      const q = new URLSearchParams(filterParams)
-      q.set('metric', metric)
-      if (metric === 'NEW') {
-        if (from) q.set('period_from', from.toISOString())
-        if (to)   q.set('period_to',   to.toISOString())
-      }
-      return `/client/${clientId}/reports/subscriptions?${q.toString()}`
-    }
-    Promise.all([
-      api.get<SubsMetricResponse>(url('ACTIVE')),
-      api.get<SubsMetricResponse>(url('TOTAL')),
-      api.get<SubsNewResponse>(url('NEW')),
-    ])
-      .then(([activeRes, totalRes, newRes]) => {
-        setActive(activeRes.data)
-        setTotal(totalRes.data)
-        setNewSubs(newRes.data)
-      })
+    if (from) q.set('period_from', from.toISOString())
+    if (to)   q.set('period_to',   to.toISOString())
+    q.set('metric', 'COUNT')
+    api
+      .get<OrdersCountResponse>(
+        `/client/${clientId}/reports/orders?${q.toString()}`,
+      )
+      .then(({ data }) => setCount(data))
       .catch((err) =>
-        setError(
-          extractErrorMessage(err, 'Could not load subscriptions report.'),
-        ),
+        setError(extractErrorMessage(err, 'Could not load orders report.')),
       )
       .finally(() => setLoading(false))
   }, [clientId, filterValues, period, customFrom, customTo])
 
-  // Sync URL bar to filter + period state so bookmarks + shares work.
-  // Skip the 'this-month' default so ordinary URLs stay clean.
   useEffect(() => {
     const params = new URLSearchParams()
     for (const chip of CHIPS) {
@@ -301,9 +189,6 @@ function SubscriptionsReportInner() {
     setCustomTo('')
   }, [])
 
-  // Switching to Custom for the first time — seed the two inputs
-  // with this-month's range so the user has something to edit
-  // rather than staring at two empty date pickers.
   const changePeriod = useCallback((next: PeriodPreset) => {
     if (next === 'custom' && !customFrom && !customTo) {
       const now = new Date()
@@ -315,6 +200,9 @@ function SubscriptionsReportInner() {
   }, [customFrom, customTo])
 
   const anyFilter = CHIPS.some(c => filterValues[c.urlKey]) || period !== 'this-month'
+  const periodLabel = period === 'custom' && customFrom && customTo
+    ? `${customFrom} → ${customTo}`
+    : (PERIOD_PRESETS.find(p => p.key === period)?.label ?? 'This month')
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -323,35 +211,25 @@ function SubscriptionsReportInner() {
           Reports
         </p>
         <h1 className="text-2xl font-bold text-slate-900 mt-1">
-          Subscriptions
+          Orders
         </h1>
         <p className="text-sm text-slate-600 mt-1">
-          A snapshot of your subscription base. Training-session subscriptions
-          and cleaned-up entries are excluded automatically.
+          Orders your farmers placed. Only orders that reached the
+          dealer (Sent and beyond) count — drafts, cancellations, and
+          expiries are excluded. Training and cleaned-up entries are
+          excluded automatically.
         </p>
       </header>
 
       <ReportSubjectTabs />
 
-      {/* Filter chip row.
-          Native <select> would auto-size to the WIDEST option in its
-          dropdown (long package names blew the Package chip to full
-          width, wrapping the row). We layer the select as an invisible
-          overlay on top of the label so the pill sizes to the DISPLAYED
-          text — short — while keeping every native affordance
-          (keyboard, mobile picker, ARIA). */}
       <div className="flex flex-wrap gap-2 items-center">
         {CHIPS.map(chip => {
           const opts = options?.[chip.optionsKey] ?? []
           const value = filterValues[chip.urlKey]
           const isSet = !!value
-          // While options are loading, show a placeholder instead of
-          // the raw UUID from the URL — otherwise the chip briefly
-          // renders "…4116-4d01-8c06-…" before the friendly name resolves.
           const selectedLabel = isSet
-            ? (options
-                ? (opts.find(o => o.id === value)?.name ?? value)
-                : '…')
+            ? (options ? (opts.find(o => o.id === value)?.name ?? value) : '…')
             : chip.allLabel
           return (
             <div
@@ -365,14 +243,7 @@ function SubscriptionsReportInner() {
               <span className={`text-xs uppercase tracking-wider ${isSet ? 'text-white/70' : 'text-slate-400'}`}>
                 {chip.label}
               </span>
-              <span className="max-w-[10rem] truncate">
-                {selectedLabel}
-              </span>
-              {/* Select overlay: covers the LABEL + VALUE area only,
-                  leaving the × button (when present) outside so the
-                  clear click never falls through to the select. When
-                  no × is showing, right-0 makes the overlay fill the
-                  whole pill so opening the dropdown works everywhere. */}
+              <span className="max-w-[10rem] truncate">{selectedLabel}</span>
               <select
                 value={value}
                 onChange={(e) => updateFilter(chip.urlKey, e.target.value)}
@@ -402,13 +273,9 @@ function SubscriptionsReportInner() {
             </div>
           )
         })}
-        {/* Period chip. Always has a value (default 'this-month'); no ×
-            because "no period" is not a state — 'all' is the wide-open
-            preset. Only affects the "New" card; Active + Total ignore. */}
+
         <div className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors border-slate-800 bg-slate-800 text-white">
-          <span className="text-xs uppercase tracking-wider text-white/70">
-            Period
-          </span>
+          <span className="text-xs uppercase tracking-wider text-white/70">Period</span>
           <span className="max-w-[10rem] truncate">
             {PERIOD_PRESETS.find(p => p.key === period)?.label ?? 'This month'}
           </span>
@@ -423,6 +290,7 @@ function SubscriptionsReportInner() {
             ))}
           </select>
         </div>
+
         {anyFilter && (
           <button
             type="button"
@@ -434,12 +302,6 @@ function SubscriptionsReportInner() {
         )}
       </div>
 
-      {/* Custom date range — visible only when Custom is picked.
-          Native <input type="date"> gives a real calendar on every
-          modern browser + a proper wheel picker on mobile, no
-          dependency. "To" is inclusive from the user's view; we
-          bump it +1 day inside periodDates so backend's half-open
-          [from, to) semantics match. */}
       {period === 'custom' && (
         <div className="flex flex-wrap gap-3 items-center">
           <label className="text-xs text-slate-500 flex items-center gap-2">
@@ -463,9 +325,7 @@ function SubscriptionsReportInner() {
             />
           </label>
           {(!customFrom || !customTo) && (
-            <span className="text-xs text-amber-700">
-              Pick both dates to filter.
-            </span>
+            <span className="text-xs text-amber-700">Pick both dates to filter.</span>
           )}
         </div>
       )}
@@ -477,35 +337,32 @@ function SubscriptionsReportInner() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MetricCard
-          label="Active Subscriptions"
-          hint="Currently ACTIVE (excludes lapsed, cancelled, unsubscribed). Period does not apply."
-          data={active}
-          loading={loading}
-          accent={accent}
-        />
-        <MetricCard
-          label="Total Subscriptions"
-          hint="Every subscription ever created, any status. Period does not apply."
-          data={total}
-          loading={loading}
-          accent={accent}
-        />
-        <NewSubscriptionsCard
-          data={newSubs}
-          loading={loading}
-          accent={accent}
-          periodLabel={
-            period === 'custom' && customFrom && customTo
-              ? `${customFrom} → ${customTo}`
-              : (PERIOD_PRESETS.find(p => p.key === period)?.label ?? 'This month')
-          }
-        />
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+          <p className="text-sm font-medium text-slate-500">Orders</p>
+          {loading ? (
+            <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
+          ) : count ? (
+            <>
+              <p className="mt-3 text-5xl font-bold tabular-nums" style={{ color: accent }}>
+                {count.orders.toLocaleString()}
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                {count.farmers.toLocaleString()}{' '}
+                {count.farmers === 1 ? 'farmer' : 'farmers'}
+              </p>
+            </>
+          ) : null}
+          <p className="mt-3 text-xs text-slate-400">
+            {periodLabel}. Orders that reached the dealer (Sent /
+            Accepted / Processing / Sent for Approval / Partially
+            Approved / Completed).
+          </p>
+        </div>
       </div>
 
       <p className="text-xs text-slate-400">
-        Coming next — order metrics (count, routing, brand mix, sale
-        conversion) and drill views by crop, district, and package.
+        Coming next — items, brand mix (Locked / Unlocked / No-brand),
+        routing (Direct vs Via Facilitator), and sale conversion.
       </p>
     </div>
   )
