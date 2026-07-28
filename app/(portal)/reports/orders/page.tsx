@@ -40,6 +40,12 @@ interface OrdersBrandMixResponse {
   open: number
 }
 
+interface OrdersConversionResponse {
+  ordered: number
+  approved: number
+  picked_up: number
+}
+
 interface FilterOption {
   id: string
   name: string
@@ -272,6 +278,74 @@ function ItemsCard({
   )
 }
 
+// Sale conversion — the money card. Big headline number is the
+// picked-up / ordered ratio (a genuine sale is farmer receipt).
+// Two secondary ratios frame the funnel: Approval (approved /
+// ordered) and Fulfilment (picked_up / approved — diagnostic on
+// how many farmer-approved orders actually landed).
+function ConversionCard({
+  data, loading, accent, periodLabel,
+}: {
+  data: OrdersConversionResponse | null
+  loading: boolean
+  accent: string
+  periodLabel: string
+}) {
+  const pct = (num: number, den: number): string =>
+    den > 0 ? `${Math.round((num / den) * 100)}%` : '—'
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6 md:col-span-2">
+      <p className="text-sm font-medium text-slate-500">Sale Conversion</p>
+      {loading ? (
+        <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
+      ) : data ? (
+        <>
+          <div className="mt-3 flex items-baseline gap-3">
+            <p
+              className="text-6xl font-bold tabular-nums"
+              style={{ color: accent }}
+            >
+              {pct(data.picked_up, data.ordered)}
+            </p>
+            <p className="text-sm text-slate-500">
+              {data.picked_up.toLocaleString()} of{' '}
+              {data.ordered.toLocaleString()} orders reached the farmer
+            </p>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+            <div className="border-l-2 border-slate-200 pl-3">
+              <p className="text-slate-500 text-xs">Approval rate</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+                {pct(data.approved, data.ordered)}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {data.approved.toLocaleString()} of{' '}
+                {data.ordered.toLocaleString()} approved
+              </p>
+            </div>
+            <div className="border-l-2 border-slate-200 pl-3">
+              <p className="text-slate-500 text-xs">Fulfilment rate</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+                {pct(data.picked_up, data.approved)}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {data.picked_up.toLocaleString()} of{' '}
+                {data.approved.toLocaleString()} received
+              </p>
+            </div>
+          </div>
+        </>
+      ) : null}
+      <p className="mt-3 text-xs text-slate-400">
+        {periodLabel}. Sale = at least one item in the order was
+        received by the farmer. Fulfilment splits out how many
+        farmer-approved orders actually completed vs stalled between
+        approval and pickup.
+      </p>
+    </div>
+  )
+}
+
 // Brand mix palette. Locked = brand accent (direct business the
 // client captured). Recommended = amber (SE guided but dealer can
 // substitute). Open = slate (dealer's free choice). Classification
@@ -383,6 +457,7 @@ function OrdersReportInner() {
   const [routing, setRouting] = useState<OrdersRoutingResponse | null>(null)
   const [items, setItems] = useState<OrdersItemsResponse | null>(null)
   const [brandMix, setBrandMix] = useState<OrdersBrandMixResponse | null>(null)
+  const [conversion, setConversion] = useState<OrdersConversionResponse | null>(null)
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -406,7 +481,7 @@ function OrdersReportInner() {
     const { from, to } = periodDates(period, customFrom, customTo)
     if (from) filterParams.set('period_from', from.toISOString())
     if (to)   filterParams.set('period_to',   to.toISOString())
-    const url = (metric: 'COUNT' | 'ROUTING' | 'ITEMS' | 'BRAND_MIX') => {
+    const url = (metric: 'COUNT' | 'ROUTING' | 'ITEMS' | 'BRAND_MIX' | 'CONVERSION') => {
       const q = new URLSearchParams(filterParams)
       q.set('metric', metric)
       return `/client/${clientId}/reports/orders?${q.toString()}`
@@ -416,12 +491,14 @@ function OrdersReportInner() {
       api.get<OrdersRoutingResponse>(url('ROUTING')),
       api.get<OrdersItemsResponse>(url('ITEMS')),
       api.get<OrdersBrandMixResponse>(url('BRAND_MIX')),
+      api.get<OrdersConversionResponse>(url('CONVERSION')),
     ])
-      .then(([countRes, routingRes, itemsRes, brandRes]) => {
+      .then(([countRes, routingRes, itemsRes, brandRes, convRes]) => {
         setCount(countRes.data)
         setRouting(routingRes.data)
         setItems(itemsRes.data)
         setBrandMix(brandRes.data)
+        setConversion(convRes.data)
       })
       .catch((err) =>
         setError(extractErrorMessage(err, 'Could not load orders report.')),
@@ -606,6 +683,13 @@ function OrdersReportInner() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ConversionCard
+          data={conversion}
+          loading={loading}
+          accent={accent}
+          periodLabel={periodLabel}
+        />
+
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
           <p className="text-sm font-medium text-slate-500">Orders</p>
           {loading ? (
@@ -651,7 +735,8 @@ function OrdersReportInner() {
       </div>
 
       <p className="text-xs text-slate-400">
-        Coming next — sale conversion.
+        Headline metrics complete. Drill views by crop, district,
+        package and time arrive next.
       </p>
     </div>
   )
