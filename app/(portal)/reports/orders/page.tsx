@@ -41,6 +41,13 @@ interface OrdersBrandMixResponse {
   open: number
 }
 
+interface DimensionRow {
+  key: string
+  label: string
+  orders: number
+  farmers: number
+}
+
 interface OrdersConversionResponse {
   ordered: number
   approved: number
@@ -425,6 +432,144 @@ function BrandMixCard({
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
 
+// ── Drill panel ───────────────────────────────────────────────────────────────
+// Break-down-by-dimension table under the headline cards. Follows
+// the plan doc's "4 dimension tabs in the same order" — this pass
+// wires Orders / COUNT as the proof; the same DrillPanel will host
+// other metrics as they land.
+
+const DIMENSIONS = [
+  { key: 'CROP',    label: 'Crop' },
+  { key: 'SPACE',   label: 'State' },
+  { key: 'PACKAGE', label: 'Package' },
+  { key: 'TIME',    label: 'Time' },
+] as const
+type Dimension = typeof DIMENSIONS[number]['key']
+
+function formatTimeLabel(iso: string, period: PeriodPreset): string {
+  // Backend picks bucket size (day/week/month) via the same period.
+  // Frontend formats consistent with that choice.
+  const d = new Date(iso)
+  if (period === 'this-month' || period === 'last-month' ||
+      (period === 'custom')) {
+    // Weekly bucket most of the time → show week-of.
+    return `Week of ${d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}`
+  }
+  if (period === 'all') {
+    return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+  }
+  // last-90d → weekly
+  return `Week of ${d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}`
+}
+
+function DrillPanel({
+  clientId, filterValues, period, customFrom, customTo, accent,
+}: {
+  clientId: string
+  filterValues: FilterValues
+  period: PeriodPreset
+  customFrom: string
+  customTo: string
+  accent: string
+}) {
+  const [dimension, setDimension] = useState<Dimension>('CROP')
+  const [rows, setRows] = useState<DimensionRow[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setLoading(true); setError('')
+    const q = new URLSearchParams({ metric: 'COUNT', dimension })
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) q.set(chip.apiKey, v)
+    }
+    const { from, to } = periodDates(period, customFrom, customTo)
+    if (from) q.set('period_from', from.toISOString())
+    if (to)   q.set('period_to',   to.toISOString())
+    api
+      .get<DimensionRow[]>(
+        `/client/${clientId}/reports/orders?${q.toString()}`,
+      )
+      .then(({ data }) => setRows(data))
+      .catch((err) =>
+        setError(extractErrorMessage(err, 'Could not load drill.')),
+      )
+      .finally(() => setLoading(false))
+  }, [clientId, filterValues, period, customFrom, customTo, dimension])
+
+  const maxVal = rows && rows.length > 0
+    ? Math.max(...rows.map(r => r.orders), 1)
+    : 1
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="text-sm font-medium text-slate-500">
+          Orders broken down by
+        </p>
+        <div className="flex items-center gap-1">
+          {DIMENSIONS.map(d => {
+            const active = d.key === dimension
+            return (
+              <button
+                key={d.key}
+                type="button"
+                onClick={() => setDimension(d.key)}
+                className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                  active
+                    ? 'border-slate-800 bg-slate-800 text-white'
+                    : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400'
+                }`}
+              >
+                {d.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {error && (
+        <p className="mt-3 text-sm text-red-600">{error}</p>
+      )}
+
+      {loading ? (
+        <p className="mt-4 text-slate-400 text-sm">Loading…</p>
+      ) : !rows || rows.length === 0 ? (
+        <p className="mt-4 text-slate-400 text-sm">
+          No data for this dimension with the current filters.
+        </p>
+      ) : (
+        <ul className="mt-4 space-y-2">
+          {rows.map((r) => {
+            const label = dimension === 'TIME'
+              ? formatTimeLabel(r.key, period)
+              : (r.label || r.key || '—')
+            const widthPct = Math.round((r.orders / maxVal) * 100)
+            return (
+              <li key={r.key} className="flex items-center gap-3 text-sm">
+                <span className="w-40 truncate text-slate-700">{label}</span>
+                <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
+                  <div
+                    className="h-full transition-all"
+                    style={{ width: `${widthPct}%`, backgroundColor: accent }}
+                  />
+                </div>
+                <span className="w-16 text-right tabular-nums text-slate-800 font-medium">
+                  {r.orders.toLocaleString()}
+                </span>
+                <span className="w-24 text-right text-xs text-slate-500 tabular-nums">
+                  {r.farmers.toLocaleString()} farmer{r.farmers === 1 ? '' : 's'}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function OrdersReportPage() {
   return (
     <Suspense fallback={<div className="text-slate-400 text-sm">Loading…</div>}>
@@ -754,9 +899,20 @@ function OrdersReportInner() {
         />
       </div>
 
+      {clientId && (
+        <DrillPanel
+          clientId={clientId}
+          filterValues={filterValues}
+          period={period}
+          customFrom={customFrom}
+          customTo={customTo}
+          accent={accent}
+        />
+      )}
+
       <p className="text-xs text-slate-400">
-        Headline metrics complete. Drill views by crop, district,
-        package and time arrive next.
+        Drills for the other Orders metrics (Routing, Items, Brand
+        Mix, Sale Conversion) arrive in the next builds.
       </p>
     </div>
   )
