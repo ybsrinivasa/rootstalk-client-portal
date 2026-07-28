@@ -97,6 +97,13 @@ function periodDates(
   return {}
 }
 
+// Categorical color for Via Facilitator. Amber-500 pairs clearly
+// with any brand-green primary (this client) and reads distinct
+// against any brand colour that isn't itself amber/orange. If a
+// future client's brand IS amber, revisit and pick from
+// client.secondary_colour or a per-client override.
+const VIA_FACILITATOR_COLOUR = '#F59E0B'
+
 function RoutingCard({
   data, loading, accent, periodLabel,
 }: {
@@ -119,25 +126,46 @@ function RoutingCard({
               <p className="text-3xl font-bold tabular-nums" style={{ color: accent }}>
                 {data.direct.toLocaleString()}
               </p>
-              <p className="text-xs text-slate-500 mt-1">Direct</p>
+              <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                <span
+                  className="inline-block w-2 h-2 rounded-full"
+                  style={{ backgroundColor: accent }}
+                />
+                Direct
+              </p>
             </div>
             <div>
-              <p className="text-3xl font-bold tabular-nums text-slate-700">
+              <p
+                className="text-3xl font-bold tabular-nums"
+                style={{ color: VIA_FACILITATOR_COLOUR }}
+              >
                 {data.via_facilitator.toLocaleString()}
               </p>
-              <p className="text-xs text-slate-500 mt-1">Via Facilitator</p>
+              <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                <span
+                  className="inline-block w-2 h-2 rounded-full"
+                  style={{ backgroundColor: VIA_FACILITATOR_COLOUR }}
+                />
+                Via Facilitator
+              </p>
             </div>
           </div>
           {total > 0 && (
             <div
-              className="mt-4 flex h-2 w-full overflow-hidden rounded-full bg-slate-200"
+              className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-slate-100"
               aria-label={`Direct ${directPct}%, Via Facilitator ${100 - directPct}%`}
             >
               <div
                 className="h-full"
                 style={{ width: `${directPct}%`, backgroundColor: accent }}
               />
-              <div className="h-full bg-slate-500" style={{ width: `${100 - directPct}%` }} />
+              <div
+                className="h-full"
+                style={{
+                  width: `${100 - directPct}%`,
+                  backgroundColor: VIA_FACILITATOR_COLOUR,
+                }}
+              />
             </div>
           )}
         </>
