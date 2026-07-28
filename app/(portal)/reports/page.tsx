@@ -19,11 +19,22 @@ import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
 
-interface OverviewResponse {
+interface CurrentBlock {
   subs_new:          { relationships: number; farmers: number }
   subs_active:       { subscriptions: number; farmers: number }
   orders_count:      { orders: number; farmers: number }
   orders_conversion: { ordered: number; approved: number; picked_up: number }
+}
+
+interface PrevBlock {
+  subs_new:          { relationships: number; farmers: number }
+  orders_count:      { orders: number; farmers: number }
+  orders_conversion: { ordered: number; approved: number; picked_up: number }
+}
+
+interface OverviewResponse {
+  current: CurrentBlock
+  prev: PrevBlock | null
 }
 
 interface FilterOption { id: string; name: string }
@@ -90,6 +101,46 @@ function periodDates(
   return {}
 }
 
+// Prev-period window for the delta badges. Mirrors the current
+// preset's window shifted one unit back:
+//   this-month → last-month
+//   last-month → month before that
+//   last-90d   → 90d before (i.e. 180d-ago → 90d-ago)
+//   custom     → same-length window immediately preceding
+//   all        → no prev (delta undefined)
+function prevPeriodDates(
+  preset: PeriodPreset, customFrom: string, customTo: string,
+): { from?: Date; to?: Date } {
+  const now = new Date()
+  if (preset === 'this-month') {
+    return {
+      from: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      to:   new Date(now.getFullYear(), now.getMonth(), 1),
+    }
+  }
+  if (preset === 'last-month') {
+    return {
+      from: new Date(now.getFullYear(), now.getMonth() - 2, 1),
+      to:   new Date(now.getFullYear(), now.getMonth() - 1, 1),
+    }
+  }
+  if (preset === 'last-90d') {
+    const to = new Date(); to.setDate(to.getDate() - 90); to.setHours(0, 0, 0, 0)
+    const from = new Date(to); from.setDate(from.getDate() - 90)
+    return { from, to }
+  }
+  if (preset === 'custom') {
+    if (!customFrom || !customTo) return {}
+    const cur = periodDates('custom', customFrom, customTo)
+    if (!cur.from || !cur.to) return {}
+    const days = Math.round((cur.to.getTime() - cur.from.getTime()) / 86400000)
+    const to = new Date(cur.from)
+    const from = new Date(cur.from); from.setDate(from.getDate() - days)
+    return { from, to }
+  }
+  return {}  // 'all' — no prev
+}
+
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '' }
 
@@ -114,8 +165,45 @@ function buildDrillQuery(
   return qs ? `?${qs}` : ''
 }
 
+// Delta = (current - prev) / prev × 100. When prev is 0 (or the
+// prev block is missing entirely — e.g. period='all'), the delta
+// is undefined. Green up, amber down, slate zero.
+interface DeltaInfo {
+  pct: number     // signed percentage
+  positive: boolean
+  isZero: boolean
+}
+
+function computeDelta(current: number, prev: number | undefined): DeltaInfo | null {
+  if (prev === undefined) return null
+  if (prev === 0) {
+    // No prev to compare against — surface as neutral (—).
+    return null
+  }
+  const pct = ((current - prev) / prev) * 100
+  return { pct, positive: pct > 0, isZero: Math.abs(pct) < 0.5 }
+}
+
+function DeltaBadge({ delta }: { delta: DeltaInfo | null }) {
+  if (delta === null) return null
+  const rounded = Math.round(delta.pct)
+  const label = delta.isZero
+    ? '0%'
+    : `${delta.positive ? '+' : ''}${rounded}%`
+  const tone = delta.isZero
+    ? 'bg-slate-100 text-slate-600'
+    : delta.positive
+      ? 'bg-green-100 text-green-700'
+      : 'bg-amber-100 text-amber-700'
+  return (
+    <span className={`ml-2 inline-block text-xs font-medium tabular-nums px-1.5 py-0.5 rounded ${tone}`}>
+      {label}
+    </span>
+  )
+}
+
 function HeadlineCard({
-  label, big, caption, href, hint, loading, accent,
+  label, big, caption, href, hint, loading, accent, delta,
 }: {
   label: string
   big: string | null
@@ -124,6 +212,7 @@ function HeadlineCard({
   hint: string
   loading: boolean
   accent: string
+  delta?: DeltaInfo | null
 }) {
   return (
     <Link
@@ -140,11 +229,14 @@ function HeadlineCard({
         <p className="mt-3 text-4xl font-bold text-slate-300">…</p>
       ) : big !== null ? (
         <>
-          <p
-            className="mt-3 text-5xl font-bold tabular-nums"
-            style={{ color: accent }}
-          >
-            {big}
+          <p className="mt-3 flex items-baseline">
+            <span
+              className="text-5xl font-bold tabular-nums"
+              style={{ color: accent }}
+            >
+              {big}
+            </span>
+            {delta && <DeltaBadge delta={delta} />}
           </p>
           {caption && (
             <p className="mt-2 text-sm text-slate-600">{caption}</p>
@@ -209,6 +301,15 @@ function OverviewInner() {
     const { from, to } = periodDates(period, customFrom, customTo)
     if (from) q.set('period_from', from.toISOString())
     if (to)   q.set('period_to',   to.toISOString())
+    // Prev window — only when the preset has a natural "before"
+    // interpretation (i.e. not 'all'). If both from/to resolve, ask
+    // the backend to also run the period-based metrics against the
+    // prev window so the frontend can render delta badges.
+    const prev = prevPeriodDates(period, customFrom, customTo)
+    if (prev.from && prev.to) {
+      q.set('prev_period_from', prev.from.toISOString())
+      q.set('prev_period_to',   prev.to.toISOString())
+    }
     api
       .get<OverviewResponse>(
         `/client/${clientId}/reports/overview?${q.toString()}`,
@@ -267,10 +368,34 @@ function OverviewInner() {
   // Carry filter state to drill pages on card click.
   const drillQs = buildDrillQuery(filterValues, period, customFrom, customTo)
 
-  const conv = data?.orders_conversion
+  const cur = data?.current
+  const prev = data?.prev  // null when period is 'all'
+
+  const conv = cur?.orders_conversion
   const salePct = conv && conv.ordered > 0
     ? `${Math.round((conv.picked_up / conv.ordered) * 100)}%`
     : (conv ? '—' : null)
+
+  // Deltas — only when a prev block came back.
+  const deltaFarmers = prev
+    ? computeDelta(cur!.subs_new.farmers, prev.subs_new.farmers)
+    : null
+  const deltaOrders = prev
+    ? computeDelta(cur!.orders_count.orders, prev.orders_count.orders)
+    : null
+  // Sale conversion delta is on the RATIO (percentage points),
+  // not on the raw ordered/picked_up numbers. Special-case: return
+  // a synthetic DeltaInfo whose "pct" is the pp difference.
+  const deltaSale = (() => {
+    if (!prev || !conv) return null
+    const curPct = conv.ordered > 0 ? (conv.picked_up / conv.ordered) * 100 : 0
+    const prevPct = prev.orders_conversion.ordered > 0
+      ? (prev.orders_conversion.picked_up / prev.orders_conversion.ordered) * 100
+      : 0
+    if (prev.orders_conversion.ordered === 0 && conv.ordered === 0) return null
+    const diff = curPct - prevPct
+    return { pct: diff, positive: diff > 0, isZero: Math.abs(diff) < 0.5 }
+  })()
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -403,20 +528,21 @@ function OverviewInner() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <HeadlineCard
           label="New Farmers"
-          big={data ? data.subs_new.farmers.toLocaleString() : null}
-          caption={data
-            ? `${data.subs_new.relationships.toLocaleString()} new subscription${data.subs_new.relationships === 1 ? '' : 's'}`
+          big={cur ? cur.subs_new.farmers.toLocaleString() : null}
+          caption={cur
+            ? `${cur.subs_new.relationships.toLocaleString()} new subscription${cur.subs_new.relationships === 1 ? '' : 's'}`
             : null}
           href={`/reports/subscriptions${drillQs}`}
           hint={`First-time farmers in ${periodLabel.toLowerCase()}.`}
           loading={loading}
           accent={accent}
+          delta={deltaFarmers}
         />
         <HeadlineCard
           label="Active Subscriptions"
-          big={data ? data.subs_active.subscriptions.toLocaleString() : null}
-          caption={data
-            ? `${data.subs_active.farmers.toLocaleString()} farmer${data.subs_active.farmers === 1 ? '' : 's'}`
+          big={cur ? cur.subs_active.subscriptions.toLocaleString() : null}
+          caption={cur
+            ? `${cur.subs_active.farmers.toLocaleString()} farmer${cur.subs_active.farmers === 1 ? '' : 's'}`
             : null}
           href={`/reports/subscriptions${drillQs}`}
           hint="Currently ACTIVE. Period does not apply."
@@ -425,14 +551,15 @@ function OverviewInner() {
         />
         <HeadlineCard
           label="Orders"
-          big={data ? data.orders_count.orders.toLocaleString() : null}
-          caption={data
-            ? `${data.orders_count.farmers.toLocaleString()} farmer${data.orders_count.farmers === 1 ? '' : 's'}`
+          big={cur ? cur.orders_count.orders.toLocaleString() : null}
+          caption={cur
+            ? `${cur.orders_count.farmers.toLocaleString()} farmer${cur.orders_count.farmers === 1 ? '' : 's'}`
             : null}
           href={`/reports/orders${drillQs}`}
           hint={`Orders that reached the dealer in ${periodLabel.toLowerCase()}.`}
           loading={loading}
           accent={accent}
+          delta={deltaOrders}
         />
         <HeadlineCard
           label="Sale Conversion"
@@ -444,12 +571,14 @@ function OverviewInner() {
           hint="Picked up / Ordered."
           loading={loading}
           accent={accent}
+          delta={deltaSale}
         />
       </div>
 
       <p className="text-xs text-slate-400">
-        Prev-period deltas and hero trend charts arrive in the next
-        polish pass.
+        Deltas compare vs the prior period (Last month for This month, etc.).
+        Active has no delta — it's point-in-time. Hero trend charts arrive
+        in the next polish pass.
       </p>
     </div>
   )
