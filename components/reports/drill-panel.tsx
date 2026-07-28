@@ -77,6 +77,14 @@ export function DrillPanel({
   }, [activeMetric, dimension])
 
   const [rows, setRows] = useState<DimensionRow[] | null>(null)
+  // Track which (metric, dimension) pair produced the current rows.
+  // Prevents a stale-data crash: when the user switches metrics,
+  // React re-renders synchronously with the NEW activeMetric config
+  // but the OLD rows in state — calling the new renderRow on an old-
+  // shape row yields {primary: undefined}, and `undefined.toLocaleString()`
+  // downstream crashes the render tree. Guarding rendered computation
+  // on rowsFor === current key skips that broken frame entirely.
+  const [rowsFor, setRowsFor] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -86,9 +94,10 @@ export function DrillPanel({
     const q = new URLSearchParams(baseQuery)
     q.set('metric', activeMetric.key)
     q.set('dimension', dimension)
+    const fetchKey = `${activeMetric.key}:${dimension}`
     api
       .get<DimensionRow[]>(`${endpoint}?${q.toString()}`)
-      .then(({ data }) => setRows(data))
+      .then(({ data }) => { setRows(data); setRowsFor(fetchKey) })
       .catch((err) =>
         setError(extractErrorMessage(err, 'Could not load drill.')),
       )
@@ -97,13 +106,18 @@ export function DrillPanel({
 
   if (!activeMetric) return null
 
-  const rendered = rows?.map(r => ({
-    row: r,
-    ...activeMetric.renderRow(r),
-    label: dimension === 'TIME'
-      ? formatTimeLabel(r.key)
-      : (r.label || r.key || '—'),
-  })) ?? []
+  const currentKey = `${activeMetric.key}:${dimension}`
+  const rowsFresh = rows !== null && rowsFor === currentKey
+
+  const rendered = rowsFresh
+    ? rows!.map(r => ({
+        row: r,
+        ...activeMetric.renderRow(r),
+        label: dimension === 'TIME'
+          ? formatTimeLabel(r.key)
+          : (r.label || r.key || '—'),
+      }))
+    : []
   const maxVal = rendered.length > 0
     ? Math.max(...rendered.map(x => x.primary), 1)
     : 1
@@ -162,7 +176,7 @@ export function DrillPanel({
 
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-      {loading ? (
+      {loading || !rowsFresh ? (
         <p className="mt-4 text-slate-400 text-sm">Loading…</p>
       ) : rendered.length === 0 ? (
         <p className="mt-4 text-slate-400 text-sm">
@@ -185,7 +199,7 @@ export function DrillPanel({
                   />
                 </div>
                 <span className="w-16 text-right tabular-nums text-slate-800 font-medium">
-                  {x.primary.toLocaleString()}
+                  {(x.primary ?? 0).toLocaleString()}
                 </span>
                 <span className="w-56 text-right text-xs text-slate-500 tabular-nums">
                   {x.caption}
