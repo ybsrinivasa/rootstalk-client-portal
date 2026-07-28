@@ -18,6 +18,9 @@ import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
+import {
+  GrowthTrendChart, RankedBarChart, StackedRoutingChart,
+} from '@/components/reports/hero-charts'
 
 interface CurrentBlock {
   subs_new:          { relationships: number; farmers: number }
@@ -281,6 +284,15 @@ function OverviewInner() {
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // Hero chart series — fetched in parallel with overview_bundle.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [growthRows, setGrowthRows] = useState<any[] | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [topStates, setTopStates] = useState<any[] | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ordersByCrop, setOrdersByCrop] = useState<any[] | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [routingOverTime, setRoutingOverTime] = useState<any[] | null>(null)
 
   useEffect(() => {
     if (!clientId) return
@@ -310,11 +322,42 @@ function OverviewInner() {
       q.set('prev_period_from', prev.from.toISOString())
       q.set('prev_period_to',   prev.to.toISOString())
     }
-    api
-      .get<OverviewResponse>(
+    // Chart URLs share chip filters + period. Each hits a drill
+    // endpoint we already have. 5 parallel requests — modest at
+    // current scale and none of them are Overview-only queries.
+    const chartQ = new URLSearchParams()
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) chartQ.set(chip.apiKey, v)
+    }
+    if (from) chartQ.set('period_from', from.toISOString())
+    if (to)   chartQ.set('period_to',   to.toISOString())
+    const chartUrl = (subject: 'subscriptions' | 'orders', metric: string, dimension: string) => {
+      const cq = new URLSearchParams(chartQ)
+      cq.set('metric', metric)
+      cq.set('dimension', dimension)
+      return `/client/${clientId}/reports/${subject}?${cq.toString()}`
+    }
+    Promise.all([
+      api.get<OverviewResponse>(
         `/client/${clientId}/reports/overview?${q.toString()}`,
-      )
-      .then(({ data }) => setData(data))
+      ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      api.get<any[]>(chartUrl('subscriptions', 'NEW',    'TIME')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      api.get<any[]>(chartUrl('subscriptions', 'ACTIVE', 'SPACE')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      api.get<any[]>(chartUrl('orders',        'COUNT',  'CROP')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      api.get<any[]>(chartUrl('orders',        'ROUTING','TIME')),
+    ])
+      .then(([overviewRes, growthRes, statesRes, cropRes, routingRes]) => {
+        setData(overviewRes.data)
+        setGrowthRows(growthRes.data)
+        setTopStates(statesRes.data.map(r => ({ ...r, primary: r.subscriptions })))
+        setOrdersByCrop(cropRes.data.map(r => ({ ...r, primary: r.orders })))
+        setRoutingOverTime(routingRes.data)
+      })
       .catch((err) =>
         setError(extractErrorMessage(err, 'Could not load overview.')),
       )
@@ -575,10 +618,36 @@ function OverviewInner() {
         />
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <GrowthTrendChart
+          data={growthRows}
+          accent={accent}
+          loading={loading}
+        />
+        <RankedBarChart
+          title="Top states by active subscriptions"
+          data={topStates}
+          accent={accent}
+          loading={loading}
+          empty="No active subscriptions with recorded farmer state."
+        />
+        <RankedBarChart
+          title="Orders by crop"
+          data={ordersByCrop}
+          accent={accent}
+          loading={loading}
+          empty="No orders in the current window."
+        />
+        <StackedRoutingChart
+          data={routingOverTime}
+          accent={accent}
+          loading={loading}
+        />
+      </div>
+
       <p className="text-xs text-slate-400">
         Deltas compare vs the prior period (Last month for This month, etc.).
-        Active has no delta — it's point-in-time. Hero trend charts arrive
-        in the next polish pass.
+        Active has no delta — it's point-in-time.
       </p>
     </div>
   )
