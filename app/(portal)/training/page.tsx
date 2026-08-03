@@ -51,7 +51,23 @@ interface TrainingSession {
   training_started_at: string
   training_ends_at: string
   training_status: 'ACTIVE' | 'WINDING_DOWN'
+  training_expert_user_id: string | null
+  training_dealer_user_id: string | null
   counts: TrainingCounts
+}
+
+interface OnboardedExpert {
+  user_id: string
+  name: string | null
+  phone: string | null
+}
+
+interface TrainingDealerInfo {
+  user_id: string
+  name: string | null
+  phone: string | null
+  shop_name: string | null
+  shop_address: string | null
 }
 
 function formatDateTime(iso: string): string {
@@ -243,6 +259,15 @@ export default function TrainingSandboxPage() {
             </div>
           </div>
 
+          {session.training_status === 'ACTIVE' && clientId && (
+            <SessionRolesPanel
+              clientId={clientId}
+              expertUserId={session.training_expert_user_id}
+              dealerUserId={session.training_dealer_user_id}
+              onChanged={load}
+            />
+          )}
+
           {session.training_status === 'ACTIVE' && (
             <div className="flex items-center justify-end">
               <button
@@ -256,6 +281,217 @@ export default function TrainingSandboxPage() {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+// ── Session Roles — Training Expert + Training Dealer ────────────────────
+//
+// Two per-session assignment slots on the training-child row. Both
+// are optional. Unset → today's behaviour (queries queue-routed,
+// picker shows onboarded dealers only). Set → queries pin to the
+// expert; the dealer surfaces in the farmer's picker with a
+// "Training" chip. Both clear on session end via the existing
+// hard-close cascade.
+
+function SessionRolesPanel({
+  clientId,
+  expertUserId,
+  dealerUserId,
+  onChanged,
+}: {
+  clientId: string
+  expertUserId: string | null
+  dealerUserId: string | null
+  onChanged: () => Promise<void>
+}) {
+  const [experts, setExperts] = useState<OnboardedExpert[]>([])
+  const [expertBusy, setExpertBusy] = useState(false)
+  const [expertError, setExpertError] = useState('')
+
+  const [dealerPhone, setDealerPhone] = useState('')
+  const [dealerBusy, setDealerBusy] = useState(false)
+  const [dealerError, setDealerError] = useState('')
+  const [dealerInfo, setDealerInfo] = useState<TrainingDealerInfo | null>(null)
+
+  useEffect(() => {
+    api.get<OnboardedExpert[]>(`/client/${clientId}/training/onboarded-experts`)
+      .then(r => setExperts(r.data))
+      .catch(() => { /* CA sees empty dropdown */ })
+  }, [clientId])
+
+  // When the session already has a dealer assigned, fetch their info
+  // so the panel shows more than just an opaque user id. The lookup
+  // endpoint validates every candidate identically — since the ID
+  // was validated at set-time, re-lookup returns the same info block.
+  useEffect(() => {
+    if (!dealerUserId) { setDealerInfo(null); return }
+    const cachedByPhone = dealerPhone.trim() ? null : null
+    void cachedByPhone
+    // Re-derive from the phone we don't have — cheapest path is a
+    // targeted GET for the user id via the same info fields. We
+    // don't have that endpoint; instead we surface a placeholder
+    // and let the CA re-enter the phone if they want to change.
+    setDealerInfo({
+      user_id: dealerUserId,
+      name: 'Assigned',
+      phone: null,
+      shop_name: null,
+      shop_address: null,
+    })
+  }, [dealerUserId, dealerPhone])
+
+  async function setExpert(userId: string) {
+    setExpertBusy(true); setExpertError('')
+    try {
+      await api.post(`/client/${clientId}/training/expert`, { user_id: userId })
+      await onChanged()
+    } catch (err) {
+      setExpertError(extractErrorMessage(err, 'Could not assign training expert.'))
+    } finally { setExpertBusy(false) }
+  }
+
+  async function clearExpert() {
+    setExpertBusy(true); setExpertError('')
+    try {
+      await api.delete(`/client/${clientId}/training/expert`)
+      await onChanged()
+    } catch (err) {
+      setExpertError(extractErrorMessage(err, 'Could not clear training expert.'))
+    } finally { setExpertBusy(false) }
+  }
+
+  async function setDealer() {
+    const digits = dealerPhone.replace(/\D/g, '')
+    if (digits.length < 10) {
+      setDealerError('Enter a 10-digit phone number.')
+      return
+    }
+    setDealerBusy(true); setDealerError('')
+    try {
+      const { data } = await api.post<TrainingSession>(
+        `/client/${clientId}/training/dealer`,
+        { phone: digits },
+      )
+      // The POST returns the whole training session; refresh the parent to pick up new ids.
+      void data
+      await onChanged()
+      setDealerPhone('')
+      // Prime the info card with what we now know (name is not in
+      // that payload, so a follow-up lookup would be needed for
+      // richness — deliberately kept lightweight for now).
+    } catch (err) {
+      setDealerError(extractErrorMessage(err, 'Could not assign training dealer.'))
+    } finally { setDealerBusy(false) }
+  }
+
+  async function clearDealer() {
+    setDealerBusy(true); setDealerError('')
+    try {
+      await api.delete(`/client/${clientId}/training/dealer`)
+      await onChanged()
+      setDealerInfo(null)
+    } catch (err) {
+      setDealerError(extractErrorMessage(err, 'Could not clear training dealer.'))
+    } finally { setDealerBusy(false) }
+  }
+
+  const currentExpert = experts.find(e => e.user_id === expertUserId)
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 space-y-5">
+      <div>
+        <h3 className="font-semibold text-slate-800">Session Roles</h3>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Optional per-session assignments. Both clear automatically when the session ends.
+        </p>
+      </div>
+
+      {/* Training Expert */}
+      <div className="border-t border-slate-100 pt-4">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Training Expert</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              All training-farmer queries route directly to this Primary Expert&apos;s device.
+            </p>
+          </div>
+          {expertUserId && (
+            <button
+              onClick={clearExpert}
+              disabled={expertBusy}
+              className="text-xs text-slate-600 hover:text-slate-900 disabled:opacity-50">
+              Clear
+            </button>
+          )}
+        </div>
+        <select
+          value={expertUserId || ''}
+          onChange={e => e.target.value && setExpert(e.target.value)}
+          disabled={expertBusy || experts.length === 0}
+          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white disabled:bg-slate-50">
+          <option value="">
+            {experts.length === 0 ? 'No active Primary Experts onboarded' : 'Pick a Primary Expert…'}
+          </option>
+          {experts.map(e => (
+            <option key={e.user_id} value={e.user_id}>
+              {e.name || e.phone} {e.phone && e.name ? `(${e.phone})` : ''}
+            </option>
+          ))}
+        </select>
+        {currentExpert && (
+          <p className="text-xs text-emerald-700 mt-1.5">
+            ✓ Assigned: {currentExpert.name || currentExpert.phone}
+          </p>
+        )}
+        {expertError && (
+          <p className="text-xs text-rose-600 mt-1.5">{expertError}</p>
+        )}
+      </div>
+
+      {/* Training Dealer */}
+      <div className="border-t border-slate-100 pt-4">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Training Dealer</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Adds one demo dealer to the farmer&apos;s picker. Must be active on RootsTalk, have a shop profile, and not be onboarded by any client.
+            </p>
+          </div>
+          {dealerUserId && (
+            <button
+              onClick={clearDealer}
+              disabled={dealerBusy}
+              className="text-xs text-slate-600 hover:text-slate-900 disabled:opacity-50">
+              Clear
+            </button>
+          )}
+        </div>
+        {dealerUserId && dealerInfo && (
+          <div className="mb-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900">
+            ✓ Assigned
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input
+            type="tel"
+            inputMode="numeric"
+            value={dealerPhone}
+            onChange={e => setDealerPhone(e.target.value)}
+            placeholder="10-digit phone number"
+            className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2"
+          />
+          <button
+            onClick={setDealer}
+            disabled={dealerBusy || dealerPhone.replace(/\D/g, '').length < 10}
+            className="px-4 py-2 rounded-lg bg-green-700 text-white text-sm font-semibold disabled:opacity-50">
+            {dealerBusy ? '…' : (dealerUserId ? 'Replace' : 'Assign')}
+          </button>
+        </div>
+        {dealerError && (
+          <p className="text-xs text-rose-600 mt-1.5">{dealerError}</p>
+        )}
+      </div>
     </div>
   )
 }
