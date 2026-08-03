@@ -30,7 +30,7 @@ const ROLES = [
 ]
 
 const ROLE_LABEL: Record<string, string> = {
-  CA: 'Customer Admin',
+  CA: 'Company Admin',
   SUBJECT_EXPERT: 'Subject Expert',
   FIELD_MANAGER: 'Field Manager',
   SEED_DATA_MANAGER: 'Seed Data',  // legacy migration safety
