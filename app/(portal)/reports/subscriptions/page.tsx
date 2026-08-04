@@ -12,7 +12,7 @@
 // Metrics wired today: ACTIVE, TOTAL, NEW. Dimension drills come
 // as the *_by_dimension queries fill in on the backend.
 
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
@@ -277,8 +277,13 @@ function SubscriptionsReportInner() {
   }) as FilterOptionsResponse | null
 
   // Fetch all three metrics whenever any filter or the period changes.
+  // Guard against stale-fetch .catch clobbering fresh-fetch .then
+  // (see sales page for the same pattern + rationale).
+  const fetchGen = useRef(0)
+
   useEffect(() => {
     if (!clientId) return
+    const myGen = ++fetchGen.current
     setLoading(true); setError('')
     const filterParams = new URLSearchParams()
     for (const chip of CHIPS) {
@@ -301,16 +306,20 @@ function SubscriptionsReportInner() {
       api.get<SubsNewResponse>(url('NEW')),
     ])
       .then(([activeRes, totalRes, newRes]) => {
+        if (fetchGen.current !== myGen) return
         setActive(activeRes.data)
         setTotal(totalRes.data)
         setNewSubs(newRes.data)
+        setError('')
       })
-      .catch((err) =>
-        setError(
-          extractErrorMessage(err, 'Could not load subscriptions report.'),
-        ),
-      )
-      .finally(() => setLoading(false))
+      .catch((err) => {
+        if (fetchGen.current !== myGen) return
+        setError(extractErrorMessage(err, 'Could not load subscriptions report.'))
+      })
+      .finally(() => {
+        if (fetchGen.current !== myGen) return
+        setLoading(false)
+      })
   }, [clientId, filterValues, period, customFrom, customTo])
 
   // Sync URL bar to filter + period state so bookmarks + shares work.

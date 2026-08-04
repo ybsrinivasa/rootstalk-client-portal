@@ -11,7 +11,7 @@
 // Metric wired today: COUNT. ITEMS / BRAND_MIX / ROUTING /
 // CONVERSION fill in as the queries.py stubs land.
 
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
@@ -537,8 +537,12 @@ function OrdersReportInner() {
     },
   }) as FilterOptionsResponse | null
 
+  // Guard against stale-fetch .catch clobbering fresh-fetch .then.
+  const fetchGen = useRef(0)
+
   useEffect(() => {
     if (!clientId) return
+    const myGen = ++fetchGen.current
     setLoading(true); setError('')
     const filterParams = new URLSearchParams()
     for (const chip of CHIPS) {
@@ -561,16 +565,22 @@ function OrdersReportInner() {
       api.get<OrdersConversionResponse>(url('CONVERSION')),
     ])
       .then(([countRes, routingRes, itemsRes, brandRes, convRes]) => {
+        if (fetchGen.current !== myGen) return
         setCount(countRes.data)
         setRouting(routingRes.data)
         setItems(itemsRes.data)
         setBrandMix(brandRes.data)
         setConversion(convRes.data)
+        setError('')
       })
-      .catch((err) =>
-        setError(extractErrorMessage(err, 'Could not load orders report.')),
-      )
-      .finally(() => setLoading(false))
+      .catch((err) => {
+        if (fetchGen.current !== myGen) return
+        setError(extractErrorMessage(err, 'Could not load orders report.'))
+      })
+      .finally(() => {
+        if (fetchGen.current !== myGen) return
+        setLoading(false)
+      })
   }, [clientId, filterValues, period, customFrom, customTo])
 
   useEffect(() => {

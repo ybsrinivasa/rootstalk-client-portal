@@ -26,7 +26,7 @@
 // Numbers), ambiguous units silently excluded. Sale marker inherited
 // from Phase 1 (PackingList.farmer_received_at IS NOT NULL).
 
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
@@ -263,9 +263,18 @@ function SalesReportInner() {
     },
   }) as FilterOptionsResponse | null
 
-  // Fetch all four metrics whenever filters or period change.
+  // Fetch generation guard — protects against a stale fetch's .catch
+  // clobbering a fresh fetch's .then, which manifested on staging as
+  // "Could not load Sales data" showing next to fully-loaded cards
+  // after rapid chip changes / eviction reconciliation kicking off
+  // a second cycle. Only the LATEST-in-flight fetch's callbacks
+  // are allowed to touch state.
+  const fetchGen = useRef(0)
+
+  // Fetch all five metrics whenever filters or period change.
   useEffect(() => {
     if (!clientId) return
+    const myGen = ++fetchGen.current
     setLoading(true); setError('')
     const filterParams = new URLSearchParams()
     for (const chip of CHIPS) {
@@ -288,6 +297,7 @@ function SalesReportInner() {
       api.get<SalesVolumeResponse>(url('NETWORK_TOTAL')),
     ])
       .then(([lockedRes, honoredRes, substitutedRes, openRes, networkRes]) => {
+        if (fetchGen.current !== myGen) return
         setData({
           locked: lockedRes.data,
           recommendedHonored: honoredRes.data,
@@ -295,9 +305,16 @@ function SalesReportInner() {
           open: openRes.data,
           networkTotal: networkRes.data,
         })
+        setError('')
       })
-      .catch(err => setError(extractErrorMessage(err, 'Could not load Sales data.')))
-      .finally(() => setLoading(false))
+      .catch(err => {
+        if (fetchGen.current !== myGen) return
+        setError(extractErrorMessage(err, 'Could not load Sales data.'))
+      })
+      .finally(() => {
+        if (fetchGen.current !== myGen) return
+        setLoading(false)
+      })
   }, [clientId, filterValues, period, customFrom, customTo])
 
   // Sync URL bar to filter + period state.
