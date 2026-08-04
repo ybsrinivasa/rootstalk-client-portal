@@ -31,7 +31,14 @@ export interface MatrixRow {
   label: string
   category?: string       // 'PESTICIDE' | 'FERTILIZER' | 'SEED' | 'OTHER'
   totals: { litres: number; kilograms: number; numbers: number }
+  leads?: number
+  converted?: number
   given: MatrixGiven[]
+}
+
+function pct(a: number, b: number): number {
+  if (b <= 0) return 0
+  return Math.round((a / b) * 100)
 }
 
 interface MatrixPanelProps {
@@ -59,11 +66,6 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 function rowTotal(g: { litres: number; kilograms: number; numbers: number }): number {
   return g.litres + g.kilograms + g.numbers
-}
-
-function pct(part: number, whole: number): number {
-  if (whole <= 0) return 0
-  return Math.round((part / whole) * 100)
 }
 
 function groupByCategory(rows: MatrixRow[]): { category: string; rows: MatrixRow[] }[] {
@@ -136,19 +138,29 @@ export function MatrixPanel({
                       const skipSubrows = collapseWhenAllHonored && allHonored
                       return (
                         <li key={i} className="space-y-2">
-                          <div className="flex items-baseline justify-between gap-3">
+                          <div className="flex items-baseline justify-between gap-3 flex-wrap">
                             <p className="font-semibold text-slate-800 truncate">
                               {row.label}
                               {skipSubrows && (
                                 <span className="ml-2 text-xs text-emerald-600 font-normal">✓ all honored</span>
                               )}
                             </p>
-                            <ThreeUnitNumber
-                              litres={row.totals.litres}
-                              kilograms={row.totals.kilograms}
-                              numbers={row.totals.numbers}
-                              colour={brandColour}
-                            />
+                            <div className="flex items-baseline gap-4">
+                              {typeof row.leads === 'number' && row.leads > 0 && (
+                                <span className="text-xs text-slate-600 tabular-nums">
+                                  {(row.converted ?? 0).toLocaleString()} / {row.leads.toLocaleString()} leads
+                                  <span className="text-slate-400 ml-1">
+                                    ({pct(row.converted ?? 0, row.leads)}%)
+                                  </span>
+                                </span>
+                              )}
+                              <ThreeUnitNumber
+                                litres={row.totals.litres}
+                                kilograms={row.totals.kilograms}
+                                numbers={row.totals.numbers}
+                                colour={brandColour}
+                              />
+                            </div>
                           </div>
                           {!skipSubrows && (
                             <ul className="space-y-1.5 pl-4 border-l border-slate-100">

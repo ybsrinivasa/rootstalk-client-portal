@@ -1,30 +1,20 @@
 'use client'
 
-// Client Reports — Sales (Phase 2).
+// Client Reports — Sales (Phase 2, leads/conversion reframing 2026-08-04).
 //
-// Headline metrics (four cards fetched in parallel):
-//   1. Locked-Brand Sales                — captured direct business
-//   2. Recommended-Brand Honored         — conversion win
-//   3. Recommended-Brand Substituted     — leakage signal
-//   4. Volume Through Our Shops          — network-scope
+// Headline metrics (leads/conversion, not volumes):
+//   1. Locked-Brand Conversion       — leads → converted, by enforcement ~100%
+//   2. Recommended-Brand Conversion  — honor rate + honored/substituted/pending split
+//   3. Open-Category Conversion      — leads → converted, dealer picked freely
+//   4. All Leads Through Our Network — everything across our onboarded dealers
 //
-// Filters:
-//   Crop · State · District · Package · Dealer · Period.
-//   Dealer is Phase 2's new cross-cutting chip — populated from the
-//   client's onboarded-dealer list. Period narrows by
-//   PackingList.farmer_received_at (the sale marker).
+// Below that:
+//   - Dealer Scorecard — per-dealer leads/converted + pooled totals
+//   - Three pivot matrices (Locked, Recommended, Open) — carry volumes
+//     (three unit families) AND a leads/converted column per row.
+//   - Drill panel — leads/conversion per dimension for each of the 5 metrics.
 //
-// Filter state lives in local useState; URL is a side-effect via
-// window.history.replaceState (Next 15 router pitfall — see
-// feedback_next15_url_filter_state_pattern.md).
-//
-// Cards 2 + 3 additionally surface an "outside our network" caption
-// when applicable — recommended items sold by dealers who aren't on
-// our onboarded list.
-//
-// Volume-only (never price); three unit buckets (Litres / Kilograms /
-// Numbers), ambiguous units silently excluded. Sale marker inherited
-// from Phase 1 (PackingList.farmer_received_at IS NOT NULL).
+// Filters (all cascading): Crop · State · District · Package · Dealer · Period.
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
@@ -32,53 +22,39 @@ import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
-import { ThreeUnitNumber } from '@/components/reports/three-unit-number'
+import { LeadsDisplay, LeadsRecommendedDisplay } from '@/components/reports/leads-display'
+import { DealerScorecard, type DealerScoreRow } from '@/components/reports/dealer-scorecard'
+import { MatrixPanel, type MatrixRow } from '@/components/reports/matrix-panel'
 import { DrillPanel, type MetricConfig } from '@/components/reports/drill-panel'
 import { useCascadingFilterOptions, type ChipKey } from '@/components/reports/use-filter-options'
-import { MatrixPanel, type MatrixRow } from '@/components/reports/matrix-panel'
 
-interface SalesVolumeResponse {
-  litres: number
-  kilograms: number
-  numbers: number
-  outside_network?: {
-    litres: number
-    kilograms: number
-    numbers: number
-  }
-}
+// Backend leads shapes.
+interface LeadsSimple { leads: number; converted: number }
+interface LeadsRecommended { leads: number; honored: number; substituted: number; pending: number }
 
-interface FilterOption {
-  id: string
-  name: string
-}
-
+interface FilterOption { id: string; name: string }
 interface FilterOptionsResponse {
   crops: FilterOption[]
   states: FilterOption[]
   districts: FilterOption[]
   packages: FilterOption[]
-  dealers: FilterOption[]
+  dealers?: FilterOption[]
 }
 
 interface SalesData {
-  locked: SalesVolumeResponse | null
-  recommendedHonored: SalesVolumeResponse | null
-  recommendedSubstituted: SalesVolumeResponse | null
-  open: SalesVolumeResponse | null
-  networkTotal: SalesVolumeResponse | null
+  locked: LeadsSimple | null
+  recommended: LeadsRecommended | null
+  open: LeadsSimple | null
+  networkTotal: LeadsSimple | null
 }
 
 const EMPTY_DATA: SalesData = {
   locked: null,
-  recommendedHonored: null,
-  recommendedSubstituted: null,
+  recommended: null,
   open: null,
   networkTotal: null,
 }
 
-// URL param key ↔ backend query param + user-facing label. Dealer is
-// new for Phase 2.
 const CHIPS = [
   { urlKey: 'crop',     apiKey: 'crop_cosh_id',     optionsKey: 'crops' as const,     label: 'Crop',     allLabel: 'All crops' },
   { urlKey: 'state',    apiKey: 'state_cosh_id',    optionsKey: 'states' as const,    label: 'State',    allLabel: 'All states' },
@@ -100,8 +76,7 @@ type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '', dealer: '' }
 
-// Backend row shape for the two pivot matrices. Shared fields are
-// listed; per-matrix extras are optional.
+// Backend row shape for the pivot matrices, extended with leads/converted.
 interface RawMatrixGiven {
   sold_brand_cosh_id: string | null
   sold_brand_name: string | null
@@ -117,6 +92,8 @@ interface RawMatrixRow {
   common_name_label?: string
   category?: string
   totals: { litres: number; kilograms: number; numbers: number }
+  leads?: number
+  converted?: number
   given: RawMatrixGiven[]
 }
 
@@ -125,6 +102,8 @@ function shapeBrandRows(rows: RawMatrixRow[]): MatrixRow[] {
     label: r.our_brand_name ?? r.our_brand_cosh_id ?? '—',
     category: r.category,
     totals: r.totals,
+    leads: r.leads,
+    converted: r.converted,
     given: r.given.map(g => ({
       label: g.sold_brand_name,
       match: g.match,
@@ -140,6 +119,8 @@ function shapeOpenRows(rows: RawMatrixRow[]): MatrixRow[] {
     label: r.common_name_label ?? r.common_name_key ?? '—',
     category: r.category,
     totals: r.totals,
+    leads: r.leads,
+    converted: r.converted,
     given: r.given.map(g => ({
       label: g.sold_brand_name,
       litres: g.litres,
@@ -149,60 +130,57 @@ function shapeOpenRows(rows: RawMatrixRow[]): MatrixRow[] {
   }))
 }
 
-// Sales drill metrics — three unit buckets per row rendered as the
-// primaryDisplay string. All five metrics support every dimension.
-const SALES_DRILL_METRICS: readonly MetricConfig[] = [
-  {
-    key: 'LOCKED',
-    label: 'Locked',
-    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
-    renderRow: (r) => salesRow(r),
-  },
-  {
-    key: 'RECOMMENDED_HONORED',
-    label: 'Recommended Honored',
-    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
-    renderRow: (r) => salesRow(r),
-  },
-  {
-    key: 'RECOMMENDED_SUBSTITUTED',
-    label: 'Recommended Substituted',
-    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
-    renderRow: (r) => salesRow(r),
-  },
-  {
-    key: 'OPEN',
-    label: 'Open',
-    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
-    renderRow: (r) => salesRow(r),
-  },
-  {
-    key: 'NETWORK_TOTAL',
-    label: 'Through Our Shops',
-    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
-    renderRow: (r) => salesRow(r),
-  },
-]
+// Drill panel metric configs — leads/conversion shape.
+function pct(a: number, b: number): number {
+  if (b <= 0) return 0
+  return Math.round((a / b) * 100)
+}
 
-// Compose the three-unit display for a drill row. `primary` is the
-// sum used for bar scaling only (apples-to-oranges but fine as a
-// relative ranking hint); `primaryDisplay` carries the honest
-// per-unit breakdown; `caption` is left empty — the display is
-// self-sufficient.
-function salesRow(r: Record<string, number>) {
-  const litres = Number(r.litres) || 0
-  const kilograms = Number(r.kilograms) || 0
-  const numbers = Number(r.numbers) || 0
-  const parts: string[] = []
-  if (litres >= 0.01) parts.push(`${litres.toLocaleString(undefined, { maximumFractionDigits: 2 })} L`)
-  if (kilograms >= 0.01) parts.push(`${kilograms.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`)
-  if (numbers >= 1) parts.push(`${numbers.toLocaleString()} Nos`)
+function leadsRow(r: Record<string, number>) {
+  const leads = Number(r.leads) || 0
+  const converted = Number(r.converted) || 0
+  const p = pct(converted, leads)
   return {
-    primary: litres + kilograms + numbers,
-    primaryDisplay: parts.join(' · ') || '—',
-    caption: '',
+    primary: p,
+    primaryDisplay: leads === 0 ? '—' : `${p}%`,
+    caption: leads === 0 ? '' : `${converted.toLocaleString()} / ${leads.toLocaleString()} leads`,
   }
 }
+
+function recommendedDrillRow(r: Record<string, number>) {
+  const leads = Number(r.leads) || 0
+  const honored = Number(r.honored) || 0
+  const substituted = Number(r.substituted) || 0
+  const honorRate = pct(honored, leads)
+  return {
+    primary: honorRate,
+    primaryDisplay: leads === 0 ? '—' : `${honorRate}%`,
+    caption: leads === 0 ? '' : `${honored.toLocaleString()} honored · ${substituted.toLocaleString()} sub`,
+  }
+}
+
+const SALES_DRILL_METRICS: readonly MetricConfig[] = [
+  {
+    key: 'LOCKED', label: 'Locked',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: leadsRow,
+  },
+  {
+    key: 'RECOMMENDED', label: 'Recommended',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: recommendedDrillRow,
+  },
+  {
+    key: 'OPEN', label: 'Open',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: leadsRow,
+  },
+  {
+    key: 'NETWORK_TOTAL', label: 'Through Our Shops',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: leadsRow,
+  },
+]
 
 function toYmd(d: Date): string {
   const y = d.getFullYear()
@@ -211,9 +189,7 @@ function toYmd(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-function periodDates(
-  preset: PeriodPreset, customFrom: string, customTo: string,
-): { from?: Date; to?: Date } {
+function periodDates(preset: PeriodPreset, customFrom: string, customTo: string): { from?: Date; to?: Date } {
   const now = new Date()
   if (preset === 'this-month') {
     return {
@@ -242,20 +218,6 @@ function periodDates(
     return { from, to }
   }
   return {}
-}
-
-function outsideTotal(v?: SalesVolumeResponse['outside_network']): number {
-  if (!v) return 0
-  return v.litres + v.kilograms + v.numbers
-}
-
-function formatOutside(v: SalesVolumeResponse['outside_network']): string {
-  if (!v) return ''
-  const parts: string[] = []
-  if (v.litres > 0) parts.push(`${v.litres.toLocaleString(undefined, { maximumFractionDigits: 2 })} L`)
-  if (v.kilograms > 0) parts.push(`${v.kilograms.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`)
-  if (v.numbers > 0) parts.push(`${v.numbers.toLocaleString()} Nos`)
-  return parts.join(' · ')
 }
 
 export default function SalesReportPage() {
@@ -293,25 +255,22 @@ function SalesReportInner() {
   const [error, setError] = useState('')
   const [toast, setToast] = useState<string | null>(null)
 
-  // Pivot matrices — separate fetch cycle so their loading doesn't
-  // block the headline cards + drill panel.
+  const [scorecard, setScorecard] = useState<DealerScoreRow[]>([])
+  const [scorecardPooled, setScorecardPooled] = useState<DealerScoreRow | null>(null)
+  const [scorecardLoading, setScorecardLoading] = useState(true)
+
   const [lockedMatrix, setLockedMatrix] = useState<MatrixRow[]>([])
   const [recommendedMatrix, setRecommendedMatrix] = useState<MatrixRow[]>([])
   const [openMatrix, setOpenMatrix] = useState<MatrixRow[]>([])
   const [matrixLoading, setMatrixLoading] = useState(true)
 
-  // Cascading filter options — refetched on every filter change so
-  // each chip's list narrows to what's intersectable with the OTHER
-  // chips. When a currently-selected value is no longer available
-  // (e.g., added a State that has no rows for the currently-selected
-  // Package), we clear it and toast the user.
   const options = useCascadingFilterOptions({
     clientId,
     filterValues,
     onEvicted: (evicted) => {
       setFilterValues(prev => {
         const next = { ...prev }
-        for (const chip of evicted) next[chip] = ''
+        for (const chip of evicted) next[chip as keyof FilterValues] = ''
         return next
       })
       const chipLabels = evicted.map(c => CHIPS.find(x => x.urlKey === c)?.label ?? c).join(', ')
@@ -320,15 +279,7 @@ function SalesReportInner() {
     },
   }) as FilterOptionsResponse | null
 
-  // Fetch generation guard — protects against a stale fetch's .catch
-  // clobbering a fresh fetch's .then, which manifested on staging as
-  // "Could not load Sales data" showing next to fully-loaded cards
-  // after rapid chip changes / eviction reconciliation kicking off
-  // a second cycle. Only the LATEST-in-flight fetch's callbacks
-  // are allowed to touch state.
   const fetchGen = useRef(0)
-
-  // Fetch all five metrics whenever filters or period change.
   useEffect(() => {
     if (!clientId) return
     const myGen = ++fetchGen.current
@@ -341,24 +292,22 @@ function SalesReportInner() {
     const { from, to } = periodDates(period, customFrom, customTo)
     if (from) filterParams.set('period_from', from.toISOString())
     if (to)   filterParams.set('period_to',   to.toISOString())
-    const url = (metric: 'LOCKED' | 'RECOMMENDED_HONORED' | 'RECOMMENDED_SUBSTITUTED' | 'OPEN' | 'NETWORK_TOTAL') => {
+    const url = (metric: 'LOCKED' | 'RECOMMENDED' | 'OPEN' | 'NETWORK_TOTAL') => {
       const q = new URLSearchParams(filterParams)
       q.set('metric', metric)
       return `/client/${clientId}/reports/sales?${q.toString()}`
     }
     Promise.all([
-      api.get<SalesVolumeResponse>(url('LOCKED')),
-      api.get<SalesVolumeResponse>(url('RECOMMENDED_HONORED')),
-      api.get<SalesVolumeResponse>(url('RECOMMENDED_SUBSTITUTED')),
-      api.get<SalesVolumeResponse>(url('OPEN')),
-      api.get<SalesVolumeResponse>(url('NETWORK_TOTAL')),
+      api.get<LeadsSimple>(url('LOCKED')),
+      api.get<LeadsRecommended>(url('RECOMMENDED')),
+      api.get<LeadsSimple>(url('OPEN')),
+      api.get<LeadsSimple>(url('NETWORK_TOTAL')),
     ])
-      .then(([lockedRes, honoredRes, substitutedRes, openRes, networkRes]) => {
+      .then(([lockedRes, recRes, openRes, networkRes]) => {
         if (fetchGen.current !== myGen) return
         setData({
           locked: lockedRes.data,
-          recommendedHonored: honoredRes.data,
-          recommendedSubstituted: substitutedRes.data,
+          recommended: recRes.data,
           open: openRes.data,
           networkTotal: networkRes.data,
         })
@@ -374,8 +323,35 @@ function SalesReportInner() {
       })
   }, [clientId, filterValues, period, customFrom, customTo])
 
-  // Pivot matrices refetch alongside the metrics. Same fetch-gen
-  // guard shape to avoid stale-catch-clobbering-fresh-then.
+  const scorecardGen = useRef(0)
+  useEffect(() => {
+    if (!clientId) return
+    const myGen = ++scorecardGen.current
+    setScorecardLoading(true)
+    const filterParams = new URLSearchParams()
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) filterParams.set(chip.apiKey, v)
+    }
+    const { from, to } = periodDates(period, customFrom, customTo)
+    if (from) filterParams.set('period_from', from.toISOString())
+    if (to)   filterParams.set('period_to',   to.toISOString())
+    api
+      .get<{ rows: DealerScoreRow[]; pooled: DealerScoreRow }>(
+        `/client/${clientId}/reports/sales/dealer-scorecard?${filterParams.toString()}`,
+      )
+      .then(({ data }) => {
+        if (scorecardGen.current !== myGen) return
+        setScorecard(data.rows)
+        setScorecardPooled(data.pooled)
+      })
+      .catch(() => { /* silent */ })
+      .finally(() => {
+        if (scorecardGen.current !== myGen) return
+        setScorecardLoading(false)
+      })
+  }, [clientId, filterValues, period, customFrom, customTo])
+
   const matrixGen = useRef(0)
   useEffect(() => {
     if (!clientId) return
@@ -402,14 +378,13 @@ function SalesReportInner() {
         setRecommendedMatrix(shapeBrandRows(recRes.data.rows))
         setOpenMatrix(shapeOpenRows(openRes.data.rows))
       })
-      .catch(() => { /* silent — matrix panels show empty state */ })
+      .catch(() => { /* silent */ })
       .finally(() => {
         if (matrixGen.current !== myGen) return
         setMatrixLoading(false)
       })
   }, [clientId, filterValues, period, customFrom, customTo])
 
-  // Sync URL bar to filter + period state.
   useEffect(() => {
     const params = new URLSearchParams()
     for (const chip of CHIPS) {
@@ -458,21 +433,18 @@ function SalesReportInner() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Sales</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Volumes sold through your onboarded dealers, by SE authoring intent.
-          Confirmed once the farmer receives the goods.
+          Leads received by your onboarded dealers vs sales converted, by SE authoring intent.
+          Volumes live in the pivot matrices below.
         </p>
       </div>
 
-      {/* Filter chip row */}
       <div className="flex flex-wrap gap-2 items-center">
         {CHIPS.map(chip => {
           const opts = options?.[chip.optionsKey] ?? []
           const value = filterValues[chip.urlKey]
           const isSet = !!value
           const selectedLabel = isSet
-            ? (options
-                ? (opts.find(o => o.id === value)?.name ?? value)
-                : '…')
+            ? (options ? (opts.find(o => o.id === value)?.name ?? value) : '…')
             : chip.allLabel
           return (
             <div
@@ -486,39 +458,27 @@ function SalesReportInner() {
               <span className={`text-xs uppercase tracking-wider ${isSet ? 'text-white/70' : 'text-slate-400'}`}>
                 {chip.label}
               </span>
-              <span className="max-w-[10rem] truncate">
-                {selectedLabel}
-              </span>
+              <span className="max-w-[10rem] truncate">{selectedLabel}</span>
               <select
                 value={value}
                 onChange={(e) => updateFilter(chip.urlKey, e.target.value)}
                 aria-label={`Filter by ${chip.label}`}
-                className={`absolute top-0 bottom-0 left-0 opacity-0 cursor-pointer ${
-                  isSet ? 'right-8' : 'right-0'
-                }`}
+                className={`absolute top-0 bottom-0 left-0 opacity-0 cursor-pointer ${isSet ? 'right-8' : 'right-0'}`}
               >
                 <option value="">{chip.allLabel}</option>
-                {opts.map(o => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
+                {opts.map(o => (<option key={o.id} value={o.id}>{o.name}</option>))}
               </select>
               {isSet && (
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.preventDefault(); e.stopPropagation()
-                    updateFilter(chip.urlKey, '')
-                  }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); updateFilter(chip.urlKey, '') }}
                   className="relative z-10 text-white/70 hover:text-white leading-none px-1"
                   aria-label={`Clear ${chip.label} filter`}
-                >
-                  ×
-                </button>
+                >×</button>
               )}
             </div>
           )
         })}
-        {/* Period chip — always set (no ×). */}
         <div className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors border-slate-800 bg-slate-800 text-white">
           <span className="text-xs uppercase tracking-wider text-white/70">Period</span>
           <span className="max-w-[10rem] truncate">
@@ -530,9 +490,7 @@ function SalesReportInner() {
             aria-label="Filter by Period"
             className="absolute inset-0 opacity-0 cursor-pointer"
           >
-            {PERIOD_PRESETS.map(p => (
-              <option key={p.key} value={p.key}>{p.label}</option>
-            ))}
+            {PERIOD_PRESETS.map(p => (<option key={p.key} value={p.key}>{p.label}</option>))}
           </select>
         </div>
         {anyFilter && (
@@ -540,32 +498,23 @@ function SalesReportInner() {
             type="button"
             onClick={clearAll}
             className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 ml-1"
-          >
-            Clear all
-          </button>
+          >Clear all</button>
         )}
       </div>
 
-      {/* Custom date range — visible only when Custom preset is picked. */}
       {period === 'custom' && (
         <div className="flex flex-wrap gap-3 items-center text-sm text-slate-600">
           <label className="flex items-center gap-1.5">
             From
-            <input
-              type="date"
-              value={customFrom}
+            <input type="date" value={customFrom}
               onChange={(e) => setCustomFrom(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1"
-            />
+              className="border border-slate-300 rounded-md px-2 py-1" />
           </label>
           <label className="flex items-center gap-1.5">
             To
-            <input
-              type="date"
-              value={customTo}
+            <input type="date" value={customTo}
               onChange={(e) => setCustomTo(e.target.value)}
-              className="border border-slate-300 rounded-md px-2 py-1"
-            />
+              className="border border-slate-300 rounded-md px-2 py-1" />
           </label>
         </div>
       )}
@@ -575,64 +524,70 @@ function SalesReportInner() {
           {toast}
         </div>
       )}
-
       {error && (
         <div className="rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-800">
           {error}
         </div>
       )}
 
-      {/* Row 1 — Brand scope: four cards. 4-col on lg, 2x2 on md, stacked on mobile. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Row 1 — Brand scope: three cards, leads/conversion. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <SalesCard
-          title="Locked-Brand Sales"
-          caption="Items your SE locked to your brand — dealer had to sell exactly that. By design, always through your onboarded network."
-          data={data.locked}
-          loading={loading}
-          brandColour={brandColour}
-        />
+          title="Locked-Brand Conversion"
+          caption="Items your SE locked to your brand — dealer had to sell exactly that. By design, conversion should be near 100%."
+        >
+          <LeadsDisplay
+            leads={data.locked?.leads ?? 0}
+            converted={data.locked?.converted ?? 0}
+            loading={loading}
+          />
+        </SalesCard>
         <SalesCard
-          title="Recommended-Brand Honored"
-          caption="SE recommended your brand, dealer sold that same brand. The conversion win."
-          data={data.recommendedHonored}
-          loading={loading}
-          brandColour={brandColour}
-          outsideCaption={data.recommendedHonored?.outside_network && outsideTotal(data.recommendedHonored.outside_network) > 0
-            ? `+ ${formatOutside(data.recommendedHonored.outside_network)} sold outside your network`
-            : null}
-        />
+          title="Recommended-Brand Conversion"
+          caption="SE recommended your brand. Big number = honor rate (% of leads where dealer sold your brand). Substituted = dealer sold a competitor."
+        >
+          <LeadsRecommendedDisplay
+            leads={data.recommended?.leads ?? 0}
+            honored={data.recommended?.honored ?? 0}
+            substituted={data.recommended?.substituted ?? 0}
+            pending={data.recommended?.pending ?? 0}
+            loading={loading}
+          />
+        </SalesCard>
         <SalesCard
-          title="Recommended-Brand Substituted"
-          caption="SE recommended your brand, dealer sold a different brand. Leakage — where your recommendation isn't landing."
-          data={data.recommendedSubstituted}
-          loading={loading}
-          brandColour="#B45309"
-        />
-        <SalesCard
-          title="Open-Category Sales"
-          caption="Items your SE authored with no specific brand — dealer picked freely. This is your captured volume from dealer-choice items in your Packages."
-          data={data.open}
-          loading={loading}
-          brandColour={brandColour}
-        />
+          title="Open-Category Conversion"
+          caption="Items your SE authored in your Packages without a specific brand. Dealer picked freely."
+        >
+          <LeadsDisplay
+            leads={data.open?.leads ?? 0}
+            converted={data.open?.converted ?? 0}
+            loading={loading}
+          />
+        </SalesCard>
       </div>
 
-      {/* Row 2 — Network scope: full-width card */}
-      <div>
-        <SalesCard
-          title="Volume Through Our Shops"
-          caption="Everything sold by your onboarded dealers — any brand, any authoring intent."
-          data={data.networkTotal}
+      {/* Row 2 — Network total */}
+      <SalesCard
+        title="All Leads Through Our Network"
+        caption="Every lead your onboarded dealers received — any brand, any authoring intent — and how many landed as sales."
+        fullWidth
+      >
+        <LeadsDisplay
+          leads={data.networkTotal?.leads ?? 0}
+          converted={data.networkTotal?.converted ?? 0}
           loading={loading}
-          brandColour={brandColour}
-          fullWidth
         />
-      </div>
+      </SalesCard>
 
-      {/* Drill panel — metric picker + dimension tabs (Crop / State /
-          Package / Dealer / Time). Reuses the shared component; a
-          Sales-specific renderRow packs the three unit buckets into
-          primaryDisplay. */}
+      {/* Dealer scorecard */}
+      <DealerScorecard
+        rows={scorecard}
+        pooled={scorecardPooled}
+        loading={scorecardLoading}
+        brandColour={brandColour}
+      />
+
+      {/* Drill panel — leads/conversion per dimension */}
       {clientId && (
         <DrillPanel
           clientId={clientId}
@@ -644,15 +599,10 @@ function SalesReportInner() {
         />
       )}
 
-      {/* Pivot matrices — collapsed by default. Locked shows per-brand
-          totals with an ✓ all-honored badge when enforcement held (the
-          normal case); if a locked brand somehow shows substitutions
-          those sub-rows render as anomalies worth chasing. Recommended
-          shows what dealers substituted for our recommended brands.
-          Common Name shows which brands dealers picked for Open items. */}
+      {/* Matrices — volumes stay here (three units) plus leads/converted per row. */}
       <MatrixPanel
         title="Locked-Brand Matrix"
-        caption="For each brand your SE locked in your Packages, what dealers sold. By enforcement, every row should be fully honored (✓); any substitutions here are data-integrity anomalies worth chasing."
+        caption="For each brand your SE locked, volumes sold + leads converted. By enforcement, every row should be fully honored (✓)."
         rows={lockedMatrix}
         loading={matrixLoading}
         brandColour={brandColour}
@@ -660,14 +610,14 @@ function SalesReportInner() {
       />
       <MatrixPanel
         title="Recommended vs Given"
-        caption="For each brand your SE recommended (not locked), what dealers actually sold. ✓ marks the honored match; slate bars are substitutions."
+        caption="For each brand your SE recommended, what dealers actually sold. Row header carries leads/converted; sub-rows show volume share of conversions."
         rows={recommendedMatrix}
         loading={matrixLoading}
         brandColour={brandColour}
       />
       <MatrixPanel
         title="Common Name → Brand Sold"
-        caption="For each common name / L2 your SE authored in your Packages without a specific brand, which brands your dealers organically picked. Reveals natural dealer-stocking preferences."
+        caption="For each common name your SE authored in Open items, which brands dealers organically picked. Row header carries leads/converted."
         rows={openMatrix}
         loading={matrixLoading}
         brandColour={brandColour}
@@ -676,9 +626,6 @@ function SalesReportInner() {
   )
 }
 
-// Build the base URLSearchParams for the DrillPanel — same filter
-// chips + period translation as the headline fetches, minus the
-// metric/dimension params (the panel appends those).
 function buildBaseQuery(
   filterValues: FilterValues,
   period: PeriodPreset,
@@ -699,39 +646,18 @@ function buildBaseQuery(
 interface SalesCardProps {
   title: string
   caption: string
-  data: SalesVolumeResponse | null
-  loading: boolean
-  brandColour: string
-  outsideCaption?: string | null
   fullWidth?: boolean
+  children: React.ReactNode
 }
 
-function SalesCard({ title, caption, data, loading, brandColour, outsideCaption, fullWidth }: SalesCardProps) {
+function SalesCard({ title, caption, fullWidth, children }: SalesCardProps) {
   return (
     <div className={`rounded-2xl border border-slate-200 bg-white shadow-sm p-5 ${fullWidth ? 'w-full' : ''}`}>
       <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
         {title}
       </p>
-      <div className="mt-3">
-        {loading || !data ? (
-          <div className="h-8 w-32 bg-slate-100 rounded animate-pulse" />
-        ) : (
-          <ThreeUnitNumber
-            litres={data.litres}
-            kilograms={data.kilograms}
-            numbers={data.numbers}
-            colour={brandColour}
-          />
-        )}
-      </div>
-      {outsideCaption && (
-        <p className="text-xs text-slate-500 mt-2 italic">
-          {outsideCaption}
-        </p>
-      )}
-      <p className="text-xs text-slate-500 mt-3 leading-relaxed">
-        {caption}
-      </p>
+      <div className="mt-3">{children}</div>
+      <p className="text-xs text-slate-500 mt-3 leading-relaxed">{caption}</p>
     </div>
   )
 }
