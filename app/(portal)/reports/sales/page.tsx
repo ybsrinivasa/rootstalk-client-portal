@@ -35,6 +35,7 @@ import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
 import { ThreeUnitNumber } from '@/components/reports/three-unit-number'
 import { DrillPanel, type MetricConfig } from '@/components/reports/drill-panel'
 import { useCascadingFilterOptions, type ChipKey } from '@/components/reports/use-filter-options'
+import { MatrixPanel, type MatrixRow } from '@/components/reports/matrix-panel'
 
 interface SalesVolumeResponse {
   litres: number
@@ -98,6 +99,52 @@ type PeriodPreset = typeof PERIOD_PRESETS[number]['key']
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '', dealer: '' }
+
+// Backend row shape for the two pivot matrices. Shared fields are
+// listed; per-matrix extras are optional.
+interface RawMatrixGiven {
+  sold_brand_cosh_id: string | null
+  sold_brand_name: string | null
+  match?: boolean
+  litres: number
+  kilograms: number
+  numbers: number
+}
+interface RawMatrixRow {
+  our_brand_cosh_id?: string
+  our_brand_name?: string
+  common_name_key?: string
+  common_name_label?: string
+  totals: { litres: number; kilograms: number; numbers: number }
+  given: RawMatrixGiven[]
+}
+
+function shapeRecommendedRows(rows: RawMatrixRow[]): MatrixRow[] {
+  return rows.map(r => ({
+    label: r.our_brand_name ?? r.our_brand_cosh_id ?? '—',
+    totals: r.totals,
+    given: r.given.map(g => ({
+      label: g.sold_brand_name,
+      match: g.match,
+      litres: g.litres,
+      kilograms: g.kilograms,
+      numbers: g.numbers,
+    })),
+  }))
+}
+
+function shapeOpenRows(rows: RawMatrixRow[]): MatrixRow[] {
+  return rows.map(r => ({
+    label: r.common_name_label ?? r.common_name_key ?? '—',
+    totals: r.totals,
+    given: r.given.map(g => ({
+      label: g.sold_brand_name,
+      litres: g.litres,
+      kilograms: g.kilograms,
+      numbers: g.numbers,
+    })),
+  }))
+}
 
 // Sales drill metrics — three unit buckets per row rendered as the
 // primaryDisplay string. All five metrics support every dimension.
@@ -243,6 +290,12 @@ function SalesReportInner() {
   const [error, setError] = useState('')
   const [toast, setToast] = useState<string | null>(null)
 
+  // Pivot matrices — separate fetch cycle so their loading doesn't
+  // block the headline cards + drill panel.
+  const [recommendedMatrix, setRecommendedMatrix] = useState<MatrixRow[]>([])
+  const [openMatrix, setOpenMatrix] = useState<MatrixRow[]>([])
+  const [matrixLoading, setMatrixLoading] = useState(true)
+
   // Cascading filter options — refetched on every filter change so
   // each chip's list narrows to what's intersectable with the OTHER
   // chips. When a currently-selected value is no longer available
@@ -314,6 +367,39 @@ function SalesReportInner() {
       .finally(() => {
         if (fetchGen.current !== myGen) return
         setLoading(false)
+      })
+  }, [clientId, filterValues, period, customFrom, customTo])
+
+  // Pivot matrices refetch alongside the metrics. Same fetch-gen
+  // guard shape to avoid stale-catch-clobbering-fresh-then.
+  const matrixGen = useRef(0)
+  useEffect(() => {
+    if (!clientId) return
+    const myGen = ++matrixGen.current
+    setMatrixLoading(true)
+    const filterParams = new URLSearchParams()
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) filterParams.set(chip.apiKey, v)
+    }
+    const { from, to } = periodDates(period, customFrom, customTo)
+    if (from) filterParams.set('period_from', from.toISOString())
+    if (to)   filterParams.set('period_to',   to.toISOString())
+    const url = (endpoint: 'recommended-matrix' | 'open-matrix') =>
+      `/client/${clientId}/reports/sales/${endpoint}?${filterParams.toString()}`
+    Promise.all([
+      api.get<{ rows: RawMatrixRow[] }>(url('recommended-matrix')),
+      api.get<{ rows: RawMatrixRow[] }>(url('open-matrix')),
+    ])
+      .then(([recRes, openRes]) => {
+        if (matrixGen.current !== myGen) return
+        setRecommendedMatrix(shapeRecommendedRows(recRes.data.rows))
+        setOpenMatrix(shapeOpenRows(openRes.data.rows))
+      })
+      .catch(() => { /* silent — matrix panels show empty state */ })
+      .finally(() => {
+        if (matrixGen.current !== myGen) return
+        setMatrixLoading(false)
       })
   }, [clientId, filterValues, period, customFrom, customTo])
 
@@ -551,6 +637,25 @@ function SalesReportInner() {
           heading="Sales broken down by"
         />
       )}
+
+      {/* Pivot matrices — collapsed by default. Recommended vs Given
+          shows what dealers substituted for our recommended brands;
+          Common Name → Brand Sold shows which brands dealers picked
+          for our Open items. */}
+      <MatrixPanel
+        title="Recommended vs Given"
+        caption="For each brand your SE recommended (not locked), what dealers actually sold. ✓ marks the honored match; slate bars are substitutions."
+        rows={recommendedMatrix}
+        loading={matrixLoading}
+        brandColour={brandColour}
+      />
+      <MatrixPanel
+        title="Common Name → Brand Sold"
+        caption="For each common name / L2 your SE authored in your Packages without a specific brand, which brands your dealers organically picked. Reveals natural dealer-stocking preferences."
+        rows={openMatrix}
+        loading={matrixLoading}
+        brandColour={brandColour}
+      />
     </div>
   )
 }
