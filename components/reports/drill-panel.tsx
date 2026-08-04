@@ -21,16 +21,24 @@ export interface MetricConfig {
   label: string
   /** Which dimensions this metric supports. Subs_active hides TIME. */
   dimensions: readonly Dimension[]
-  /** Extract the primary number + caption to render per row. */
-  renderRow: (row: DimensionRow) => { primary: number; caption: string }
+  /** Extract the primary number + caption to render per row.
+   *  Optionally return a `primaryDisplay` string to render in place
+   *  of the raw number — used by Sales rows whose value spans three
+   *  unit families ("342 L · 12 kg"). */
+  renderRow: (row: DimensionRow) => {
+    primary: number
+    caption: string
+    primaryDisplay?: string
+  }
 }
 
-export type Dimension = 'CROP' | 'SPACE' | 'PACKAGE' | 'TIME'
+export type Dimension = 'CROP' | 'SPACE' | 'PACKAGE' | 'TIME' | 'DEALER'
 
 const ALL_DIMENSIONS: readonly { key: Dimension; label: string }[] = [
   { key: 'CROP',    label: 'Crop' },
   { key: 'SPACE',   label: 'State' },
   { key: 'PACKAGE', label: 'Package' },
+  { key: 'DEALER',  label: 'Dealer' },
   { key: 'TIME',    label: 'Time' },
 ] as const
 
@@ -198,8 +206,8 @@ export function DrillPanel({
                     style={{ width: `${widthPct}%`, backgroundColor: accent }}
                   />
                 </div>
-                <span className="w-16 text-right tabular-nums text-slate-800 font-medium">
-                  {(x.primary ?? 0).toLocaleString()}
+                <span className="w-28 text-right tabular-nums text-slate-800 font-medium text-xs sm:text-sm">
+                  {x.primaryDisplay ?? (x.primary ?? 0).toLocaleString()}
                 </span>
                 <span className="w-56 text-right text-xs text-slate-500 tabular-nums">
                   {x.caption}

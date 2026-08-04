@@ -33,6 +33,7 @@ import { extractErrorMessage } from '@/lib/errors'
 import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
 import { ThreeUnitNumber } from '@/components/reports/three-unit-number'
+import { DrillPanel, type MetricConfig } from '@/components/reports/drill-panel'
 
 interface SalesVolumeResponse {
   litres: number
@@ -96,6 +97,61 @@ type PeriodPreset = typeof PERIOD_PRESETS[number]['key']
 type FilterValues = Record<typeof CHIPS[number]['urlKey'], string>
 
 const EMPTY_FILTERS: FilterValues = { crop: '', state: '', district: '', package: '', dealer: '' }
+
+// Sales drill metrics — three unit buckets per row rendered as the
+// primaryDisplay string. All five metrics support every dimension.
+const SALES_DRILL_METRICS: readonly MetricConfig[] = [
+  {
+    key: 'LOCKED',
+    label: 'Locked',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: (r) => salesRow(r),
+  },
+  {
+    key: 'RECOMMENDED_HONORED',
+    label: 'Recommended Honored',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: (r) => salesRow(r),
+  },
+  {
+    key: 'RECOMMENDED_SUBSTITUTED',
+    label: 'Recommended Substituted',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: (r) => salesRow(r),
+  },
+  {
+    key: 'OPEN',
+    label: 'Open',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: (r) => salesRow(r),
+  },
+  {
+    key: 'NETWORK_TOTAL',
+    label: 'Through Our Shops',
+    dimensions: ['CROP', 'SPACE', 'PACKAGE', 'DEALER', 'TIME'],
+    renderRow: (r) => salesRow(r),
+  },
+]
+
+// Compose the three-unit display for a drill row. `primary` is the
+// sum used for bar scaling only (apples-to-oranges but fine as a
+// relative ranking hint); `primaryDisplay` carries the honest
+// per-unit breakdown; `caption` is left empty — the display is
+// self-sufficient.
+function salesRow(r: Record<string, number>) {
+  const litres = Number(r.litres) || 0
+  const kilograms = Number(r.kilograms) || 0
+  const numbers = Number(r.numbers) || 0
+  const parts: string[] = []
+  if (litres >= 0.01) parts.push(`${litres.toLocaleString(undefined, { maximumFractionDigits: 2 })} L`)
+  if (kilograms >= 0.01) parts.push(`${kilograms.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`)
+  if (numbers >= 1) parts.push(`${numbers.toLocaleString()} Nos`)
+  return {
+    primary: litres + kilograms + numbers,
+    primaryDisplay: parts.join(' · ') || '—',
+    caption: '',
+  }
+}
 
 function toYmd(d: Date): string {
   const y = d.getFullYear()
@@ -445,8 +501,43 @@ function SalesReportInner() {
           fullWidth
         />
       </div>
+
+      {/* Drill panel — metric picker + dimension tabs (Crop / State /
+          Package / Dealer / Time). Reuses the shared component; a
+          Sales-specific renderRow packs the three unit buckets into
+          primaryDisplay. */}
+      {clientId && (
+        <DrillPanel
+          clientId={clientId}
+          endpoint={`/client/${clientId}/reports/sales`}
+          baseQuery={buildBaseQuery(filterValues, period, customFrom, customTo)}
+          metrics={SALES_DRILL_METRICS}
+          accent={brandColour}
+          heading="Sales broken down by"
+        />
+      )}
     </div>
   )
+}
+
+// Build the base URLSearchParams for the DrillPanel — same filter
+// chips + period translation as the headline fetches, minus the
+// metric/dimension params (the panel appends those).
+function buildBaseQuery(
+  filterValues: FilterValues,
+  period: PeriodPreset,
+  customFrom: string,
+  customTo: string,
+): URLSearchParams {
+  const q = new URLSearchParams()
+  for (const chip of CHIPS) {
+    const v = filterValues[chip.urlKey]
+    if (v) q.set(chip.apiKey, v)
+  }
+  const { from, to } = periodDates(period, customFrom, customTo)
+  if (from) q.set('period_from', from.toISOString())
+  if (to)   q.set('period_to',   to.toISOString())
+  return q
 }
 
 interface SalesCardProps {
