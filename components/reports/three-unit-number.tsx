@@ -1,14 +1,18 @@
 'use client'
 
 // Renders the three parallel volume numbers that every Sales card uses.
-// Litres · Kilograms · Numbers, in a compact horizontal row. Buckets with
-// value 0 collapse to a muted "—" so a card showing a purely-liquid
-// product doesn't clutter with "0 KG · 0 Nos". If ALL three are zero the
-// whole triplet renders as one big dash (empty-state).
+// Litres · Kilograms · Numbers, in a compact horizontal row.
 //
-// Numbers are formatted with `toLocaleString` for thousand separators;
-// non-integer buckets (litres / kilograms after ML/GM conversion) are
-// rounded to 2 decimals for readability.
+// Display rules:
+// - Only buckets with value ≥ MIN_DISPLAYABLE (0.01) render. Sub-gram /
+//   sub-decilitre quantities drop out — they'd otherwise round to "0 kg"
+//   with 2-decimal formatting and read as a bug rather than data. If a
+//   client somehow has real millilitre-scale sales they can pull the
+//   long tail from CSV export.
+// - If EVERY bucket falls under the threshold, one large muted dash
+//   renders — the deliberate empty-state.
+// - Numbers formatted with `toLocaleString` for thousand separators;
+//   L / KG rounded to 2 decimals.
 
 interface ThreeUnitNumberProps {
   litres: number
@@ -17,8 +21,9 @@ interface ThreeUnitNumberProps {
   colour?: string   // brand colour for the primary tone; falls back to slate
 }
 
+const MIN_DISPLAYABLE = 0.01   // volumes below this drop from display
+
 function fmt(v: number, decimals: number): string {
-  if (v === 0) return '—'
   return v.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: decimals,
@@ -26,15 +31,17 @@ function fmt(v: number, decimals: number): string {
 }
 
 export function ThreeUnitNumber({ litres, kilograms, numbers, colour }: ThreeUnitNumberProps) {
-  const allZero = litres === 0 && kilograms === 0 && numbers === 0
-  if (allZero) {
+  const showLitres = litres >= MIN_DISPLAYABLE
+  const showKg = kilograms >= MIN_DISPLAYABLE
+  const showNumbers = numbers >= 1   // integers — no threshold nuance
+  if (!showLitres && !showKg && !showNumbers) {
     return <p className="text-3xl font-bold text-slate-300">—</p>
   }
 
   const primary = colour || '#0F172A'
   return (
     <div className="flex items-baseline gap-4 flex-wrap">
-      {litres > 0 && (
+      {showLitres && (
         <div>
           <span className="text-2xl font-bold tabular-nums" style={{ color: primary }}>
             {fmt(litres, 2)}
@@ -42,7 +49,7 @@ export function ThreeUnitNumber({ litres, kilograms, numbers, colour }: ThreeUni
           <span className="text-xs text-slate-500 ml-1">L</span>
         </div>
       )}
-      {kilograms > 0 && (
+      {showKg && (
         <div>
           <span className="text-2xl font-bold tabular-nums" style={{ color: primary }}>
             {fmt(kilograms, 2)}
@@ -50,7 +57,7 @@ export function ThreeUnitNumber({ litres, kilograms, numbers, colour }: ThreeUni
           <span className="text-xs text-slate-500 ml-1">kg</span>
         </div>
       )}
-      {numbers > 0 && (
+      {showNumbers && (
         <div>
           <span className="text-2xl font-bold tabular-nums" style={{ color: primary }}>
             {fmt(numbers, 0)}

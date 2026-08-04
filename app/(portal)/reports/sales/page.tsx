@@ -62,6 +62,7 @@ interface SalesData {
   locked: SalesVolumeResponse | null
   recommendedHonored: SalesVolumeResponse | null
   recommendedSubstituted: SalesVolumeResponse | null
+  open: SalesVolumeResponse | null
   networkTotal: SalesVolumeResponse | null
 }
 
@@ -69,6 +70,7 @@ const EMPTY_DATA: SalesData = {
   locked: null,
   recommendedHonored: null,
   recommendedSubstituted: null,
+  open: null,
   networkTotal: null,
 }
 
@@ -205,7 +207,7 @@ function SalesReportInner() {
     const { from, to } = periodDates(period, customFrom, customTo)
     if (from) filterParams.set('period_from', from.toISOString())
     if (to)   filterParams.set('period_to',   to.toISOString())
-    const url = (metric: 'LOCKED' | 'RECOMMENDED_HONORED' | 'RECOMMENDED_SUBSTITUTED' | 'NETWORK_TOTAL') => {
+    const url = (metric: 'LOCKED' | 'RECOMMENDED_HONORED' | 'RECOMMENDED_SUBSTITUTED' | 'OPEN' | 'NETWORK_TOTAL') => {
       const q = new URLSearchParams(filterParams)
       q.set('metric', metric)
       return `/client/${clientId}/reports/sales?${q.toString()}`
@@ -214,13 +216,15 @@ function SalesReportInner() {
       api.get<SalesVolumeResponse>(url('LOCKED')),
       api.get<SalesVolumeResponse>(url('RECOMMENDED_HONORED')),
       api.get<SalesVolumeResponse>(url('RECOMMENDED_SUBSTITUTED')),
+      api.get<SalesVolumeResponse>(url('OPEN')),
       api.get<SalesVolumeResponse>(url('NETWORK_TOTAL')),
     ])
-      .then(([lockedRes, honoredRes, substitutedRes, networkRes]) => {
+      .then(([lockedRes, honoredRes, substitutedRes, openRes, networkRes]) => {
         setData({
           locked: lockedRes.data,
           recommendedHonored: honoredRes.data,
           recommendedSubstituted: substitutedRes.data,
+          open: openRes.data,
           networkTotal: networkRes.data,
         })
       })
@@ -395,8 +399,8 @@ function SalesReportInner() {
         </div>
       )}
 
-      {/* Row 1 — Brand scope: three cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Row 1 — Brand scope: four cards. 4-col on lg, 2x2 on md, stacked on mobile. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <SalesCard
           title="Locked-Brand Sales"
           caption="Items your SE locked to your brand — dealer had to sell exactly that. By design, always through your onboarded network."
@@ -420,6 +424,13 @@ function SalesReportInner() {
           data={data.recommendedSubstituted}
           loading={loading}
           brandColour="#B45309"
+        />
+        <SalesCard
+          title="Open-Category Sales"
+          caption="Items your SE authored with no specific brand — dealer picked freely. This is your captured volume from dealer-choice items in your Packages."
+          data={data.open}
+          loading={loading}
+          brandColour={brandColour}
         />
       </div>
 
