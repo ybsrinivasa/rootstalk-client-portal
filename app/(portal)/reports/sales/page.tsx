@@ -115,13 +115,15 @@ interface RawMatrixRow {
   our_brand_name?: string
   common_name_key?: string
   common_name_label?: string
+  category?: string
   totals: { litres: number; kilograms: number; numbers: number }
   given: RawMatrixGiven[]
 }
 
-function shapeRecommendedRows(rows: RawMatrixRow[]): MatrixRow[] {
+function shapeBrandRows(rows: RawMatrixRow[]): MatrixRow[] {
   return rows.map(r => ({
     label: r.our_brand_name ?? r.our_brand_cosh_id ?? '—',
+    category: r.category,
     totals: r.totals,
     given: r.given.map(g => ({
       label: g.sold_brand_name,
@@ -136,6 +138,7 @@ function shapeRecommendedRows(rows: RawMatrixRow[]): MatrixRow[] {
 function shapeOpenRows(rows: RawMatrixRow[]): MatrixRow[] {
   return rows.map(r => ({
     label: r.common_name_label ?? r.common_name_key ?? '—',
+    category: r.category,
     totals: r.totals,
     given: r.given.map(g => ({
       label: g.sold_brand_name,
@@ -292,6 +295,7 @@ function SalesReportInner() {
 
   // Pivot matrices — separate fetch cycle so their loading doesn't
   // block the headline cards + drill panel.
+  const [lockedMatrix, setLockedMatrix] = useState<MatrixRow[]>([])
   const [recommendedMatrix, setRecommendedMatrix] = useState<MatrixRow[]>([])
   const [openMatrix, setOpenMatrix] = useState<MatrixRow[]>([])
   const [matrixLoading, setMatrixLoading] = useState(true)
@@ -385,15 +389,17 @@ function SalesReportInner() {
     const { from, to } = periodDates(period, customFrom, customTo)
     if (from) filterParams.set('period_from', from.toISOString())
     if (to)   filterParams.set('period_to',   to.toISOString())
-    const url = (endpoint: 'recommended-matrix' | 'open-matrix') =>
+    const url = (endpoint: 'locked-matrix' | 'recommended-matrix' | 'open-matrix') =>
       `/client/${clientId}/reports/sales/${endpoint}?${filterParams.toString()}`
     Promise.all([
+      api.get<{ rows: RawMatrixRow[] }>(url('locked-matrix')),
       api.get<{ rows: RawMatrixRow[] }>(url('recommended-matrix')),
       api.get<{ rows: RawMatrixRow[] }>(url('open-matrix')),
     ])
-      .then(([recRes, openRes]) => {
+      .then(([lockedRes, recRes, openRes]) => {
         if (matrixGen.current !== myGen) return
-        setRecommendedMatrix(shapeRecommendedRows(recRes.data.rows))
+        setLockedMatrix(shapeBrandRows(lockedRes.data.rows))
+        setRecommendedMatrix(shapeBrandRows(recRes.data.rows))
         setOpenMatrix(shapeOpenRows(openRes.data.rows))
       })
       .catch(() => { /* silent — matrix panels show empty state */ })
@@ -638,10 +644,20 @@ function SalesReportInner() {
         />
       )}
 
-      {/* Pivot matrices — collapsed by default. Recommended vs Given
-          shows what dealers substituted for our recommended brands;
-          Common Name → Brand Sold shows which brands dealers picked
-          for our Open items. */}
+      {/* Pivot matrices — collapsed by default. Locked shows per-brand
+          totals with an ✓ all-honored badge when enforcement held (the
+          normal case); if a locked brand somehow shows substitutions
+          those sub-rows render as anomalies worth chasing. Recommended
+          shows what dealers substituted for our recommended brands.
+          Common Name shows which brands dealers picked for Open items. */}
+      <MatrixPanel
+        title="Locked-Brand Matrix"
+        caption="For each brand your SE locked in your Packages, what dealers sold. By enforcement, every row should be fully honored (✓); any substitutions here are data-integrity anomalies worth chasing."
+        rows={lockedMatrix}
+        loading={matrixLoading}
+        brandColour={brandColour}
+        collapseWhenAllHonored
+      />
       <MatrixPanel
         title="Recommended vs Given"
         caption="For each brand your SE recommended (not locked), what dealers actually sold. ✓ marks the honored match; slate bars are substitutions."
