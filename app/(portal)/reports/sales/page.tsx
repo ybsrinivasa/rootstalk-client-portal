@@ -34,6 +34,7 @@ import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
 import { ThreeUnitNumber } from '@/components/reports/three-unit-number'
 import { DrillPanel, type MetricConfig } from '@/components/reports/drill-panel'
+import { useCascadingFilterOptions, type ChipKey } from '@/components/reports/use-filter-options'
 
 interface SalesVolumeResponse {
   litres: number
@@ -238,18 +239,29 @@ function SalesReportInner() {
   const [customTo,   setCustomTo]   = useState<string>(() => searchParams.get('to')   || '')
 
   const [data, setData] = useState<SalesData>(EMPTY_DATA)
-  const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [toast, setToast] = useState<string | null>(null)
 
-  // Fetch chip options once per client.
-  useEffect(() => {
-    if (!clientId) return
-    api
-      .get<FilterOptionsResponse>(`/client/${clientId}/reports/filter-options`)
-      .then(({ data }) => setOptions(data))
-      .catch(() => { /* chips will just be empty; cards still render */ })
-  }, [clientId])
+  // Cascading filter options — refetched on every filter change so
+  // each chip's list narrows to what's intersectable with the OTHER
+  // chips. When a currently-selected value is no longer available
+  // (e.g., added a State that has no rows for the currently-selected
+  // Package), we clear it and toast the user.
+  const options = useCascadingFilterOptions({
+    clientId,
+    filterValues,
+    onEvicted: (evicted) => {
+      setFilterValues(prev => {
+        const next = { ...prev }
+        for (const chip of evicted) next[chip] = ''
+        return next
+      })
+      const chipLabels = evicted.map(c => CHIPS.find(x => x.urlKey === c)?.label ?? c).join(', ')
+      setToast(`${chipLabels} filter${evicted.length > 1 ? 's' : ''} cleared — no data with the new filters`)
+      setTimeout(() => setToast(null), 4000)
+    },
+  }) as FilterOptionsResponse | null
 
   // Fetch all four metrics whenever filters or period change.
   useEffect(() => {
@@ -446,6 +458,12 @@ function SalesReportInner() {
               className="border border-slate-300 rounded-md px-2 py-1"
             />
           </label>
+        </div>
+      )}
+
+      {toast && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">
+          {toast}
         </div>
       )}
 

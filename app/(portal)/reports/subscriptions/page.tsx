@@ -20,6 +20,7 @@ import { getClient } from '@/lib/auth'
 import { ReportSubjectTabs } from '@/components/reports/subject-tabs'
 import { ExportCsvButton } from '@/components/reports/export-button'
 import { DrillPanel, type MetricConfig } from '@/components/reports/drill-panel'
+import { useCascadingFilterOptions, type ChipKey } from '@/components/reports/use-filter-options'
 
 // Subscriptions drill metrics. Active is point-in-time, so TIME is
 // deliberately absent from its supported dimensions (backend also
@@ -255,18 +256,25 @@ function SubscriptionsReportInner() {
   const [active, setActive] = useState<SubsMetricResponse | null>(null)
   const [total, setTotal] = useState<SubsMetricResponse | null>(null)
   const [newSubs, setNewSubs] = useState<SubsNewResponse | null>(null)
-  const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [toast, setToast] = useState<string | null>(null)
 
-  // Fetch filter chip options once per client.
-  useEffect(() => {
-    if (!clientId) return
-    api
-      .get<FilterOptionsResponse>(`/client/${clientId}/reports/filter-options`)
-      .then(({ data }) => setOptions(data))
-      .catch(() => { /* filter chips will just be empty; page still works */ })
-  }, [clientId])
+  // Cascading filter chip options — refetched on every chip change.
+  const options = useCascadingFilterOptions({
+    clientId,
+    filterValues: filterValues as Partial<Record<ChipKey, string>>,
+    onEvicted: (evicted) => {
+      setFilterValues(prev => {
+        const next = { ...prev }
+        for (const chip of evicted) if (chip in next) next[chip as keyof FilterValues] = ''
+        return next
+      })
+      const labels = evicted.map(c => CHIPS.find(x => x.urlKey === c)?.label ?? c).join(', ')
+      setToast(`${labels} filter${evicted.length > 1 ? 's' : ''} cleared — no data with the new filters`)
+      setTimeout(() => setToast(null), 4000)
+    },
+  }) as FilterOptionsResponse | null
 
   // Fetch all three metrics whenever any filter or the period changes.
   useEffect(() => {
@@ -525,6 +533,12 @@ function SubscriptionsReportInner() {
               Pick both dates to filter.
             </span>
           )}
+        </div>
+      )}
+
+      {toast && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm px-4 py-3">
+          {toast}
         </div>
       )}
 
