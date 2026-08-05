@@ -131,11 +131,24 @@ export function SalesTrendChart({
                 fill="#0F172A"
               />
             ))}
+            {/* per-bar date label — thin out if crowded so labels don't overlap */}
+            {rows.map((r, i) => {
+              const step = rows.length <= 6 ? 1 : rows.length <= 12 ? 2 : Math.ceil(rows.length / 6)
+              if (i % step !== 0 && i !== rows.length - 1) return null
+              return (
+                <text
+                  key={r.key + 'lbl'}
+                  x={barX(i) + barWidth / 2}
+                  y={height - padding.b + 12}
+                  fontSize="9"
+                  fill="#64748B"
+                  textAnchor="middle"
+                >
+                  {fmtBucket(r.key)}
+                </text>
+              )
+            })}
           </svg>
-          <div className="flex justify-between text-[10px] text-slate-500 mt-1 px-8">
-            {rows.length > 0 && <span>{fmtBucket(rows[0].key)}</span>}
-            {rows.length > 1 && <span>{fmtBucket(rows[rows.length - 1].key)}</span>}
-          </div>
           <div className="flex items-center gap-3 text-xs text-slate-500 mt-2">
             <span className="flex items-center gap-1.5">
               <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: accent }} />
