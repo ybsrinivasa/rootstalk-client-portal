@@ -27,6 +27,7 @@ import { DealerScorecard, type DealerScoreRow } from '@/components/reports/deale
 import { MatrixPanel, type MatrixRow } from '@/components/reports/matrix-panel'
 import { DrillPanel, type MetricConfig } from '@/components/reports/drill-panel'
 import { useCascadingFilterOptions, type ChipKey } from '@/components/reports/use-filter-options'
+import { SalesTrendChart, SalesTopBar } from '@/components/reports/sales-hero-charts'
 
 // Backend leads shapes.
 interface LeadsSimple { leads: number; converted: number }
@@ -259,6 +260,14 @@ function SalesReportInner() {
   const [scorecardPooled, setScorecardPooled] = useState<DealerScoreRow | null>(null)
   const [scorecardLoading, setScorecardLoading] = useState(true)
 
+  // Hero charts state — two-metric toggle (Locked | Total), fetches
+  // three by-dimension endpoints in parallel.
+  const [heroMetric, setHeroMetric] = useState<'LOCKED' | 'NETWORK_TOTAL'>('NETWORK_TOTAL')
+  const [heroTime, setHeroTime] = useState<{ key: string; leads: number; converted: number }[]>([])
+  const [heroSpace, setHeroSpace] = useState<{ key: string; label?: string; leads: number; converted: number }[]>([])
+  const [heroCrop, setHeroCrop] = useState<{ key: string; label?: string; leads: number; converted: number }[]>([])
+  const [heroLoading, setHeroLoading] = useState(true)
+
   const [lockedMatrix, setLockedMatrix] = useState<MatrixRow[]>([])
   const [recommendedMatrix, setRecommendedMatrix] = useState<MatrixRow[]>([])
   const [openMatrix, setOpenMatrix] = useState<MatrixRow[]>([])
@@ -351,6 +360,45 @@ function SalesReportInner() {
         setScorecardLoading(false)
       })
   }, [clientId, filterValues, period, customFrom, customTo])
+
+  // Hero charts fetch — three by-dimension queries in parallel.
+  // Refetches on any filter/period/metric change.
+  const heroGen = useRef(0)
+  useEffect(() => {
+    if (!clientId) return
+    const myGen = ++heroGen.current
+    setHeroLoading(true)
+    const base = new URLSearchParams()
+    for (const chip of CHIPS) {
+      const v = filterValues[chip.urlKey]
+      if (v) base.set(chip.apiKey, v)
+    }
+    const { from, to } = periodDates(period, customFrom, customTo)
+    if (from) base.set('period_from', from.toISOString())
+    if (to)   base.set('period_to',   to.toISOString())
+    const url = (dim: 'TIME' | 'SPACE' | 'CROP') => {
+      const q = new URLSearchParams(base)
+      q.set('metric', heroMetric)
+      q.set('dimension', dim)
+      return `/client/${clientId}/reports/sales?${q.toString()}`
+    }
+    Promise.all([
+      api.get<{ key: string; leads: number; converted: number }[]>(url('TIME')),
+      api.get<{ key: string; label?: string; leads: number; converted: number }[]>(url('SPACE')),
+      api.get<{ key: string; label?: string; leads: number; converted: number }[]>(url('CROP')),
+    ])
+      .then(([timeRes, spaceRes, cropRes]) => {
+        if (heroGen.current !== myGen) return
+        setHeroTime(timeRes.data)
+        setHeroSpace(spaceRes.data)
+        setHeroCrop(cropRes.data)
+      })
+      .catch(() => { /* silent — charts render empty */ })
+      .finally(() => {
+        if (heroGen.current !== myGen) return
+        setHeroLoading(false)
+      })
+  }, [clientId, filterValues, period, customFrom, customTo, heroMetric])
 
   const matrixGen = useRef(0)
   useEffect(() => {
@@ -578,6 +626,58 @@ function SalesReportInner() {
           loading={loading}
         />
       </SalesCard>
+
+      {/* Hero charts — two-metric toggle (Locked | Total) + three
+          charts: conversion trend over time, top states, top crops. */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs uppercase tracking-wider text-slate-500 font-medium">Trends for:</span>
+        {(['NETWORK_TOTAL', 'LOCKED'] as const).map(m => {
+          const active = heroMetric === m
+          const label = m === 'NETWORK_TOTAL' ? 'Total' : 'Locked'
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setHeroMetric(m)}
+              className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                active
+                  ? 'border-slate-800 bg-slate-800 text-white'
+                  : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400'
+              }`}
+            >
+              {label}
+            </button>
+          )
+        })}
+        <span className="text-xs text-slate-400 ml-1">
+          {heroMetric === 'NETWORK_TOTAL'
+            ? '(Locked + Recommended + Open — everything through your network)'
+            : '(only your locked-brand items)'}
+        </span>
+      </div>
+
+      <SalesTrendChart
+        data={heroTime}
+        accent={brandColour}
+        loading={heroLoading}
+        title="Conversion trend over time"
+      />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <SalesTopBar
+          title="Top states"
+          data={heroSpace}
+          accent={brandColour}
+          loading={heroLoading}
+          emptyText="No location data in the current window."
+        />
+        <SalesTopBar
+          title="Top crops"
+          data={heroCrop}
+          accent={brandColour}
+          loading={heroLoading}
+          emptyText="No crop data in the current window."
+        />
+      </div>
 
       {/* Dealer scorecard */}
       <DealerScorecard
