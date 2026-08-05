@@ -23,6 +23,8 @@ export const CHIP_API_KEYS = {
   package:  'package_id',
   dealer:   'dealer_user_id',
   promoter: 'promoter_user_id',
+  severity: 'severity',
+  pundit:   'pundit_id',
 } as const
 
 export type ChipKey = keyof typeof CHIP_API_KEYS
@@ -36,9 +38,11 @@ export interface FilterOptionsResponse {
   crops: FilterOption[]
   states: FilterOption[]
   districts: FilterOption[]
-  packages: FilterOption[]
-  dealers?: FilterOption[]      // omitted from Subscriptions + Orders responses today
-  promoters?: FilterOption[]    // present when the Promoters area drives the request
+  packages?: FilterOption[]
+  dealers?: FilterOption[]
+  promoters?: FilterOption[]
+  severities?: FilterOption[]
+  pundits?: FilterOption[]
 }
 
 // Which options key corresponds to which chip.
@@ -49,6 +53,8 @@ const CHIP_TO_OPTIONS_KEY: Record<ChipKey, keyof FilterOptionsResponse> = {
   package: 'packages',
   dealer: 'dealers',
   promoter: 'promoters',
+  severity: 'severities',
+  pundit: 'pundits',
 }
 
 interface UseCascadingFilterOptionsArgs {
@@ -57,12 +63,16 @@ interface UseCascadingFilterOptionsArgs {
   /** Called when a currently-selected chip value is no longer
    *  available in the fresh options list. Caller clears + toasts. */
   onEvicted?: (evicted: ChipKey[], clear: (chip: ChipKey) => void) => void
+  /** Subject-specific endpoint suffix. Defaults to the shared
+   *  Subscription-scoped one. Queries area passes 'queries/filter-options'. */
+  endpointPath?: string
 }
 
 export function useCascadingFilterOptions({
   clientId,
   filterValues,
   onEvicted,
+  endpointPath = 'filter-options',
 }: UseCascadingFilterOptionsArgs): FilterOptionsResponse | null {
   const [options, setOptions] = useState<FilterOptionsResponse | null>(null)
   // Stable ref to the callback so useEffect doesn't re-run when the
@@ -82,7 +92,7 @@ export function useCascadingFilterOptions({
       if (v) q.set(CHIP_API_KEYS[chip], v)
     }
     const qs = q.toString()
-    const url = `/client/${clientId}/reports/filter-options${qs ? '?' + qs : ''}`
+    const url = `/client/${clientId}/reports/${endpointPath}${qs ? '?' + qs : ''}`
 
     // Small debounce so a rapid chip-clear-and-reselect doesn't
     // fire two requests.
@@ -113,7 +123,7 @@ export function useCascadingFilterOptions({
     }, 200)
     return () => clearTimeout(handle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, filterKey])
+  }, [clientId, filterKey, endpointPath])
 
   return options
 }
