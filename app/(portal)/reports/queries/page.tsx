@@ -398,7 +398,6 @@ function QueriesReportInner() {
     'Avg Response Time'
   )
   const heroIsTime = heroMetric === 'AVG_RESPONSE'
-  const heroTimeData = heroIsTime ? heroTime : heroTime
   const heroTitle = `${heroMetricLabel} over time`
 
   return (
@@ -610,11 +609,12 @@ function QueriesReportInner() {
       </div>
 
       <PromoterTrendChart
-        data={heroTimeData}
+        data={heroTime}
         accent={brandColour}
         loading={heroLoading}
         bucket={pickBucket(period, customFrom, customTo)}
         title={heroTitle}
+        isDuration={heroIsTime}
       />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <PromoterTopBar
@@ -623,6 +623,7 @@ function QueriesReportInner() {
           accent={brandColour}
           loading={heroLoading}
           emptyText="No location data in the current window."
+          isDuration={heroIsTime}
         />
         <PromoterTopBar
           title={`Top crops — ${heroMetricLabel}`}
@@ -630,6 +631,7 @@ function QueriesReportInner() {
           accent={brandColour}
           loading={heroLoading}
           emptyText="No crop data in the current window."
+          isDuration={heroIsTime}
         />
       </div>
 

@@ -30,7 +30,19 @@ function fmtBucketLabel(iso: string, bucket: BucketSize): string {
   return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
 }
 
-function fmtValue(v: number, isAcres: boolean): string {
+// Format the y-axis and per-row values based on what the metric is:
+//   integer count  → "1,234"
+//   acres          → "1,234" (rounded) or "12.3" (< 100)
+//   seconds        → "45m" / "6.4h" / "3d"
+function fmtValue(v: number, isAcres: boolean, isDuration: boolean = false): string {
+  if (isDuration) {
+    if (!v || v <= 0) return '—'
+    const mins = v / 60
+    if (mins < 60) return `${Math.round(mins)}m`
+    const hours = mins / 60
+    if (hours < 48) return `${hours.toFixed(1)}h`
+    return `${Math.round(hours / 24)}d`
+  }
   if (!isAcres) return Math.round(v).toLocaleString()
   const rounded = v >= 100 ? Math.round(v) : Math.round(v * 10) / 10
   return rounded.toLocaleString()
@@ -39,7 +51,7 @@ function fmtValue(v: number, isAcres: boolean): string {
 // ── Trend over time — solid bars per bucket ──────────────────────────
 
 export function PromoterTrendChart({
-  data, accent, loading, bucket, title, isAcres = false, unitLabel = '',
+  data, accent, loading, bucket, title, isAcres = false, isDuration = false, unitLabel = '',
 }: {
   data: Point[] | null
   accent: string
@@ -47,6 +59,7 @@ export function PromoterTrendChart({
   bucket: BucketSize
   title: string
   isAcres?: boolean
+  isDuration?: boolean
   unitLabel?: string
 }) {
   const width = 400
@@ -61,7 +74,14 @@ export function PromoterTrendChart({
   const chartH = height - padding.t - padding.b
   const scaleY = (v: number) => padding.t + chartH * (1 - v / maxV)
 
+  // Summing durations across buckets is meaningless (would double-count
+  // farmers who submitted queries in multiple buckets and be an
+  // unweighted total of averages). For duration metrics we show Peak
+  // (max bucket value) so the header still carries a useful headline
+  // number. For count/acres metrics, keep the running total.
   const total = rows.reduce((s, r) => s + r.value, 0)
+  const headlineLabel = isDuration ? 'Peak' : 'Total'
+  const headlineValue = isDuration ? maxV : total
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
@@ -69,7 +89,7 @@ export function PromoterTrendChart({
         <p className="text-sm font-medium text-slate-500">{title}</p>
         {!loading && !empty && (
           <p className="text-xs text-slate-500 tabular-nums">
-            Total: <span className="font-semibold" style={{ color: accent }}>{fmtValue(total, isAcres)}</span>
+            {headlineLabel}: <span className="font-semibold" style={{ color: accent }}>{fmtValue(headlineValue, isAcres, isDuration)}</span>
             {unitLabel && <span className="text-slate-400 ml-1">{unitLabel}</span>}
           </p>
         )}
@@ -81,7 +101,7 @@ export function PromoterTrendChart({
       ) : (
         <svg viewBox={`0 0 ${width} ${height}`} className="mt-4 w-full h-40" role="img" aria-label={title}>
           <line x1={padding.l} y1={height - padding.b} x2={width - padding.r} y2={height - padding.b} stroke={SLATE} strokeWidth={1} />
-          <text x={0} y={padding.t + 4} fontSize="10" fill="#64748B">{fmtValue(maxV, isAcres)}</text>
+          <text x={0} y={padding.t + 4} fontSize="10" fill="#64748B">{fmtValue(maxV, isAcres, isDuration)}</text>
           <text x={0} y={height - padding.b + 4} fontSize="10" fill="#64748B">0</text>
           {rows.map((r, i) => {
             const topY = scaleY(r.value)
@@ -122,7 +142,7 @@ export function PromoterTrendChart({
 // ── Ranked horizontal-bar list (Top states, Top crops) ──────────────
 
 export function PromoterTopBar({
-  title, data, accent, loading, emptyText, limit = 8, isAcres = false,
+  title, data, accent, loading, emptyText, limit = 8, isAcres = false, isDuration = false,
 }: {
   title: string
   data: Point[] | null
@@ -131,6 +151,7 @@ export function PromoterTopBar({
   emptyText: string
   limit?: number
   isAcres?: boolean
+  isDuration?: boolean
 }) {
   const rows = (data ?? []).slice(0, limit)
   const maxV = rows.length > 0 ? Math.max(1, ...rows.map(r => r.value)) : 1
@@ -153,7 +174,7 @@ export function PromoterTopBar({
                   <div className="h-full" style={{ width: `${barWidth}%`, backgroundColor: accent }} />
                 </div>
                 <span className="w-16 text-right tabular-nums text-xs text-slate-700">
-                  {fmtValue(r.value, isAcres)}
+                  {fmtValue(r.value, isAcres, isDuration)}
                 </span>
               </li>
             )
