@@ -22,6 +22,7 @@ const TABS: SubjectTab[] = [
   { href: '/reports/subscriptions', label: 'Subscriptions' },
   { href: '/reports/orders',        label: 'Orders' },
   { href: '/reports/sales',         label: 'Sales' },
+  { href: '/reports/promoters',     label: 'Promoters' },
 ]
 
 export function ReportSubjectTabs() {

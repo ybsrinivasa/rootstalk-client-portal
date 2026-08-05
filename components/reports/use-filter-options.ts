@@ -22,6 +22,7 @@ export const CHIP_API_KEYS = {
   district: 'district_cosh_id',
   package:  'package_id',
   dealer:   'dealer_user_id',
+  promoter: 'promoter_user_id',
 } as const
 
 export type ChipKey = keyof typeof CHIP_API_KEYS
@@ -36,7 +37,8 @@ export interface FilterOptionsResponse {
   states: FilterOption[]
   districts: FilterOption[]
   packages: FilterOption[]
-  dealers?: FilterOption[]    // omitted from Subscriptions + Orders responses today
+  dealers?: FilterOption[]      // omitted from Subscriptions + Orders responses today
+  promoters?: FilterOption[]    // present when the Promoters area drives the request
 }
 
 // Which options key corresponds to which chip.
@@ -46,6 +48,7 @@ const CHIP_TO_OPTIONS_KEY: Record<ChipKey, keyof FilterOptionsResponse> = {
   district: 'districts',
   package: 'packages',
   dealer: 'dealers',
+  promoter: 'promoters',
 }
 
 interface UseCascadingFilterOptionsArgs {
