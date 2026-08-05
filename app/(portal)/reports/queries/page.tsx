@@ -45,7 +45,14 @@ interface FilterOptionsResponse {
 interface CountShape { count: number }
 interface AvgResponseShape { avg_seconds: number; responded: number }
 interface SlaShape { within: number; total: number; sla_hours: number }
-interface SeverityShape { severe: number; moderate: number; low: number; total: number }
+interface SeverityShape {
+  critical: number
+  high: number
+  moderate: number
+  low: number
+  other: number
+  total: number
+}
 
 interface QueriesData {
   count: CountShape | null
@@ -558,9 +565,12 @@ function QueriesReportInner() {
         </QueryCard>
         <QueryCard title="By Severity" caption="Split by the severity farmers marked at submission.">
           <div className="space-y-1.5">
-            {(['severe', 'moderate', 'low'] as const).map(k => {
-              const label = k === 'severe' ? 'Severe' : k === 'moderate' ? 'Moderate' : 'Low'
-              const colour = k === 'severe' ? '#B91C1C' : k === 'moderate' ? '#B45309' : '#15803d'
+            {([
+              { k: 'critical', label: 'Critical', colour: '#B91C1C' },
+              { k: 'high',     label: 'High',     colour: '#C2410C' },
+              { k: 'moderate', label: 'Moderate', colour: '#B45309' },
+              { k: 'low',      label: 'Low',      colour: '#15803d' },
+            ] as const).map(({ k, label, colour }) => {
               const count = sev?.[k] ?? 0
               const total = sev?.total ?? 0
               const barWidth = total > 0 ? Math.round((count / total) * 100) : 0
@@ -576,6 +586,11 @@ function QueriesReportInner() {
                 </div>
               )
             })}
+            {(sev?.other ?? 0) > 0 && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                + {sev?.other} with a legacy severity value
+              </p>
+            )}
           </div>
         </QueryCard>
       </div>
