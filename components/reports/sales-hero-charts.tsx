@@ -19,9 +19,28 @@ interface LeadPoint {
   package_name?: string
 }
 
-function fmtBucket(iso: string): string {
+export type BucketSize = 'day' | 'week' | 'month'
+
+// Format a bucket-start ISO date as a human-readable label. Buckets
+// wider than a day render as ranges — a lone "01 Jul" on a monthly
+// bar reads as "what happened on 1 July," which is misleading.
+function fmtBucket(iso: string, bucket: BucketSize): string {
   const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
+  const monthShort = d.toLocaleDateString(undefined, { month: 'short' })
+  const day = d.getDate().toString().padStart(2, '0')
+  if (bucket === 'day') {
+    return `${day} ${monthShort}`
+  }
+  if (bucket === 'week') {
+    const end = new Date(d)
+    end.setDate(end.getDate() + 6)
+    const endDay = end.getDate().toString().padStart(2, '0')
+    const endMonthShort = end.toLocaleDateString(undefined, { month: 'short' })
+    if (monthShort === endMonthShort) return `${day}–${endDay} ${monthShort}`
+    return `${day} ${monthShort}–${endDay} ${endMonthShort}`
+  }
+  // month — "Jul 2026" is unambiguous vs a lone day-of-month
+  return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
 }
 
 function pct(a: number, b: number): number {
@@ -37,11 +56,12 @@ function pct(a: number, b: number): number {
 // so trend is readable even when bar heights vary.
 
 export function SalesTrendChart({
-  data, accent, loading, title = 'Conversion trend',
+  data, accent, loading, bucket, title = 'Conversion trend',
 }: {
   data: LeadPoint[] | null
   accent: string
   loading: boolean
+  bucket: BucketSize
   title?: string
 }) {
   const width = 400
@@ -144,7 +164,7 @@ export function SalesTrendChart({
                   fill="#64748B"
                   textAnchor="middle"
                 >
-                  {fmtBucket(r.key)}
+                  {fmtBucket(r.key, bucket)}
                 </text>
               )
             })}

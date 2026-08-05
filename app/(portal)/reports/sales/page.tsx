@@ -221,6 +221,17 @@ function periodDates(preset: PeriodPreset, customFrom: string, customTo: string)
   return {}
 }
 
+// Mirror of backend `_pick_time_bucket` so the trend chart can format
+// bar labels as ranges. Keep in sync with queries.py:_pick_time_bucket.
+function pickBucket(preset: PeriodPreset, customFrom: string, customTo: string): 'day' | 'week' | 'month' {
+  const { from, to } = periodDates(preset, customFrom, customTo)
+  if (!from || !to) return 'month'
+  const days = Math.round((to.getTime() - from.getTime()) / (24 * 3600 * 1000))
+  if (days <= 14) return 'day'
+  if (days <= 120) return 'week'
+  return 'month'
+}
+
 export default function SalesReportPage() {
   return (
     <Suspense fallback={<div className="text-slate-400 text-sm">Loading…</div>}>
@@ -660,6 +671,7 @@ function SalesReportInner() {
         data={heroTime}
         accent={brandColour}
         loading={heroLoading}
+        bucket={pickBucket(period, customFrom, customTo)}
         title="Conversion trend over time"
       />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
