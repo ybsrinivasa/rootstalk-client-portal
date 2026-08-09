@@ -455,7 +455,7 @@ function SessionRolesPanel({
           <div>
             <p className="text-sm font-semibold text-slate-800">Training Dealer</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Adds one demo dealer to the farmer&apos;s picker. Must be active on RootsTalk, have a shop profile, and not be onboarded by any client.
+              A dummy dealer for this training session — the farmer&apos;s picker will show only this dealer for training orders. Must be active on RootsTalk with a shop profile, and not already onboarded by your company as a real dealer.
             </p>
           </div>
           {dealerUserId && (
