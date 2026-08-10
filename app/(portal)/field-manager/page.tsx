@@ -21,10 +21,8 @@ interface Promoter {
   // otherwise. Powers the amber-badge summary of what the promoter
   // is still holding when they've asked to leave.
   pending_stepdown?: {
-    open_orders: number
-    pending_payments: number
-    pending_payments_amount: number
     unassigned_units: number
+    pending_assignments: number
   } | null
   territory_notes: string | null; registered_at: string
   // 2026-05-21 — bulk-decorated by GET /field-manager/promoters
@@ -307,24 +305,23 @@ export default function FieldManagerPage() {
                           Stepdown requested
                         </p>
                         {p.pending_stepdown && (
-                          (p.pending_stepdown.open_orders > 0
-                            || p.pending_stepdown.pending_payments > 0
-                            || p.pending_stepdown.unassigned_units > 0) ? (
+                          (p.pending_stepdown.unassigned_units > 0
+                            || p.pending_stepdown.pending_assignments > 0) ? (
                             <ul className="mt-1 space-y-0.5 text-amber-800">
-                              {p.pending_stepdown.open_orders > 0 && (
-                                <li>· {p.pending_stepdown.open_orders} open order{p.pending_stepdown.open_orders === 1 ? '' : 's'} in flight</li>
-                              )}
-                              {p.pending_stepdown.pending_payments > 0 && (
-                                <li>· {p.pending_stepdown.pending_payments} pending payment{p.pending_stepdown.pending_payments === 1 ? '' : 's'} (₹{Math.round(p.pending_stepdown.pending_payments_amount).toLocaleString()})</li>
-                              )}
                               {p.pending_stepdown.unassigned_units > 0 && (
                                 <li>· {p.pending_stepdown.unassigned_units} unassigned allocation unit{p.pending_stepdown.unassigned_units === 1 ? '' : 's'} (reclaimed on approve)</li>
+                              )}
+                              {p.pending_stepdown.pending_assignments > 0 && (
+                                <li>· {p.pending_stepdown.pending_assignments} farmer assignment{p.pending_stepdown.pending_assignments === 1 ? '' : 's'} awaiting response</li>
                               )}
                             </ul>
                           ) : (
                             <p className="mt-1 text-amber-800">No pending items — safe to approve immediately.</p>
                           )
                         )}
+                        <p className="mt-1 text-[10px] text-amber-700 italic">
+                          Facilitator role stays active — orders being facilitated and pending payments continue independently.
+                        </p>
                       </div>
                     )}
                   </td>
