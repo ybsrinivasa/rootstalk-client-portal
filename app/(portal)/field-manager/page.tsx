@@ -14,7 +14,18 @@ interface Promoter {
   // R9 (2026-05-29): Promoter-invitation lifecycle on the same row.
   // FACILITATOR: NONE → PENDING → (ACCEPTED|DECLINED).
   // DEALER:     NONE → ACCEPTED (auto-accept on request, no handshake).
-  promoter_request_status: 'NONE' | 'PENDING' | 'ACCEPTED' | 'DECLINED'
+  // 2026-08-10 — STEPDOWN_REQUESTED: promoter has requested to leave
+  // and is waiting for CA/FM to approve via the revoke button.
+  promoter_request_status: 'NONE' | 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'STEPDOWN_REQUESTED'
+  // 2026-08-10 — decorated only on STEPDOWN_REQUESTED rows; null
+  // otherwise. Powers the amber-badge summary of what the promoter
+  // is still holding when they've asked to leave.
+  pending_stepdown?: {
+    open_orders: number
+    pending_payments: number
+    pending_payments_amount: number
+    unassigned_units: number
+  } | null
   territory_notes: string | null; registered_at: string
   // 2026-05-21 — bulk-decorated by GET /field-manager/promoters
   // for DEALER rows so the FM can verify identity at a glance,
@@ -160,12 +171,21 @@ export default function FieldManagerPage() {
   async function revokePromoter(p: Promoter) {
     // 2026-06-23 — Both DEALER and FACILITATOR use the two-sided
     // handshake now, so the teardown semantics are identical.
-    const consequence = p.promoter_request_status === 'PENDING'
-      ? 'The pending invitation will be withdrawn.'
-      : 'They will stop being able to assign packages on behalf of this company. Existing assignments are unaffected.'
-    const verb = p.promoter_request_status === 'PENDING'
-      ? 'Revoke the pending Promoter invitation for'
-      : 'End the Promoter role for'
+    // 2026-08-10 — STEPDOWN_REQUESTED: the promoter has asked to
+    // leave; this button "approves" that. Copy shifts to reflect
+    // the direction — they initiated, we're confirming.
+    let consequence: string
+    let verb: string
+    if (p.promoter_request_status === 'PENDING') {
+      consequence = 'The pending invitation will be withdrawn.'
+      verb = 'Revoke the pending Promoter invitation for'
+    } else if (p.promoter_request_status === 'STEPDOWN_REQUESTED') {
+      consequence = 'Their request to step down will be approved. Any unassigned allocation units will be reclaimed. Existing assignments are unaffected.'
+      verb = 'Approve the stepdown request from'
+    } else {
+      consequence = 'They will stop being able to assign packages on behalf of this company. Existing assignments are unaffected.'
+      verb = 'End the Promoter role for'
+    }
     if (!confirm(`${verb} ${p.name || 'this person'}? ${consequence}`)) return
     try {
       await api.put(
@@ -280,6 +300,33 @@ export default function FieldManagerPage() {
                         Invitation pending
                       </span>
                     )}
+                    {p.promoter_request_status === 'STEPDOWN_REQUESTED' && (
+                      <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <p className="font-semibold flex items-center gap-1.5">
+                          <span aria-hidden>⚠</span>
+                          Stepdown requested
+                        </p>
+                        {p.pending_stepdown && (
+                          (p.pending_stepdown.open_orders > 0
+                            || p.pending_stepdown.pending_payments > 0
+                            || p.pending_stepdown.unassigned_units > 0) ? (
+                            <ul className="mt-1 space-y-0.5 text-amber-800">
+                              {p.pending_stepdown.open_orders > 0 && (
+                                <li>· {p.pending_stepdown.open_orders} open order{p.pending_stepdown.open_orders === 1 ? '' : 's'} in flight</li>
+                              )}
+                              {p.pending_stepdown.pending_payments > 0 && (
+                                <li>· {p.pending_stepdown.pending_payments} pending payment{p.pending_stepdown.pending_payments === 1 ? '' : 's'} (₹{Math.round(p.pending_stepdown.pending_payments_amount).toLocaleString()})</li>
+                              )}
+                              {p.pending_stepdown.unassigned_units > 0 && (
+                                <li>· {p.pending_stepdown.unassigned_units} unassigned allocation unit{p.pending_stepdown.unassigned_units === 1 ? '' : 's'} (reclaimed on approve)</li>
+                              )}
+                            </ul>
+                          ) : (
+                            <p className="mt-1 text-amber-800">No pending items — safe to approve immediately.</p>
+                          )
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 font-mono text-xs text-slate-600 hidden sm:table-cell">{p.phone || '—'}</td>
                   <td className="px-5 py-3.5 text-slate-400 text-xs hidden md:table-cell">{p.territory_notes || '—'}</td>
@@ -315,8 +362,14 @@ export default function FieldManagerPage() {
                       )}
                       {p.status === 'ACTIVE' && p.is_promoter && (
                         <button onClick={() => revokePromoter(p)}
-                          className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap">
-                          End Promoter Role
+                          className={
+                            p.promoter_request_status === 'STEPDOWN_REQUESTED'
+                              ? 'text-xs px-2 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold whitespace-nowrap'
+                              : 'text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap'
+                          }>
+                          {p.promoter_request_status === 'STEPDOWN_REQUESTED'
+                            ? 'Approve Stepdown'
+                            : 'End Promoter Role'}
                         </button>
                       )}
                       {p.status === 'ACTIVE' && !p.is_promoter && p.promoter_request_status === 'PENDING' && (
