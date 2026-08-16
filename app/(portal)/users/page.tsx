@@ -476,15 +476,20 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Add User Modal */}
+      {/* Add User Modal.
+          2026-08-16 — Card constrained to max-h-[90vh] with a scrollable
+          body + shrink-0 header/footer. Prevents the "Add User" button
+          from disappearing off the bottom of the viewport when the
+          Subject Expert bio fields expand the form on shorter screens. */}
       {showInvite && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b border-slate-100">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100 shrink-0">
               <h2 className="font-bold text-slate-900">Add Portal User</h2>
               <p className="text-slate-500 text-sm mt-0.5">Create login credentials for a Subject Expert or other team member</p>
             </div>
-            <form onSubmit={handleInvite} className="p-6 space-y-4">
+            <form onSubmit={handleInvite} className="flex flex-col flex-1 min-h-0">
+              <div className="p-6 pb-4 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Full Name</label>
                 <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
@@ -562,7 +567,8 @@ export default function UsersPage() {
               )}
 
               {error && <p className="text-sm text-red-600">{error}</p>}
-              <div className="flex gap-3 pt-2">
+              </div>
+              <div className="flex gap-3 p-6 pt-4 border-t border-slate-100 shrink-0">
                 <button type="button" onClick={() => { setShowInvite(false); setError('') }}
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
                   Cancel
@@ -583,14 +589,15 @@ export default function UsersPage() {
           (CA-exclusivity / password-reset). */}
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b border-slate-100">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100 shrink-0">
               <h2 className="font-bold text-slate-900">Edit User</h2>
               <p className="text-slate-500 text-sm mt-0.5">
                 {editing.email} · {ROLE_LABEL[editing.role] || editing.role}
               </p>
             </div>
-            <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
+            <form onSubmit={handleSaveEdit} className="flex flex-col flex-1 min-h-0">
+              <div className="p-6 pb-4 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Full Name</label>
                 <input value={editForm.name}
@@ -623,8 +630,8 @@ export default function UsersPage() {
               )}
 
               {error && <p className="text-sm text-red-600">{error}</p>}
-
-              <div className="flex gap-3 pt-2">
+              </div>
+              <div className="flex gap-3 p-6 pt-4 border-t border-slate-100 shrink-0">
                 <button type="button" onClick={() => { setEditing(null); setError('') }}
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
                   Cancel
@@ -645,14 +652,15 @@ export default function UsersPage() {
           Same checkbox pattern as the invite form. */}
       {editingRoles && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl w-full max-w-md">
-            <div className="px-6 pt-5 pb-3 border-b border-slate-100">
+          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="px-6 pt-5 pb-3 border-b border-slate-100 shrink-0">
               <h2 className="font-bold text-slate-900">Edit Roles</h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {editingRoles.name || editingRoles.email}
               </p>
             </div>
-            <form onSubmit={handleSaveRoles} className="p-6 space-y-4">
+            <form onSubmit={handleSaveRoles} className="flex flex-col flex-1 min-h-0">
+              <div className="p-6 pb-4 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
                   Roles
@@ -683,8 +691,8 @@ export default function UsersPage() {
               </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
-
-              <div className="flex gap-3 pt-2">
+              </div>
+              <div className="flex gap-3 p-6 pt-4 border-t border-slate-100 shrink-0">
                 <button type="button" onClick={() => { setEditingRoles(null); setError('') }}
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
                   Cancel
