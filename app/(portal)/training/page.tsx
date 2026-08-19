@@ -53,6 +53,10 @@ interface TrainingSession {
   training_status: 'ACTIVE' | 'WINDING_DOWN'
   training_expert_user_id: string | null
   training_dealer_user_id: string | null
+  // 2026-08-19 — Backend now hydrates the assigned dealer's display
+  // info (name, phone, shop) on the /current read so the CA panel
+  // can show more than an opaque "Assigned" badge.
+  training_dealer_info?: TrainingDealerInfo | null
   counts: TrainingCounts
 }
 
@@ -264,6 +268,7 @@ export default function TrainingSandboxPage() {
               clientId={clientId}
               expertUserId={session.training_expert_user_id}
               dealerUserId={session.training_dealer_user_id}
+              dealerInfo={session.training_dealer_info ?? null}
               onChanged={load}
             />
           )}
@@ -298,11 +303,15 @@ function SessionRolesPanel({
   clientId,
   expertUserId,
   dealerUserId,
+  dealerInfo,
   onChanged,
 }: {
   clientId: string
   expertUserId: string | null
   dealerUserId: string | null
+  // 2026-08-19 — Hydrated by the backend on /current so the panel
+  // renders the dealer's name + phone + shop instead of "Assigned".
+  dealerInfo: TrainingDealerInfo | null
   onChanged: () => Promise<void>
 }) {
   const [experts, setExperts] = useState<OnboardedExpert[]>([])
@@ -312,34 +321,12 @@ function SessionRolesPanel({
   const [dealerPhone, setDealerPhone] = useState('')
   const [dealerBusy, setDealerBusy] = useState(false)
   const [dealerError, setDealerError] = useState('')
-  const [dealerInfo, setDealerInfo] = useState<TrainingDealerInfo | null>(null)
 
   useEffect(() => {
     api.get<OnboardedExpert[]>(`/client/${clientId}/training/onboarded-experts`)
       .then(r => setExperts(r.data))
       .catch(() => { /* CA sees empty dropdown */ })
   }, [clientId])
-
-  // When the session already has a dealer assigned, fetch their info
-  // so the panel shows more than just an opaque user id. The lookup
-  // endpoint validates every candidate identically — since the ID
-  // was validated at set-time, re-lookup returns the same info block.
-  useEffect(() => {
-    if (!dealerUserId) { setDealerInfo(null); return }
-    const cachedByPhone = dealerPhone.trim() ? null : null
-    void cachedByPhone
-    // Re-derive from the phone we don't have — cheapest path is a
-    // targeted GET for the user id via the same info fields. We
-    // don't have that endpoint; instead we surface a placeholder
-    // and let the CA re-enter the phone if they want to change.
-    setDealerInfo({
-      user_id: dealerUserId,
-      name: 'Assigned',
-      phone: null,
-      shop_name: null,
-      shop_address: null,
-    })
-  }, [dealerUserId, dealerPhone])
 
   async function setExpert(userId: string) {
     setExpertBusy(true); setExpertError('')
@@ -390,7 +377,6 @@ function SessionRolesPanel({
     try {
       await api.delete(`/client/${clientId}/training/dealer`)
       await onChanged()
-      setDealerInfo(null)
     } catch (err) {
       setDealerError(extractErrorMessage(err, 'Could not clear training dealer.'))
     } finally { setDealerBusy(false) }
@@ -467,9 +453,19 @@ function SessionRolesPanel({
             </button>
           )}
         </div>
-        {dealerUserId && dealerInfo && (
-          <div className="mb-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900">
-            ✓ Assigned
+        {dealerUserId && (
+          <div className="mb-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 space-y-0.5">
+            <p className="font-semibold">
+              ✓ Assigned{dealerInfo?.name ? `: ${dealerInfo.name}` : ''}
+              {dealerInfo?.phone ? ` · ${dealerInfo.phone}` : ''}
+            </p>
+            {(dealerInfo?.shop_name || dealerInfo?.shop_address) && (
+              <p className="text-emerald-800">
+                {dealerInfo.shop_name}
+                {dealerInfo.shop_name && dealerInfo.shop_address ? ' · ' : ''}
+                {dealerInfo.shop_address}
+              </p>
+            )}
           </div>
         )}
         <div className="flex gap-2">
