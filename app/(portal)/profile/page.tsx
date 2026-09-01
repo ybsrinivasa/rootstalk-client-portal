@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, FormEvent } from 'react'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
-import { getClient, getToken } from '@/lib/auth'
+import { getClient, getToken, getUser } from '@/lib/auth'
 
 // ── Colour distance helper ────────────────────────────────────────────────────
 function hexToRgb(hex: string): [number, number, number] | null {
@@ -78,6 +78,16 @@ export default function ProfilePage() {
   const client = getClient()
   const clientId = client?.id
 
+  // Coaching Sandbox: if the current user is a coaching student, their
+  // workspace's own Company Profile is empty and un-editable. Route
+  // them instead to a read-only view of their session's REFERENCE
+  // CLIENT profile — a real fully-configured example they can learn
+  // from. Non-students get the normal editable workspace profile.
+  const user = getUser()
+  const coachingCtx = user?.coaching_context
+  const isCoachingStudent = Boolean(coachingCtx)
+  const readOnly = isCoachingStudent
+
   const [form, setForm] = useState<ProfileData>({
     display_name: '', tagline: null, primary_colour: '#1A5C2A', secondary_colour: null,
     logo_url: null, hq_address: null, support_phone: null, office_phone: null,
@@ -97,11 +107,17 @@ export default function ProfilePage() {
   const secondaryWarn = form.secondary_colour ? colourWarning(form.secondary_colour) : null
 
   useEffect(() => {
-    if (!clientId) return
-    api.get<ProfileData>(`/client/${clientId}/profile`)
+    // Coaching student → fetch reference client's profile from the
+    // dedicated coaching endpoint (bypasses tenant guard cleanly).
+    // Everyone else → their bound client's own profile.
+    const url = isCoachingStudent
+      ? `/coaching/my/reference-client-profile`
+      : `/client/${clientId}/profile`
+    if (!isCoachingStudent && !clientId) return
+    api.get<ProfileData>(url)
       .then(res => setForm(res.data))
       .catch(() => setLoadError('Could not load profile. Please refresh.'))
-  }, [clientId])
+  }, [clientId, isCoachingStudent])
 
   function set<K extends keyof ProfileData>(key: K, value: ProfileData[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -174,10 +190,32 @@ export default function ProfilePage() {
     <div className="max-w-3xl mx-auto space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-stone-900">Company Profile</h1>
-        <p className="text-stone-500 text-sm mt-1">Update your company branding and contact information</p>
+        <p className="text-stone-500 text-sm mt-1">
+          {readOnly
+            ? `Read-only view of ${coachingCtx?.reference_client_name}'s Company Profile — this is what a fully-configured client looks like.`
+            : 'Update your company branding and contact information'}
+        </p>
       </div>
 
+      {readOnly && (
+        <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 flex items-start gap-3">
+          <span className="text-purple-700 text-lg">🎓</span>
+          <div className="flex-1 text-sm text-purple-900">
+            <p className="font-medium">Coaching mode — read only</p>
+            <p className="text-purple-800/80 text-xs mt-0.5">
+              You&apos;re viewing <strong>{coachingCtx?.reference_client_name}</strong>&apos;s real Company Profile as a reference. You can&apos;t edit these fields from your coaching workspace.
+            </p>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSave} className="space-y-8">
+        {/* Read-only wrap — `fieldset[disabled]` disables every input,
+            select, textarea, and button descendant in one shot without
+            per-element wiring. Fires alongside the hidden Save button
+            below so a student in coaching mode can't accidentally
+            submit or edit anything. */}
+        <fieldset disabled={readOnly} className="space-y-8">
 
         {/* ── Brand Identity ────────────────────────────────────────────────── */}
         <div className="bg-white rounded-xl border border-stone-200 shadow-sm p-6">
@@ -351,12 +389,15 @@ export default function ProfilePage() {
           {saveError && (
             <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-700 text-sm">{saveError}</div>
           )}
-          <button type="submit" disabled={saving || logoUploading}
-            className="px-6 py-2.5 text-white font-semibold rounded-lg text-sm disabled:opacity-50 transition-opacity"
-            style={{ background: form.primary_colour || '#1A5C2A' }}>
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          {!readOnly && (
+            <button type="submit" disabled={saving || logoUploading}
+              className="px-6 py-2.5 text-white font-semibold rounded-lg text-sm disabled:opacity-50 transition-opacity"
+              style={{ background: form.primary_colour || '#1A5C2A' }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          )}
         </div>
+        </fieldset>
       </form>
     </div>
   )

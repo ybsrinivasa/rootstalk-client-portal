@@ -22,6 +22,19 @@ export interface CPUser {
    *  /admin/cm/clients/{cid}/login-as). Drives the "CM badge" UI
    *  and unlocks every feature on the client. */
   is_cm_for_this_client?: boolean
+  /** Coaching Sandbox context (2026-09-01). Non-null when the user
+   *  is a coaching student in an OPEN session — drives read-only
+   *  reference-client fetches on pages like Company Profile that
+   *  would otherwise show the student's empty workspace shell. */
+  coaching_context?: {
+    session_id: string
+    session_status: string
+    coach_name: string | null
+    reference_client_id: string
+    reference_client_name: string
+    workspace_client_id: string
+    assigned_pwa_roles: string[]
+  } | null
 }
 
 /** Convenience helper — true when the user's portal_roles include the
