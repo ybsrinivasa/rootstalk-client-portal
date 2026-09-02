@@ -149,11 +149,22 @@ export function hasRole(user: CPUser | null, ...roles: string[]): boolean {
  *  gate. CA falls through unless they also carry an SE portal role
  *  (multi-role is supported for non-CA roles only).
  *
+ *  Coaching Sandbox (2026-09-02): a coaching student is the sole CA
+ *  of their is_coaching workspace and can't add an SE (my earlier
+ *  add_portal_user guard + CA-exclusivity block it). So without this
+ *  bypass the student could never practise the Publish flow. The
+ *  backend gates (`_assert_can_edit_client_advisory` +
+ *  `_assert_can_publish_client_advisory`) have the mirroring
+ *  is_coaching short-circuit — this UI helper mirrors it so the
+ *  Publish button surfaces instead of being hidden.
+ *
  *  Used to hide Publish buttons / hide preview-page Publish CTAs.
  *  Surfaces the same rule client-side so the user doesn't get to
  *  the click → 403 round-trip. */
 export function canPublishAdvisory(user: CPUser | null): boolean {
-  return hasPortalRole(user, 'SUBJECT_EXPERT')
+  if (hasPortalRole(user, 'SUBJECT_EXPERT')) return true
+  if (user?.coaching_context) return true
+  return false
 }
 
 /** Post-login landing route. Dashboard fetches packages/pool/alerts
