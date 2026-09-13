@@ -1,12 +1,14 @@
 import axios from 'axios'
+import { getStore, isCoachView } from './tokenStore'
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001',
 })
 
 api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('rt_cp_token')
+  const store = getStore()
+  if (store) {
+    const token = store.getItem('rt_cp_token')
     if (token) config.headers.Authorization = `Bearer ${token}`
   }
   return config
@@ -18,6 +20,18 @@ api.interceptors.response.use(
     if (typeof window !== 'undefined') {
       const status = error.response?.status
       const code = error.response?.data?.detail?.code
+      // Coach-view 403s on writes are expected (get_current_user
+      // refuses any non-safe method on tokens with `coach_view=true`).
+      // Don't hijack the response — the caller sees the error and
+      // shows an inline "Read-only mode" toast. Same reasoning for
+      // 401s inside a coach-view tab: the coach can't re-authenticate
+      // from here (they'd need to open a fresh view from the SA
+      // portal), so redirecting to /login would just log them out of
+      // the student's identity and land on the company login page —
+      // wrong for both users.
+      if (isCoachView()) {
+        return Promise.reject(error)
+      }
       if (status === 401 && !window.location.pathname.startsWith('/onboarding/')) {
         // Preserve the company-branded login URL on session expiry,
         // mirroring the explicit logout flow in lib/auth.ts. The

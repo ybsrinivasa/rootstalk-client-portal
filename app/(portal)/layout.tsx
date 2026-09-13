@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { getToken, getUser, getClient, logout, CPClient, CPUser } from '@/lib/auth'
+import { isCoachView } from '@/lib/tokenStore'
 
 // ── SVG icon components ──────────────────────────────────────────────────────
 function IconHome() {
@@ -283,11 +284,13 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
   const [client, setClientState] = useState<CPClient | null>(null)
   const [user, setUser] = useState<CPUser | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [coachView, setCoachView] = useState(false)
 
   useEffect(() => {
     if (!getToken()) { router.replace('/login'); return }
     setClientState(getClient())
     setUser(getUser())
+    setCoachView(isCoachView())
   }, [router])
 
   // Prefer portal_roles (Batch K); fall back to portal_role list for
@@ -369,7 +372,9 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
               {user?.name && <p className="text-white/40 text-xs truncate">{user.email}</p>}
             </div>
           </div>
-          <button onClick={logout} className="text-white/40 text-xs hover:text-white transition-colors">Sign out</button>
+          <button onClick={logout} className="text-white/40 text-xs hover:text-white transition-colors">
+            {coachView ? 'Close view' : 'Sign out'}
+          </button>
         </div>
       </aside>
 
@@ -390,6 +395,26 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
           <span className="font-semibold text-stone-800 text-sm">{client?.display_name || 'RootsTalk'}</span>
         </div>
 
+        {coachView && (
+          <div className="sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-2 bg-purple-700 text-white text-sm">
+            <div className="flex items-center gap-2 min-w-0">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              <span className="truncate">
+                <span className="font-semibold">Coach view</span>
+                {' · read-only · changes will not be saved'}
+              </span>
+            </div>
+            <button
+              onClick={logout}
+              className="flex-shrink-0 px-2 py-0.5 rounded bg-purple-800 hover:bg-purple-900 text-white text-xs"
+            >
+              Close view
+            </button>
+          </div>
+        )}
         <main className="flex-1 p-6 bg-[#F7F5F0]">
           {children}
         </main>

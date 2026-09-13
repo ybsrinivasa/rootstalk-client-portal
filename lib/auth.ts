@@ -1,4 +1,5 @@
 import api from './api'
+import { getStore, isCoachView, COACH_VIEW_FLAG } from './tokenStore'
 
 export interface CPUser {
   id: string; email: string; name: string | null
@@ -100,6 +101,22 @@ export async function login(email: string, password: string, clientShortName?: s
 }
 
 export function logout(): void {
+  // Coach-view tabs get a dedicated exit path — close the tab (or
+  // wipe sessionStorage + redirect somewhere neutral). Sign-out UI
+  // is relabelled "Close view" for these tabs so this branch only
+  // fires from that explicit exit.
+  if (isCoachView()) {
+    sessionStorage.removeItem('rt_cp_token')
+    sessionStorage.removeItem('rt_cp_user')
+    sessionStorage.removeItem('rt_cp_client')
+    sessionStorage.removeItem(COACH_VIEW_FLAG)
+    // Best-effort tab close; if the tab wasn't opened via window.open
+    // the browser refuses and we fall through to an empty about:blank.
+    window.close()
+    window.location.href = 'about:blank'
+    return
+  }
+
   // Capture the bound short_name BEFORE clearing localStorage so we
   // can land the user back on their company-branded login URL
   // (/login/<short>) instead of the generic /login. Per user
@@ -120,22 +137,25 @@ export function logout(): void {
 }
 
 export function getToken(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('rt_cp_token')
+  const store = getStore()
+  return store ? store.getItem('rt_cp_token') : null
 }
 
 export function getUser(): CPUser | null {
-  if (typeof window === 'undefined') return null
-  try { return JSON.parse(localStorage.getItem('rt_cp_user') || '') } catch { return null }
+  const store = getStore()
+  if (!store) return null
+  try { return JSON.parse(store.getItem('rt_cp_user') || '') } catch { return null }
 }
 
 export function getClient(): CPClient | null {
-  if (typeof window === 'undefined') return null
-  try { return JSON.parse(localStorage.getItem('rt_cp_client') || '') } catch { return null }
+  const store = getStore()
+  if (!store) return null
+  try { return JSON.parse(store.getItem('rt_cp_client') || '') } catch { return null }
 }
 
 export function setClient(client: CPClient): void {
-  localStorage.setItem('rt_cp_client', JSON.stringify(client))
+  const store = getStore()
+  if (store) store.setItem('rt_cp_client', JSON.stringify(client))
 }
 
 export function hasRole(user: CPUser | null, ...roles: string[]): boolean {
