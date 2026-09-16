@@ -108,11 +108,16 @@ interface Quote {
   discount_paise: number
   total_paise: number
   per_unit_effective_paise: number
+  per_unit_gross_paise?: number
   min_units: number
   max_units: number
   gross_rupees: string
   discount_rupees: string
   total_rupees: string
+  // 2026-09-16 — Advisory-Only Mode flat-pricing flag. When true, the
+  // preview UI drops the discount-tier breakdown and shows a simple
+  // "N units × ₹X = ₹Total (No bulk discount)" line instead.
+  flat_pricing?: boolean
 }
 
 function formatINR(rupees: number | string): string {
@@ -508,24 +513,46 @@ export default function SubscriptionPage() {
           {/* Live price quote */}
           {quote && (
             <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-sm space-y-1.5">
-              <div className="flex justify-between text-slate-600">
-                <span>{quote.units.toLocaleString('en-IN')} units × ₹199</span>
-                <span>₹{formatINR(quote.gross_rupees)}</span>
-              </div>
-              {quote.discount_paise > 0 && (
-                <div className="flex justify-between text-green-700">
-                  <span>Volume discount</span>
-                  <span>− ₹{formatINR(quote.discount_rupees)}</span>
-                </div>
-              )}
-              <div className="flex justify-between pt-2 border-t border-slate-200 font-semibold text-slate-900">
-                <span>Total payable</span>
-                <span>₹{formatINR(quote.total_rupees)}</span>
-              </div>
-              {quote.units > 1 && (
-                <p className="text-xs text-slate-500 pt-1">
-                  Effective price: ₹{formatINR(quote.per_unit_effective_paise / 100)} per unit
-                </p>
+              {quote.flat_pricing ? (
+                /* Advisory-Only Mode (2026-09-16) — flat pricing.
+                   Skip the discount tier; show the plain multiplication. */
+                <>
+                  <div className="flex justify-between text-slate-600">
+                    <span>
+                      {quote.units.toLocaleString('en-IN')} units × ₹{Math.round((quote.per_unit_gross_paise ?? 0) / 100)}
+                    </span>
+                    <span>₹{formatINR(quote.gross_rupees)}</span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-slate-200 font-semibold text-slate-900">
+                    <span>Total payable</span>
+                    <span>₹{formatINR(quote.total_rupees)}</span>
+                  </div>
+                  <p className="text-xs text-purple-700 pt-1">
+                    Advisory-only client — flat pricing, no bulk discount.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between text-slate-600">
+                    <span>{quote.units.toLocaleString('en-IN')} units × ₹199</span>
+                    <span>₹{formatINR(quote.gross_rupees)}</span>
+                  </div>
+                  {quote.discount_paise > 0 && (
+                    <div className="flex justify-between text-green-700">
+                      <span>Volume discount</span>
+                      <span>− ₹{formatINR(quote.discount_rupees)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-2 border-t border-slate-200 font-semibold text-slate-900">
+                    <span>Total payable</span>
+                    <span>₹{formatINR(quote.total_rupees)}</span>
+                  </div>
+                  {quote.units > 1 && (
+                    <p className="text-xs text-slate-500 pt-1">
+                      Effective price: ₹{formatINR(quote.per_unit_effective_paise / 100)} per unit
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}
