@@ -5,6 +5,11 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import api from '@/lib/api'
 import { getClient } from '@/lib/auth'
 import FilterChips, { ActiveChip } from '@/components/cca/FilterChips'
+import PracticeBrandsModal from '@/components/PracticeBrandsModal'
+
+// v1.10 — Brands button gate. Only INPUT practices with an L1 in
+// this set have a filterable brand catalog.
+const BRANDS_BUTTON_L1_TYPES = new Set(['PESTICIDE', 'FERTILIZER', 'SPECIAL_INPUT'])
 
 interface SpPractice {
   id: string
@@ -49,6 +54,7 @@ function SpPracticesContent() {
 
   const [data, setData] = useState<Response>({ items: [], total: 0, limit: PAGE_SIZE, offset: 0 })
   const [loading, setLoading] = useState(true)
+  const [brandsPracticeId, setBrandsPracticeId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!clientId) return
@@ -134,6 +140,7 @@ function SpPracticesContent() {
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Timeline</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Specific Problem</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden sm:table-cell">Crop</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -166,6 +173,18 @@ function SpPracticesContent() {
                   <td className="px-5 py-3.5 text-slate-500 hidden sm:table-cell text-xs">
                     {p.crop_name_en || '—'}
                   </td>
+                  <td className="px-5 py-3.5 text-right">
+                    {p.l0_type === 'INPUT'
+                      && p.l1_type
+                      && BRANDS_BUTTON_L1_TYPES.has(p.l1_type)
+                      && (
+                        <button
+                          onClick={() => setBrandsPracticeId(p.id)}
+                          className="text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg px-3 py-1.5">
+                          Brands
+                        </button>
+                      )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -190,6 +209,10 @@ function SpPracticesContent() {
           </div>
         </div>
       )}
+      <PracticeBrandsModal
+        practiceId={brandsPracticeId}
+        onClose={() => setBrandsPracticeId(null)}
+      />
     </div>
   )
 }
