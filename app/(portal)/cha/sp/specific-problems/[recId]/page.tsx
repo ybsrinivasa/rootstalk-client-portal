@@ -13,6 +13,10 @@ import {
   ReadOnlyBanner, VersionHistorySection, type LineageRow,
 } from '@/components/advisory-authoring/LineageSection'
 import { practiceShortLabel } from '@/lib/practice-label'
+import PracticeBrandsModal from '@/components/PracticeBrandsModal'
+
+// v1.10 — Brands button gate.
+const BRANDS_BUTTON_L1_TYPES = new Set(['PESTICIDE', 'FERTILIZER', 'SPECIAL_INPUT'])
 
 interface SP {
   id: string
@@ -111,6 +115,7 @@ export default function SpDetailPage() {
   const [readiness, setReadiness] = useState<PublishReadiness | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [expandedPractice, setExpandedPractice] = useState<string | null>(null)
+  const [brandsPracticeId, setBrandsPracticeId] = useState<string | null>(null)
 
   // Add timeline
   const [showAddTL, setShowAddTL] = useState(false)
@@ -659,6 +664,17 @@ export default function SpDetailPage() {
                               <span className="text-[11px] text-slate-400">
                                 {hasElements ? `${p.elements!.length} element${p.elements!.length === 1 ? '' : 's'}` : 'no elements'}
                               </span>
+                              {p.l0_type === 'INPUT'
+                                && p.l1_type
+                                && BRANDS_BUTTON_L1_TYPES.has(p.l1_type)
+                                && (
+                                  <button
+                                    onClick={e => { e.stopPropagation(); setBrandsPracticeId(p.id) }}
+                                    className="text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg px-2.5 py-1"
+                                    title="Show Cosh brands matching this chemistry">
+                                    Brands
+                                  </button>
+                                )}
                               <button onClick={e => {
                                 e.stopPropagation()
                                 tryEdit(() => {
@@ -1057,6 +1073,10 @@ export default function SpDetailPage() {
         </div>
       )}
       <GuardModal />
+      <PracticeBrandsModal
+        practiceId={brandsPracticeId}
+        onClose={() => setBrandsPracticeId(null)}
+      />
     </div>
   )
 }
