@@ -54,7 +54,7 @@ export default function ChangePasswordPage() {
           {success && <p className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2">✓ {success}</p>}
           <button type="submit" disabled={loading}
             className="w-full py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+            style={{ background: colour }}>
             {loading ? 'Saving…' : 'Change Password'}
           </button>
         </form>

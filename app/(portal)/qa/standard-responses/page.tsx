@@ -116,7 +116,7 @@ function QaSrsContent() {
         {cropFilter ? (
           <button onClick={openCreate}
             className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+            style={{ background: colour }}>
             + New Question
           </button>
         ) : (
@@ -222,7 +222,7 @@ function QaSrsContent() {
                 </button>
                 <button type="submit" disabled={creating || !questionText.trim()}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {creating ? 'Creating…' : 'Create'}
                 </button>
               </div>

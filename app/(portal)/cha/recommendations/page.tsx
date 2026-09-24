@@ -402,7 +402,7 @@ function ChaRecsContent() {
             </button>
             <button onClick={() => openCreate()}
               className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              style={{ background: colour }}>
               + New Recommendation
             </button>
           </div>
@@ -443,7 +443,7 @@ function ChaRecsContent() {
                     <button onClick={() => createBundleAndGo(bundle)}
                       disabled={bundleBusy === bundle}
                       className="text-sm font-semibold px-4 py-2.5 rounded-xl border text-white disabled:opacity-50"
-                      style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                      style={{ background: colour }}>
                       {bundleBusy === bundle ? 'Starting…' : '+ Add Recommendations'}
                     </button>
                     <button onClick={() => openImport(bundle)}
@@ -633,7 +633,7 @@ function ChaRecsContent() {
                 <button type="submit"
                   disabled={creating || !form.problem_group_cosh_id}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {creating ? 'Creating…' : 'Create Recommendation'}
                 </button>
               </div>
@@ -694,7 +694,7 @@ function ChaRecsContent() {
                 disabled={publishing || !publishReadiness?.ready}
                 title={!publishReadiness?.ready ? 'Resolve the items above first' : ''}
                 className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {publishing ? 'Publishing…' : 'Confirm Publish'}
               </button>
             </div>

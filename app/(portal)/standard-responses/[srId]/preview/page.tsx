@@ -172,7 +172,7 @@ export default function QAPreviewPage() {
           {canPublish && (
             <button onClick={() => { setShowConfirm(true); setPublishError('') }}
               className="text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm"
-              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              style={{ background: colour }}>
               Publish
             </button>
           )}
@@ -305,7 +305,7 @@ export default function QAPreviewPage() {
                 </button>
                 <button type="button" onClick={handlePublish} disabled={publishing}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {publishing ? 'Publishing…' : 'Publish'}
                 </button>
               </div>

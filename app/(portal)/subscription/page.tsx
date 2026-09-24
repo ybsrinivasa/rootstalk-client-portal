@@ -570,7 +570,7 @@ export default function SubscriptionPage() {
 
           <button type="submit" disabled={purchasing || !quote}
             className="w-full text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50"
-            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+            style={{ background: colour }}>
             {purchasing
               ? 'Processing…'
               : quote

@@ -650,7 +650,7 @@ export default function FarmPunditsPage() {
               <div className="flex gap-2">
                 <button type="submit" disabled={searching}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {searching ? 'Searching…' : 'Search FarmPundits'}
                 </button>
                 <button type="button" onClick={clearAll}

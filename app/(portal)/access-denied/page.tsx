@@ -39,7 +39,7 @@ function AccessDeniedInner() {
       </p>
       <Link href="/dashboard"
         className="inline-block mt-6 text-sm font-semibold text-white px-5 py-2.5 rounded-xl"
-        style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+        style={{ background: colour }}>
         ← Back to Dashboard
       </Link>
     </div>

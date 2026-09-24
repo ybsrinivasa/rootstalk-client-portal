@@ -329,7 +329,7 @@ export default function UsersPage() {
         </div>
         <button onClick={() => { setShowInvite(true); setError(''); setSuccess('') }}
           className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-          style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+          style={{ background: colour }}>
           + Add User
         </button>
       </div>
@@ -575,7 +575,7 @@ export default function UsersPage() {
                 </button>
                 <button type="submit" disabled={inviting || form.roles.length === 0}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {inviting ? 'Adding…' : 'Add User'}
                 </button>
               </div>
@@ -638,7 +638,7 @@ export default function UsersPage() {
                 </button>
                 <button type="submit" disabled={savingEdit}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {savingEdit ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
@@ -699,7 +699,7 @@ export default function UsersPage() {
                 </button>
                 <button type="submit" disabled={savingRoles || editingRoles.roles.length === 0}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {savingRoles ? 'Saving…' : 'Save Roles'}
                 </button>
               </div>

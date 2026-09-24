@@ -550,7 +550,7 @@ export default function RecDetailPage() {
               disabled={publishing || !readiness?.ready}
               title={!readiness?.ready ? 'Resolve the items below first' : ''}
               className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
-              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              style={{ background: colour }}>
               {publishing ? 'Publishing…' : '✓ Publish'}
             </button>
           )}
@@ -861,7 +861,7 @@ export default function RecDetailPage() {
                 </button>
                 <button type="submit" disabled={addingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {addingTL ? 'Adding…' : 'Add Timeline'}
                 </button>
               </div>
@@ -981,7 +981,7 @@ export default function RecDetailPage() {
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={editingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {editingTL ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
@@ -1019,7 +1019,7 @@ export default function RecDetailPage() {
               </button>
               <button onClick={handlePublish} disabled={publishing}
                 className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {publishing ? 'Publishing…' : 'Confirm Publish'}
               </button>
             </div>

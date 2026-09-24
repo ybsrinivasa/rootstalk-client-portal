@@ -1106,7 +1106,7 @@ export default function PackageDetailPage() {
               disabled={publishing || !readiness?.ready}
               title={!readiness?.ready ? 'Resolve the items below first' : ''}
               className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
-              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              style={{ background: colour }}>
               {publishing ? 'Publishing…' : '✓ Publish'}
             </button>
           )}
@@ -1131,7 +1131,7 @@ export default function PackageDetailPage() {
                 ? 'Add at least one district via Edit Locations before restoring'
                 : 'Restore this package as ACTIVE'}
               className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
-              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              style={{ background: colour }}>
               {publishing ? 'Restoring…' : '↻ Restore (publish)'}
             </button>
           )}
@@ -1141,7 +1141,7 @@ export default function PackageDetailPage() {
                 disabled={cloning}
                 title="Start a new edit cycle. Your live version stays untouched."
                 className="text-sm font-semibold px-4 py-2.5 rounded-xl text-white disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {cloning ? 'Starting…' : '+ Start new edit'}
               </button>
               {pkg.parent_global_id && (
@@ -1168,7 +1168,7 @@ export default function PackageDetailPage() {
               disabled={cloning}
               title="Start a new edit from this historical version. You can edit before publishing, or publish unchanged to make it live again."
               className="text-sm font-semibold px-4 py-2.5 rounded-xl text-white disabled:opacity-50"
-              style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+              style={{ background: colour }}>
               {cloning ? 'Starting…' : '+ Start new edit'}
             </button>
           )}
@@ -1634,7 +1634,7 @@ export default function PackageDetailPage() {
                 className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
               <button type="button" onClick={handleSaveLocations} disabled={savingLocations}
                 className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {savingLocations ? 'Saving…' : 'Save Locations'}
               </button>
             </div>
@@ -1708,7 +1708,7 @@ export default function PackageDetailPage() {
                     <button type="button" onClick={addAuthorToDraft}
                       disabled={!addAuthorPick}
                       className="w-full text-sm font-semibold py-2.5 rounded-xl text-white disabled:opacity-40"
-                      style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                      style={{ background: colour }}>
                       + Add Author
                     </button>
                   </div>
@@ -1725,7 +1725,7 @@ export default function PackageDetailPage() {
               </button>
               <button type="button" onClick={handleSaveAuthors} disabled={savingAuthors}
                 className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {savingAuthors ? 'Saving…' : 'Save Authors'}
               </button>
             </div>
@@ -1833,7 +1833,7 @@ export default function PackageDetailPage() {
                 </button>
                 <button type="submit" disabled={savingEdit}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {savingEdit ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
@@ -2250,7 +2250,7 @@ export default function PackageDetailPage() {
                 </button>
                 <button type="submit" disabled={addingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {addingTL ? 'Adding…' : 'Add Timeline'}
                 </button>
               </div>
@@ -2408,7 +2408,7 @@ export default function PackageDetailPage() {
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={editingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {editingTL ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
@@ -2486,7 +2486,7 @@ export default function PackageDetailPage() {
               <button onClick={handleImport}
                 disabled={importing || !importSourceTlId || !importNewName.trim()}
                 className="flex-1 py-3 text-white font-semibold rounded-xl text-sm disabled:opacity-40"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {importing ? 'Importing…' : 'Import Timeline'}
               </button>
               <button onClick={() => { setShowImport(false); setImportError('') }}
@@ -2541,7 +2541,7 @@ export default function PackageDetailPage() {
               </button>
               <button onClick={handlePublish} disabled={publishing}
                 className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {publishing ? 'Publishing…' : 'Confirm Publish'}
               </button>
             </div>

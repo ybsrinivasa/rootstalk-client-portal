@@ -208,7 +208,7 @@ export default function SetupPage() {
               </div>
               <button onClick={() => saveLocations(false)} disabled={saving}
                 className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {saving ? 'Saving…' : '✓ Save Locations'}
               </button>
             </div>
@@ -245,7 +245,7 @@ export default function SetupPage() {
               </select>
               <button type="submit" disabled={saving || !cropForm.crop_cosh_id}
                 className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {saving ? 'Adding…' : '+ Add'}
               </button>
             </form>
@@ -369,7 +369,7 @@ export default function SetupPage() {
               </button>
               <button onClick={() => saveLocations(true)} disabled={saving}
                 className="text-white text-sm font-semibold px-4 py-2 rounded-xl disabled:opacity-50"
-                style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                style={{ background: colour }}>
                 {saving ? 'Applying…' : 'Confirm — apply changes'}
               </button>
             </div>

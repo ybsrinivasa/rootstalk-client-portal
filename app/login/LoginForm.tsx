@@ -304,7 +304,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
                   {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
                     className="w-full text-white font-semibold py-3 rounded-lg text-sm tracking-wide disabled:opacity-50"
-                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    style={{ background: colour }}>
                     {loading ? 'Signing in…' : 'Sign in'}
                   </button>
                   <button type="button" onClick={() => { setForgotMode(true); setForgotStage('email') }}
@@ -322,7 +322,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
                   {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
                     className="w-full text-white font-semibold py-3 rounded-lg text-sm tracking-wide disabled:opacity-50"
-                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    style={{ background: colour }}>
                     {loading ? 'Sending…' : 'Send OTP to my email'}
                   </button>
                 </form>
@@ -337,7 +337,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
                   {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
                     className="w-full text-white font-semibold py-3 rounded-lg text-sm tracking-wide disabled:opacity-50"
-                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    style={{ background: colour }}>
                     {loading ? 'Verifying…' : 'Verify & Sign in'}
                   </button>
                 </form>
@@ -359,7 +359,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
                   {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
                     className="w-full text-white py-3 rounded-lg text-sm font-semibold tracking-wide disabled:opacity-50"
-                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    style={{ background: colour }}>
                     {loading ? 'Sending…' : 'Send reset code'}
                   </button>
                 </form>
@@ -377,7 +377,7 @@ export default function LoginForm({ initialShortName }: LoginFormProps) {
                   {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
                   <button type="submit" disabled={loading}
                     className="w-full text-white py-3 rounded-lg text-sm font-semibold tracking-wide disabled:opacity-50"
-                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    style={{ background: colour }}>
                     {loading ? 'Resetting…' : 'Set new password'}
                   </button>
                 </form>

@@ -530,7 +530,7 @@ export default function StandardResponseDetailPage() {
 
         <button onClick={() => { setShowAddTL(true); setTlForm(emptyTLForm) }}
           className="w-full text-white font-semibold py-3 rounded-2xl text-sm shadow-sm"
-          style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+          style={{ background: colour }}>
           + Add Timeline
         </button>
       </div>
@@ -575,7 +575,7 @@ export default function StandardResponseDetailPage() {
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
                 <button type="submit" disabled={savingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {savingTL ? 'Adding…' : 'Add Timeline'}
                 </button>
               </div>
@@ -687,7 +687,7 @@ export default function StandardResponseDetailPage() {
                 </button>
                 <button type="submit" disabled={savingSR || !editSRForm.question_text.trim()}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {savingSR ? 'Saving…' : 'Save changes'}
                 </button>
               </div>
@@ -758,7 +758,7 @@ export default function StandardResponseDetailPage() {
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
                 <button type="submit" disabled={editingTL}
                   className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                  style={{ background: colour }}>
                   {editingTL ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>

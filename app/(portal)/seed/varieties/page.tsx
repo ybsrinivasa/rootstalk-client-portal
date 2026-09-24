@@ -536,7 +536,7 @@ function SeedVarietiesContent() {
               setExpandedPkg(null); setSaveError('')
             }}
             className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-            style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+            style={{ background: colour }}>
             + Add Variety
           </button>
         </div>
@@ -1132,7 +1132,7 @@ function SeedVarietiesContent() {
                 <div className="flex gap-3 pt-2">
                   <button onClick={save} disabled={saving || !form.name.trim()}
                     className="flex-1 py-3 text-white text-sm font-semibold rounded-xl disabled:opacity-40"
-                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    style={{ background: colour }}>
                     {saving ? 'Saving…' : selected ? 'Update Variety' : 'Create Variety'}
                   </button>
                   <button onClick={() => { setShowCreate(false); setSelected(null); setSaveError('') }}

@@ -253,7 +253,7 @@ export default function FieldManagerPage() {
       <div className="flex justify-end">
         <button onClick={() => { setAddingType(type as 'DEALER' | 'FACILITATOR'); setShowAdd(true); setAddError(''); setPhoneLookup({ state: 'idle' }) }}
           className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-          style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+          style={{ background: colour }}>
           + Onboard {type === 'DEALER' ? 'Dealer' : 'Facilitator'}
         </button>
       </div>
@@ -610,7 +610,7 @@ export default function FieldManagerPage() {
                     className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">Cancel</button>
                   <button type="submit" disabled={adding || !canOnboard}
                     className="flex-1 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50"
-                    style={{ background: `linear-gradient(135deg, ${colour}cc, ${colour})` }}>
+                    style={{ background: colour }}>
                     {adding ? 'Onboarding…' : 'Onboard'}
                   </button>
                 </div>
