@@ -60,11 +60,19 @@ export default function CustomParametersPage() {
     try {
       const { data } = await api.get<Parameter[]>(`/client/${clientId}/parameters?crop_cosh_id=${selectedCrop}`)
       const customParams = data.filter(p => p.source === 'CUSTOM')
-      // Load variables and translations for each
       const enriched = await Promise.all(customParams.map(async p => {
         const varsRes = await api.get<Variable[]>(`/client/${clientId}/parameters/${p.id}/variables`).catch(() => ({ data: [] }))
         const transRes = await api.get<Translation[]>(`/client/${clientId}/parameters/${p.id}/translations`).catch(() => ({ data: [] }))
-        return { ...p, variables: varsRes.data, translations: transRes.data }
+        // Per-variable translations — N calls per parameter (one per
+        // variable). Fine for CA-portal review; batch endpoint can
+        // land later if clients grow many variables per parameter.
+        const varsWithTrans = await Promise.all(varsRes.data.map(async v => {
+          const vt = await api.get<Translation[]>(
+            `/client/${clientId}/parameters/${p.id}/variables/${v.id}/translations`,
+          ).catch(() => ({ data: [] }))
+          return { ...v, translations: vt.data }
+        }))
+        return { ...p, variables: varsWithTrans, translations: transRes.data }
       }))
       setParameters(enriched)
     } finally { setLoading(false) }
@@ -133,6 +141,20 @@ export default function CustomParametersPage() {
     if (!clientId) return
     await api.put(`/client/${clientId}/parameters/${paramId}/variables/${varId}/translations/${langCode}`, { name })
     loadParameters()
+  }
+
+  async function regenerateParameterTranslations(paramId: string) {
+    if (!clientId) return
+    await api.post(`/client/${clientId}/parameters/${paramId}/translations/regenerate`)
+    // Celery task is async — give it a few seconds then refresh.
+    // User sees "Pending" rows flip to Approved as the worker lands.
+    setTimeout(() => loadParameters(), 3000)
+  }
+
+  async function regenerateVariableTranslations(paramId: string, varId: string) {
+    if (!clientId) return
+    await api.post(`/client/${clientId}/parameters/${paramId}/variables/${varId}/translations/regenerate`)
+    setTimeout(() => loadParameters(), 3000)
   }
 
   const STATUS_COLOUR: Record<string, string> = { ACTIVE: 'bg-green-100 text-green-700', INACTIVE: 'bg-slate-100 text-slate-500' }
@@ -243,28 +265,67 @@ export default function CustomParametersPage() {
                   </div>
                 )}
 
-                {/* Translations panel */}
+                {/* Translations panel — parameter + per-variable */}
                 {expandedTranslation === param.id && (
-                  <div className="border-t border-blue-50 bg-blue-50 px-5 py-4">
-                    <p className="text-xs font-semibold text-blue-700 mb-3">Parameter Translations</p>
+                  <div className="border-t border-blue-50 bg-blue-50 px-5 py-4 space-y-5">
                     {languages.length === 0 ? (
                       <p className="text-xs text-blue-500">No languages enabled. Enable languages in Settings.</p>
                     ) : (
-                      <div className="space-y-2">
-                        {languages.filter(l => l.language_code !== 'en').map(lang => {
-                          const trans = param.translations?.find(t => t.language_code === lang.language_code)
-                          return (
-                            <TranslationRow
-                              key={lang.language_code}
-                              languageCode={lang.language_code}
-                              languageName={lang.language_name_en}
-                              currentText={trans?.name || ''}
-                              status={trans?.status || 'PENDING'}
-                              onApprove={(text) => approveTranslation(param.id, lang.language_code, text)}
-                            />
-                          )
-                        })}
-                      </div>
+                      <>
+                        {/* Parameter name translations */}
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-blue-700">Parameter: <span className="font-normal">{param.name}</span></p>
+                            <button onClick={() => regenerateParameterTranslations(param.id)}
+                              className="text-[11px] text-blue-600 font-medium px-2 py-0.5 rounded hover:bg-blue-100">
+                              ↻ Regenerate all
+                            </button>
+                          </div>
+                          <div className="space-y-2">
+                            {languages.filter(l => l.language_code !== 'en').map(lang => {
+                              const trans = param.translations?.find(t => t.language_code === lang.language_code)
+                              return (
+                                <TranslationRow
+                                  key={lang.language_code}
+                                  languageCode={lang.language_code}
+                                  languageName={lang.language_name_en}
+                                  currentText={trans?.name || ''}
+                                  status={trans?.status || 'PENDING'}
+                                  onApprove={(text) => approveTranslation(param.id, lang.language_code, text)}
+                                />
+                              )
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Variable name translations — one block per variable */}
+                        {param.variables.map(v => (
+                          <div key={v.id} className="pt-3 border-t border-blue-100">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs font-semibold text-blue-700">Variable: <span className="font-normal">{v.name}</span></p>
+                              <button onClick={() => regenerateVariableTranslations(param.id, v.id)}
+                                className="text-[11px] text-blue-600 font-medium px-2 py-0.5 rounded hover:bg-blue-100">
+                                ↻ Regenerate all
+                              </button>
+                            </div>
+                            <div className="space-y-2">
+                              {languages.filter(l => l.language_code !== 'en').map(lang => {
+                                const trans = v.translations?.find(t => t.language_code === lang.language_code)
+                                return (
+                                  <TranslationRow
+                                    key={lang.language_code}
+                                    languageCode={lang.language_code}
+                                    languageName={lang.language_name_en}
+                                    currentText={trans?.name || ''}
+                                    status={trans?.status || 'PENDING'}
+                                    onApprove={(text) => approveVariableTranslation(param.id, v.id, lang.language_code, text)}
+                                  />
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </>
                     )}
                   </div>
                 )}
@@ -355,7 +416,7 @@ function TranslationRow({
 }) {
   const [text, setText] = useState(currentText)
   const [saving, setSaving] = useState(false)
-  const approved = status === 'EXPERT_VALIDATED'
+  const approved = status === 'APPROVED'
   return (
     <div className="flex items-center gap-2">
       <p className="text-xs text-blue-700 w-20 font-medium shrink-0">{languageName}</p>
