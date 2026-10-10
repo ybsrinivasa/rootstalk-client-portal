@@ -15,7 +15,7 @@ interface Variable {
 }
 interface Translation { language_code: string; name: string; status: string }
 interface EnabledLanguage { language_code: string; language_name_en: string; status: string }
-interface ClientCrop { crop_cosh_id: string; status: string }
+interface ClientCrop { crop_cosh_id: string; crop_name_en: string | null; status: string }
 
 export default function CustomParametersPage() {
   const client = getClient()
@@ -179,7 +179,7 @@ export default function CustomParametersPage() {
             {crops.map(c => (
               <button key={c.crop_cosh_id} onClick={() => setSelectedCrop(c.crop_cosh_id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedCrop === c.crop_cosh_id ? 'bg-green-700 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
-                {c.crop_cosh_id}
+                {c.crop_name_en || c.crop_cosh_id}
               </button>
             ))}
           </div>
@@ -194,7 +194,7 @@ export default function CustomParametersPage() {
         ) : parameters.length === 0 ? (
           <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
             <p className="text-3xl mb-3">❓</p>
-            <p className="text-gray-500 font-medium">No custom parameters yet for {selectedCrop}</p>
+            <p className="text-gray-500 font-medium">No custom parameters yet for {crops.find(c => c.crop_cosh_id === selectedCrop)?.crop_name_en || selectedCrop}</p>
             <p className="text-sm text-gray-400 mt-1">Custom parameters appear in guided elimination alongside Cosh-sourced ones</p>
           </div>
         ) : (
@@ -340,7 +340,7 @@ export default function CustomParametersPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-1">Add Custom Parameter</h2>
-            <p className="text-xs text-gray-400 mb-4">Will be available across all PoPs for {selectedCrop}</p>
+            <p className="text-xs text-gray-400 mb-4">Will be available across all PoPs for {crops.find(c => c.crop_cosh_id === selectedCrop)?.crop_name_en || selectedCrop}</p>
             {createError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">{createError}</p>}
             <div className="space-y-4">
               <div>
