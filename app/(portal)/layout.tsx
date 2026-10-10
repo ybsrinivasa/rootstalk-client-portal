@@ -164,6 +164,13 @@ const ALL_NAV: NavItem[] = [
   { href: '/cha/problems',       label: 'Problem Groups',           Icon: IconCHA,          group: 'CHA' },
   { href: '/cha/sp/crops',       label: 'Specific Problems',        Icon: IconCHA,          group: 'CHA' },
   { href: '/qa/crops',           label: 'Q&A',                      Icon: IconCHA,          group: 'QA' },
+  // 2026-10-10 — Custom Parameters review surface. SEs author
+  // per-client Custom P/V inside the Set Signature modal of a
+  // Package; this screen is where they review the auto-generated
+  // Claude translations (hi/ta/kn) and approve/edit/regenerate
+  // per Parameter and per Variable. See
+  // project_rootstalk_pv_translation_2026_10_10.md.
+  { href: '/custom-parameters',  label: 'Custom Parameters',        Icon: IconCustomParams, group: 'CONTENT' },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
@@ -198,7 +205,7 @@ const ROLE_NAV: Record<string, string[]> = {
   // without the privilege sees the link but every action will 403
   // with `seed_data_or_ca_only` and a helpful message via Batch W-2
   // error surfacing.
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/seed'],
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/custom-parameters', '/seed'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager'],
   // CLIENT_RM scoped to Alerts (2026-07-20 user direction). Previously
   // also had /field-manager access; the backend gate
