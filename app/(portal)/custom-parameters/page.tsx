@@ -416,7 +416,16 @@ function TranslationRow({
 }) {
   const [text, setText] = useState(currentText)
   const [saving, setSaving] = useState(false)
+  // Sync local text to parent's currentText whenever the parent reloads
+  // (after Approve or Regenerate). Without this, a successful save
+  // wouldn't flip the row back to clean + hide the Save button.
+  useEffect(() => { setText(currentText) }, [currentText])
   const approved = status === 'APPROVED'
+  const dirty = text !== currentText
+  // Hide the Save button when the row is already APPROVED AND the SE
+  // hasn't edited the text. Show it when there's actually something
+  // to save (user edited) or the row is still Pending.
+  const showSave = dirty || !approved
   return (
     <div className="flex items-center gap-2">
       <p className="text-xs text-blue-700 w-20 font-medium shrink-0">{languageName}</p>
@@ -425,11 +434,13 @@ function TranslationRow({
       <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 ${approved ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
         {approved ? '✓' : 'Pending'}
       </span>
-      <button onClick={async () => { setSaving(true); try { await onApprove(text) } finally { setSaving(false) } }}
-        disabled={saving}
-        className="text-xs text-blue-600 font-medium px-2 py-1 rounded hover:bg-blue-100 disabled:opacity-40 shrink-0">
-        {saving ? '…' : 'Approve'}
-      </button>
+      {showSave && (
+        <button onClick={async () => { setSaving(true); try { await onApprove(text) } finally { setSaving(false) } }}
+          disabled={saving}
+          className="text-xs text-blue-600 font-medium px-2 py-1 rounded hover:bg-blue-100 disabled:opacity-40 shrink-0">
+          {saving ? '…' : (approved ? 'Save edit' : 'Approve')}
+        </button>
+      )}
     </div>
   )
 }
