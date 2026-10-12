@@ -11,6 +11,8 @@ interface Parameter {
 }
 interface Variable {
   id: string; name: string; status: string
+  cosh_id?: string | null
+  client_id?: string | null
   translations?: Translation[]
 }
 interface Translation { language_code: string; name: string; status: string }
@@ -59,13 +61,14 @@ export default function CustomParametersPage() {
     setLoading(true)
     try {
       const { data } = await api.get<Parameter[]>(`/client/${clientId}/parameters?crop_cosh_id=${selectedCrop}`)
-      const customParams = data.filter(p => p.source === 'CUSTOM')
-      const enriched = await Promise.all(customParams.map(async p => {
+      // Fetch variables for every parameter (not just CUSTOM) so we
+      // can detect Cosh parents that carry client-added custom
+      // variables underneath — those also need translation review.
+      const enrichedAll = await Promise.all(data.map(async p => {
         const varsRes = await api.get<Variable[]>(`/client/${clientId}/parameters/${p.id}/variables`).catch(() => ({ data: [] }))
-        const transRes = await api.get<Translation[]>(`/client/${clientId}/parameters/${p.id}/translations`).catch(() => ({ data: [] }))
-        // Per-variable translations — N calls per parameter (one per
-        // variable). Fine for CA-portal review; batch endpoint can
-        // land later if clients grow many variables per parameter.
+        const transRes = p.source === 'CUSTOM'
+          ? await api.get<Translation[]>(`/client/${clientId}/parameters/${p.id}/translations`).catch(() => ({ data: [] }))
+          : { data: [] }
         const varsWithTrans = await Promise.all(varsRes.data.map(async v => {
           const vt = await api.get<Translation[]>(
             `/client/${clientId}/parameters/${p.id}/variables/${v.id}/translations`,
@@ -74,7 +77,16 @@ export default function CustomParametersPage() {
         }))
         return { ...p, variables: varsWithTrans, translations: transRes.data }
       }))
-      setParameters(enriched)
+      // Keep a parameter in the display list if it's CUSTOM (whole
+      // thing is client's) OR it has at least one client-added
+      // custom variable (Cosh parent + Batch CC per-client variable).
+      // Pure-Cosh parameters with no client additions are excluded —
+      // their translations come from Cosh, not editable here.
+      const visible = enrichedAll.filter(p =>
+        p.source === 'CUSTOM' ||
+        p.variables.some(v => v.client_id === clientId && !v.cosh_id)
+      )
+      setParameters(visible)
     } finally { setLoading(false) }
   }
 
@@ -165,7 +177,7 @@ export default function CustomParametersPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Custom Parameters</h1>
-            <p className="text-sm text-gray-500 mt-1">Add guided elimination questions beyond the Cosh-sourced list</p>
+            <p className="text-sm text-gray-500 mt-1">Review translations for your Custom Parameters and your custom variables added under Cosh parameters</p>
           </div>
           <button onClick={() => { setShowCreate(true); setCreateError('') }}
             className="px-4 py-2 bg-green-700 text-white text-sm font-semibold rounded-lg hover:bg-green-800">
@@ -194,31 +206,50 @@ export default function CustomParametersPage() {
         ) : parameters.length === 0 ? (
           <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
             <p className="text-3xl mb-3">❓</p>
-            <p className="text-gray-500 font-medium">No custom parameters yet for {crops.find(c => c.crop_cosh_id === selectedCrop)?.crop_name_en || selectedCrop}</p>
-            <p className="text-sm text-gray-400 mt-1">Custom parameters appear in guided elimination alongside Cosh-sourced ones</p>
+            <p className="text-gray-500 font-medium">No custom content yet for {crops.find(c => c.crop_cosh_id === selectedCrop)?.crop_name_en || selectedCrop}</p>
+            <p className="text-sm text-gray-400 mt-1">Add a Custom Parameter here, or add custom variables under Cosh parameters via Package authoring. All custom content appears here for translation review.</p>
           </div>
         ) : (
           <div className="space-y-4">
-            {parameters.map(param => (
+            {parameters.map(param => {
+              const isCustomParam = param.source === 'CUSTOM'
+              // Client-owned variables under this parent — the ones
+              // the CA added. For a Custom parent these are all the
+              // variables; for a Cosh parent these are the Batch CC
+              // per-client additions (Cosh-shipped variables are
+              // hidden here since their translations belong to Cosh).
+              const editableVars = param.variables.filter(v => !v.cosh_id)
+              return (
               <div key={param.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 {/* Parameter header */}
                 <div className="px-5 py-4 flex items-center justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-gray-900">{param.name}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOUR[param.status]}`}>{param.status}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isCustomParam ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                        {isCustomParam ? 'Custom' : 'Cosh · your variables'}
+                      </span>
+                      {isCustomParam && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOUR[param.status]}`}>{param.status}</span>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">{param.variables.length} variable{param.variables.length !== 1 ? 's' : ''}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {isCustomParam
+                        ? `${param.variables.length} variable${param.variables.length !== 1 ? 's' : ''}`
+                        : `${editableVars.length} of your variable${editableVars.length !== 1 ? 's' : ''}`}
+                    </p>
                   </div>
                   <div className="flex gap-2 items-center ml-3">
                     <button onClick={() => setExpandedTranslation(expandedTranslation === param.id ? null : param.id)}
                       className="text-xs text-blue-600 font-medium px-2 py-1 rounded-lg hover:bg-blue-50">
                       Translations
                     </button>
-                    <button onClick={() => toggleParamStatus(param.id, param.status)}
-                      className={`text-xs px-2 py-1 rounded-lg font-medium ${param.status === 'ACTIVE' ? 'text-red-500 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
-                      {param.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                    </button>
+                    {isCustomParam && (
+                      <button onClick={() => toggleParamStatus(param.id, param.status)}
+                        className={`text-xs px-2 py-1 rounded-lg font-medium ${param.status === 'ACTIVE' ? 'text-red-500 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
+                        {param.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                      </button>
+                    )}
                     <button onClick={() => setExpandedParam(expandedParam === param.id ? null : param.id)}
                       className="text-gray-400 text-lg">{expandedParam === param.id ? '▲' : '▼'}</button>
                   </div>
@@ -227,9 +258,11 @@ export default function CustomParametersPage() {
                 {/* Variables */}
                 {expandedParam === param.id && (
                   <div className="border-t border-gray-50 bg-gray-50 px-5 py-4">
-                    <p className="text-xs font-semibold text-gray-500 mb-3">Variables (answer options)</p>
+                    <p className="text-xs font-semibold text-gray-500 mb-3">
+                      {isCustomParam ? 'Variables (answer options)' : 'Your custom variables under this Cosh parameter'}
+                    </p>
                     <div className="space-y-2">
-                      {param.variables.map(v => (
+                      {editableVars.map(v => (
                         <div key={v.id} className="flex items-center gap-2">
                           {editingVar?.varId === v.id ? (
                             <input value={editingVar.text}
@@ -260,19 +293,28 @@ export default function CustomParametersPage() {
                         </div>
                       ))}
                     </div>
-                    {/* Add variable */}
-                    <AddVariableRow onAdd={(name) => addVariable(param.id, name)} />
+                    {/* Add variable — Custom parent only. Variables under
+                        Cosh parents are added via the Set Signature flow
+                        inside Package authoring, not here. */}
+                    {isCustomParam && (
+                      <AddVariableRow onAdd={(name) => addVariable(param.id, name)} />
+                    )}
                   </div>
                 )}
 
-                {/* Translations panel — parameter + per-variable */}
+                {/* Translations panel — parameter (CUSTOM only) + per-variable */}
                 {expandedTranslation === param.id && (
                   <div className="border-t border-blue-50 bg-blue-50 px-5 py-4 space-y-5">
                     {languages.length === 0 ? (
                       <p className="text-xs text-blue-500">No languages enabled. Enable languages in Settings.</p>
+                    ) : editableVars.length === 0 && !isCustomParam ? (
+                      <p className="text-xs text-blue-500">No custom variables added under this Cosh parameter yet.</p>
                     ) : (
                       <>
-                        {/* Parameter name translations */}
+                        {/* Parameter name translations — only shown for
+                            CUSTOM parents. For Cosh parents the parameter
+                            name belongs to Cosh and is not editable here. */}
+                        {isCustomParam && (
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-xs font-semibold text-blue-700">Parameter: <span className="font-normal">{param.name}</span></p>
@@ -297,9 +339,13 @@ export default function CustomParametersPage() {
                             })}
                           </div>
                         </div>
+                        )}
 
-                        {/* Variable name translations — one block per variable */}
-                        {param.variables.map(v => (
+                        {/* Variable name translations — one block per
+                            client-owned variable. For a Cosh parent this
+                            is the client's custom-added variables only;
+                            for a Custom parent it's all its variables. */}
+                        {editableVars.map(v => (
                           <div key={v.id} className="pt-3 border-t border-blue-100">
                             <div className="flex items-center justify-between mb-2">
                               <p className="text-xs font-semibold text-blue-700">Variable: <span className="font-normal">{v.name}</span></p>
@@ -330,7 +376,8 @@ export default function CustomParametersPage() {
                   </div>
                 )}
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
