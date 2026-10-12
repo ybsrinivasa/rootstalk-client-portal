@@ -96,15 +96,18 @@ export default function CustomParametersPage() {
     if (validVars.length < 2) { setCreateError('At least 2 variables required'); return }
     setCreating(true); setCreateError('')
     try {
-      const { data: param } = await api.post(`/client/${clientId}/parameters`, {
+      // Atomic create per Batch 28: parameter + initial variables in
+      // one round-trip. The backend's ParameterCreate schema enforces
+      // min_length=2 on `variables` (422 if violated), and the handler
+      // commits the Parameter and its Variables in one transaction.
+      // Also fires the Claude translate task per Variable in the
+      // post-commit hook.
+      await api.post(`/client/${clientId}/parameters`, {
         name: newParamName.trim(),
         crop_cosh_id: selectedCrop,
-        source: 'CUSTOM',
         display_order: 0,
+        variables: validVars.map(name => ({ name: name.trim() })),
       })
-      for (const v of validVars) {
-        await api.post(`/client/${clientId}/parameters/${param.id}/variables`, { name: v.trim() })
-      }
       setShowCreate(false)
       setNewParamName('')
       setNewVariables(['', ''])
