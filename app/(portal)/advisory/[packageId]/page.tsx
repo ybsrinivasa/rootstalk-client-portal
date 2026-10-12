@@ -168,6 +168,113 @@ const L0_COLOUR = {
   MEDIA: 'bg-pink-100 text-pink-700',
 }
 
+// Translate the raw publish-readiness blocker payload into a human
+// sentence. The backend returns structured data (code + sibling
+// name + shared districts); the raw `message` field reads like an
+// error log line. For known §4.2 blocker codes we substitute a
+// clearer sentence; everything else falls through to `item.message`.
+interface ReadinessItemLike {
+  code: string
+  message: string
+  sibling_package_name?: string
+  shared_districts?: { state_cosh_id: string; district_cosh_id: string }[]
+  conflicts?: {
+    sibling_package_name?: string
+    shared_districts?: { state_cosh_id: string; district_cosh_id: string }[]
+  }[]
+  violations?: {
+    sibling_package_name?: string
+    shared_districts?: { state_cosh_id: string; district_cosh_id: string }[]
+    this_parameter_ids?: string[]
+    sibling_parameter_ids?: string[]
+  }[]
+  [key: string]: unknown
+}
+
+function formatDistrictList(
+  districts: { district_cosh_id: string }[] | undefined,
+  districtNames: Record<string, string>,
+): string {
+  if (!districts || districts.length === 0) return 'a shared district'
+  const named = districts.map(d => districtNames[d.district_cosh_id] || d.district_cosh_id)
+  if (named.length === 1) return named[0]
+  if (named.length === 2) return `${named[0]} and ${named[1]}`
+  return `${named.slice(0, -1).join(', ')}, and ${named[named.length - 1]}`
+}
+
+function formatReadinessItem(
+  item: ReadinessItemLike,
+  districtNames: Record<string, string>,
+): React.ReactNode {
+  if (item.code === 'no_pv_with_shared_district_sibling') {
+    return (
+      <>This Package shares a district with another PoP. Both need a signature before either can publish.</>
+    )
+  }
+  if (item.code === 'sibling_has_no_pv') {
+    const sib = item.sibling_package_name || 'another PoP'
+    const where = formatDistrictList(item.shared_districts, districtNames)
+    return (
+      <>
+        <strong>{sib}</strong> shares {where} with this Package but has no signature yet. Add a signature on <strong>{sib}</strong> (or remove its overlapping location) before either can publish.
+      </>
+    )
+  }
+  if (item.code === 'pv_conflict_with_sibling') {
+    const conflicts = item.conflicts || []
+    if (conflicts.length === 1) {
+      const c = conflicts[0]
+      const sib = c.sibling_package_name || 'another PoP'
+      const where = formatDistrictList(c.shared_districts, districtNames)
+      return (
+        <>
+          <strong>{sib}</strong> has the identical signature in {where}. Guided elimination can&apos;t tell the two apart — change either Package&apos;s signature or locations.
+        </>
+      )
+    }
+    return (
+      <>
+        Multiple siblings have the identical signature in shared districts:{' '}
+        {conflicts.map((c, i) => (
+          <span key={i}>
+            {i > 0 && '; '}
+            <strong>{c.sibling_package_name || 'another PoP'}</strong> in {formatDistrictList(c.shared_districts, districtNames)}
+          </span>
+        ))}
+        . Change this Package&apos;s signature or locations.
+      </>
+    )
+  }
+  if (item.code === 'pv_parameter_set_mismatch') {
+    const violations = item.violations || []
+    if (violations.length === 1) {
+      const v = violations[0]
+      const sib = v.sibling_package_name || 'another PoP'
+      const where = formatDistrictList(v.shared_districts, districtNames)
+      const thisCount = v.this_parameter_ids?.length ?? 0
+      const sibCount = v.sibling_parameter_ids?.length ?? 0
+      return (
+        <>
+          <strong>{sib}</strong> uses a different parameter set in {where}. This Package has {thisCount} parameter{thisCount === 1 ? '' : 's'}; <strong>{sib}</strong> has {sibCount}. For a farmer in {where} to resolve to one Package, both PoPs must share the same parameters.
+        </>
+      )
+    }
+    return (
+      <>
+        Multiple siblings use different parameter sets in shared districts:{' '}
+        {violations.map((v, i) => (
+          <span key={i}>
+            {i > 0 && '; '}
+            <strong>{v.sibling_package_name || 'another PoP'}</strong> in {formatDistrictList(v.shared_districts, districtNames)}
+          </span>
+        ))}
+        . All PoPs covering the same district must share the same parameter set.
+      </>
+    )
+  }
+  return item.message
+}
+
 export default function PackageDetailPage() {
   const { packageId } = useParams<{ packageId: string }>()
   const router = useRouter()
@@ -1288,12 +1395,25 @@ export default function PackageDetailPage() {
               </div>
             </div>
             <ul className="space-y-1.5 ml-7 text-sm text-amber-900">
-              {(readiness.missing || []).map((m, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <span className="text-amber-500 mt-0.5 text-xs">●</span>
-                  <span>{m.message}</span>
-                </li>
-              ))}
+              {(readiness.missing || []).map((m, i) => {
+                // Resolve district cosh_ids → names from this Package's
+                // already-loaded locations. Siblings' shared_districts
+                // overlap by definition with this Package's districts,
+                // so the lookup covers them. Any unresolvable cosh_id
+                // falls through to the raw UUID in the sentence.
+                const districtNames: Record<string, string> = {}
+                for (const loc of locations) {
+                  if (loc.district_name) {
+                    districtNames[loc.district_cosh_id] = loc.district_name
+                  }
+                }
+                return (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="text-amber-500 mt-0.5 text-xs">●</span>
+                    <span>{formatReadinessItem(m as ReadinessItemLike, districtNames)}</span>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )
