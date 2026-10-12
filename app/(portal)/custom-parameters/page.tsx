@@ -177,7 +177,7 @@ export default function CustomParametersPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Custom Parameters</h1>
-            <p className="text-sm text-gray-500 mt-1">Review translations for your Custom Parameters and your custom variables added under Cosh parameters</p>
+            <p className="text-sm text-gray-500 mt-1">Review translations for your Custom Parameters and your custom variables added under standard parameters</p>
           </div>
           <button onClick={() => { setShowCreate(true); setCreateError('') }}
             className="px-4 py-2 bg-green-700 text-white text-sm font-semibold rounded-lg hover:bg-green-800">
@@ -207,7 +207,7 @@ export default function CustomParametersPage() {
           <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
             <p className="text-3xl mb-3">❓</p>
             <p className="text-gray-500 font-medium">No custom content yet for {crops.find(c => c.crop_cosh_id === selectedCrop)?.crop_name_en || selectedCrop}</p>
-            <p className="text-sm text-gray-400 mt-1">Add a Custom Parameter here, or add custom variables under Cosh parameters via Package authoring. All custom content appears here for translation review.</p>
+            <p className="text-sm text-gray-400 mt-1">Add a Custom Parameter here, or add custom variables under standard parameters via Package authoring. All custom content appears here for translation review.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -227,7 +227,7 @@ export default function CustomParametersPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-gray-900">{param.name}</p>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isCustomParam ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {isCustomParam ? 'Custom' : 'Cosh · your variables'}
+                        {isCustomParam ? 'Custom' : 'Standard · your variables'}
                       </span>
                       {isCustomParam && (
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOUR[param.status]}`}>{param.status}</span>
@@ -259,7 +259,7 @@ export default function CustomParametersPage() {
                 {expandedParam === param.id && (
                   <div className="border-t border-gray-50 bg-gray-50 px-5 py-4">
                     <p className="text-xs font-semibold text-gray-500 mb-3">
-                      {isCustomParam ? 'Variables (answer options)' : 'Your custom variables under this Cosh parameter'}
+                      {isCustomParam ? 'Variables (answer options)' : 'Your custom variables under this standard parameter'}
                     </p>
                     <div className="space-y-2">
                       {editableVars.map(v => (
@@ -308,7 +308,7 @@ export default function CustomParametersPage() {
                     {languages.length === 0 ? (
                       <p className="text-xs text-blue-500">No languages enabled. Enable languages in Settings.</p>
                     ) : editableVars.length === 0 && !isCustomParam ? (
-                      <p className="text-xs text-blue-500">No custom variables added under this Cosh parameter yet.</p>
+                      <p className="text-xs text-blue-500">No custom variables added under this standard parameter yet.</p>
                     ) : (
                       <>
                         {/* Parameter name translations — only shown for
