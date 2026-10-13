@@ -26,6 +26,7 @@ import { cqEndpoints, type PipeContext } from '@/lib/advisory-pipe'
 import {
   practiceLabel, type RelationsPractice, type RelationOut,
 } from './RelationsSection'
+import TranslationReview from '@/components/TranslationReview'
 
 // ── Public types ───────────────────────────────────────────────────────
 
@@ -340,6 +341,22 @@ export function CQsSection({
                   placeholder="e.g. Has it rained in the last 2 days?"
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </div>
+
+              {/* Translation review — only shown when editing an
+                  existing CQ (new CQs have no id until first save).
+                  The backend fires `translate_field` for CQ create +
+                  update, so by the time the SE opens an existing CQ
+                  the hi/ta/kn (and other active locales) rows are
+                  populated. Edits to the English above re-trigger
+                  translation on save; the SE sees the fresh output
+                  the next time they open this CQ, or by clicking
+                  Regenerate inside the widget. */}
+              {editing && (
+                <TranslationReview
+                  entityType="conditional_question.question_text"
+                  entityId={editing.id}
+                />
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {(['yes', 'no'] as const).map(side => {
