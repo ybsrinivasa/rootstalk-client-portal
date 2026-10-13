@@ -308,23 +308,23 @@ export function CQsSection({
                   <span className="text-[10px] uppercase tracking-wider text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded font-semibold shrink-0">IF</span>
                   <p className="text-xs font-medium text-slate-800 flex-1 min-w-0 break-words">{cq.question_text}</p>
                   <button onClick={() => openEdit(cq)}
-                    className="text-slate-300 hover:text-blue-500 shrink-0"
+                    className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 p-1 rounded shrink-0 transition-colors"
                     title="Edit Conditional Question">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
                   <button onClick={() => openEdit(cq, true)}
-                    className="text-slate-300 hover:text-emerald-600 shrink-0"
+                    className="text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 p-1 rounded shrink-0 transition-colors"
                     title="Review translations">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </button>
                   <button onClick={() => handleDelete(cq.id)}
-                    className="text-slate-300 hover:text-red-500 shrink-0"
+                    className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1 rounded shrink-0 transition-colors"
                     title="Delete Conditional Question">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
