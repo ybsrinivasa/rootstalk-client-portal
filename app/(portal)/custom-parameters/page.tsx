@@ -119,7 +119,14 @@ export default function CustomParametersPage() {
 
   async function addVariable(paramId: string, name: string) {
     if (!clientId || !name.trim()) return
-    await api.post(`/client/${clientId}/parameters/${paramId}/variables`, { name: name.trim() })
+    // Backend's VariableCreate schema requires `parameter_id` in the
+    // body even though it's also in the URL path (matches the SA
+    // portal's handleAddVariable shape). Omitting it 422s with a
+    // Pydantic "field required" error — no useful detail string, so
+    // the UI falls through to a silent failure.
+    await api.post(`/client/${clientId}/parameters/${paramId}/variables`, {
+      parameter_id: paramId, name: name.trim(),
+    })
     loadParameters()
   }
 
