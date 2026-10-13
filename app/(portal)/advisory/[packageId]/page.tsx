@@ -1556,20 +1556,20 @@ export default function PackageDetailPage() {
                     </p>
                   </div>
                   <button onClick={e => { e.stopPropagation(); tryEdit(() => openEditTimeline(tl)) }}
-                    className="text-slate-300 hover:text-blue-500 transition-colors p-1"
+                    className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors p-1"
                     title="Edit timeline">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
                   <button onClick={e => { e.stopPropagation(); tryEdit(() => handleDeleteTimeline(tl)) }}
-                    className="text-slate-300 hover:text-red-400 transition-colors p-1"
+                    className="text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors p-1"
                     title="Delete timeline">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
-                  <svg className={`w-4 h-4 text-slate-400 transition-transform ${expanded === tl.id ? 'rotate-180' : ''}`}
+                  <svg className={`w-4 h-4 text-slate-500 transition-transform ${expanded === tl.id ? 'rotate-180' : ''}`}
                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -1618,18 +1618,18 @@ export default function PackageDetailPage() {
                                   setShowAddPractice(tl.id)
                                 })
                               }}
-                                className="text-slate-300 hover:text-blue-500 p-1" title="Edit practice">
+                                className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded p-1 transition-colors" title="Edit practice">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                 </svg>
                               </button>
                               <button onClick={e => { e.stopPropagation(); tryEdit(() => handleDeletePractice(tl.id, p.id)) }}
-                                className="text-slate-300 hover:text-red-400 p-1" title="Delete practice">
+                                className="text-slate-500 hover:text-red-600 hover:bg-red-50 rounded p-1 transition-colors" title="Delete practice">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                               </button>
-                              <svg className={`w-3.5 h-3.5 text-slate-300 transition-transform ${isPExpanded ? 'rotate-180' : ''}`}
+                              <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform ${isPExpanded ? 'rotate-180' : ''}`}
                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                               </svg>
