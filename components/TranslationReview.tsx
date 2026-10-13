@@ -141,6 +141,7 @@ export default function TranslationReview({ entityType, entityId, pollMs = 0 }: 
     <div className="mt-4 rounded-xl border border-slate-200 bg-white">
       {/* Collapsed summary bar */}
       <button
+        type="button"
         onClick={() => setExpanded(v => !v)}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 rounded-t-xl">
         <div className="flex items-center gap-3 min-w-0">
@@ -166,6 +167,7 @@ export default function TranslationReview({ entityType, entityId, pollMs = 0 }: 
           <div className="flex flex-wrap gap-1.5 pt-3">
             {data.locales.map(l => (
               <button key={l.language_code}
+                type="button"
                 onClick={() => setSelectedLocale(l.language_code)}
                 className={`text-[11px] px-2.5 py-1 rounded-full font-medium border transition-colors ${
                   selectedLocale === l.language_code
@@ -215,7 +217,7 @@ export default function TranslationReview({ entityType, entityId, pollMs = 0 }: 
             <p className="text-[10px] text-slate-400">
               Translations are read-only. To change them, edit the English text above and save.
             </p>
-            <button onClick={regenerate}
+            <button type="button" onClick={regenerate}
               disabled={regenerating}
               className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-700 font-medium hover:bg-green-200 disabled:opacity-50">
               {regenerating ? 'Regenerating…' : 'Regenerate'}
