@@ -43,6 +43,20 @@ interface Props {
   // Optional refresh cadence — useful when the parent knows the SE
   // just saved and Celery is likely mid-flight. Default 0 (no auto).
   pollMs?: number
+  // Start the panel open on mount — used when the SE clicked a
+  // "Translations" affordance to open the modal (as opposed to Edit).
+  initialExpanded?: boolean
+  // Bumping this triggers an immediate reload AND a 10-second
+  // post-save "Translating…" pulse that polls every 2s so Claude's
+  // fresh output appears without the SE clicking anything.
+  // 2026-10-13 — added to collapse the SE's edit-English → save →
+  // close → reopen loop into one modal session.
+  refreshKey?: string | number
+  // When true, Regenerate is disabled with an inline note telling
+  // the SE to save their English edits first. Prevents a confusing
+  // "re-translate" of the stale DB English after the SE has typed
+  // new text in the parent form but not yet saved.
+  englishDirty?: boolean
 }
 
 const LOCALE_NAMES: Record<string, string> = {
@@ -68,13 +82,20 @@ const STATUS_STYLE: Record<LocaleRow['translation_status'], string> = {
   MISSING: 'text-slate-500 bg-slate-100 border-slate-200',
 }
 
-export default function TranslationReview({ entityType, entityId, pollMs = 0 }: Props) {
+export default function TranslationReview({
+  entityType, entityId, pollMs = 0,
+  initialExpanded = false, refreshKey, englishDirty = false,
+}: Props) {
   const [data, setData] = useState<TranslationsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [regenerating, setRegenerating] = useState(false)
   const [selectedLocale, setSelectedLocale] = useState<string>('hi')
-  const [expanded, setExpanded] = useState<boolean>(false)
+  const [expanded, setExpanded] = useState<boolean>(initialExpanded)
+  // Post-save pulse — when the parent bumps refreshKey, we show a
+  // "Translating…" banner and poll quickly for ~10s so Claude's
+  // output lands in the panel without the SE closing and reopening.
+  const [postSavePulseUntil, setPostSavePulseUntil] = useState<number>(0)
 
   const load = useCallback(async () => {
     if (!entityId) return
@@ -103,8 +124,35 @@ export default function TranslationReview({ entityType, entityId, pollMs = 0 }: 
     return () => clearInterval(t)
   }, [pollMs, load])
 
+  // Reload on refreshKey change + start a short post-save pulse.
+  // Guarded with a mount-skip so the initial render doesn't trigger
+  // the "Translating…" banner when the component first appears.
+  const didMountRef = useState<{ v: boolean }>({ v: false })[0]
+  useEffect(() => {
+    if (refreshKey === undefined) return
+    if (!didMountRef.v) { didMountRef.v = true; return }
+    load()
+    setPostSavePulseUntil(Date.now() + 10_000)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
+
+  // While the post-save pulse is active, poll every 2s so the SE
+  // sees fresh Claude output land without clicking anything.
+  useEffect(() => {
+    if (postSavePulseUntil <= Date.now()) return
+    const t = setInterval(() => {
+      if (Date.now() > postSavePulseUntil) {
+        clearInterval(t); return
+      }
+      load()
+    }, 2000)
+    return () => clearInterval(t)
+  }, [postSavePulseUntil, load])
+
+  const pulseActive = postSavePulseUntil > Date.now()
+
   const regenerate = async () => {
-    if (!entityId || regenerating) return
+    if (!entityId || regenerating || englishDirty) return
     setRegenerating(true)
     try {
       await api.post(`/admin/translations/${entityType}/${entityId}/regenerate`)
@@ -162,6 +210,14 @@ export default function TranslationReview({ entityType, entityId, pollMs = 0 }: 
 
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-slate-100">
+          {pulseActive && (
+            <div className="pt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-100">
+              <span className="w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin shrink-0" />
+              <p className="text-xs text-blue-800">
+                Fresh translation in progress — usually ~5 seconds. The panel will refresh automatically.
+              </p>
+            </div>
+          )}
           {/* Locale switcher — one pill per language. Selected pill
               shows in green; empty locales dim to signal "not yet". */}
           <div className="flex flex-wrap gap-1.5 pt-3">
@@ -215,11 +271,14 @@ export default function TranslationReview({ entityType, entityId, pollMs = 0 }: 
           {/* Actions */}
           <div className="flex items-center justify-between pt-2 border-t border-slate-100">
             <p className="text-[10px] text-slate-400">
-              Translations are read-only. To change them, edit the English text above and save.
+              {englishDirty
+                ? 'Save your English edits above first — Regenerate uses the saved text.'
+                : 'Translations are read-only. To change them, edit the English above and save.'}
             </p>
             <button type="button" onClick={regenerate}
-              disabled={regenerating}
-              className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-700 font-medium hover:bg-green-200 disabled:opacity-50">
+              disabled={regenerating || englishDirty}
+              title={englishDirty ? 'Save your English changes first' : undefined}
+              className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-700 font-medium hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed">
               {regenerating ? 'Regenerating…' : 'Regenerate'}
             </button>
           </div>

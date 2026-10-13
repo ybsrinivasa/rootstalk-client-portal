@@ -74,6 +74,18 @@ export function CQsSection({
   }>({ question_text: '', yes_attachment: '', no_attachment: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // 2026-10-13 — Translation review session state.
+  //   openWithTranslationsExpanded: true when SE clicked the globe
+  //     icon instead of Edit — passes initialExpanded to the panel.
+  //   translationRefreshKey: bumped on every successful Save Changes
+  //     so TranslationReview reloads + shows the "Translating…" pulse
+  //     without the SE closing and reopening the modal.
+  //   savedQuestionText: the English the SE last committed to the DB.
+  //     Compared against the textarea to compute englishDirty for the
+  //     Regenerate guard.
+  const [openWithTranslationsExpanded, setOpenWithTranslationsExpanded] = useState(false)
+  const [translationRefreshKey, setTranslationRefreshKey] = useState(0)
+  const [savedQuestionText, setSavedQuestionText] = useState('')
 
   // ── Load + persist callback to parent mirror ─────────────────────────
 
@@ -136,10 +148,12 @@ export function CQsSection({
     setModalOpen(true)
     setEditing(null)
     setCqForm({ question_text: '', yes_attachment: '', no_attachment: '' })
+    setSavedQuestionText('')
+    setOpenWithTranslationsExpanded(false)
     setError('')
   }
 
-  function openEdit(cq: CQOut) {
+  function openEdit(cq: CQOut, withTranslationsOpen = false) {
     setModalOpen(true)
     setEditing(cq)
     setCqForm({
@@ -147,12 +161,15 @@ export function CQsSection({
       yes_attachment: cq.yes ? `${cq.yes.kind}:${cq.yes.id}` : '',
       no_attachment:  cq.no  ? `${cq.no.kind}:${cq.no.id}`   : '',
     })
+    setSavedQuestionText(cq.question_text)
+    setOpenWithTranslationsExpanded(withTranslationsOpen)
     setError('')
   }
 
   function closeModal() {
     setModalOpen(false)
     setEditing(null)
+    setOpenWithTranslationsExpanded(false)
     setError('')
   }
 
@@ -180,6 +197,15 @@ export function CQsSection({
           yes: toAttachment(cqForm.yes_attachment),
           no:  toAttachment(cqForm.no_attachment),
         })
+        // 2026-10-13: keep the modal OPEN on edit-save so the SE can
+        // review the fresh Claude translations in the same session.
+        // The savedQuestionText comparison (used for englishDirty)
+        // flips back to clean; TranslationReview reloads via the
+        // bumped refreshKey and shows a "Translating…" pulse until
+        // Celery lands the new output (typically ~5s).
+        await loadCQs()
+        setSavedQuestionText(cqForm.question_text.trim())
+        setTranslationRefreshKey(k => k + 1)
       } else {
         // POST the CQ, then bind each side via the link endpoints.
         const cqResp = await api.post<{ id: string }>(endpoints.create(timelineId), {
@@ -202,9 +228,11 @@ export function CQsSection({
         }
         await bind(cqForm.yes_attachment, 'YES')
         await bind(cqForm.no_attachment, 'NO')
+        // New-CQ path: close as before. The SE can re-open to review
+        // the first-pass Claude translations if they want.
+        await loadCQs()
+        closeModal()
       }
-      await loadCQs()
-      closeModal()
     } catch (err: unknown) {
       setError(extractErrorMessage(err, 'Failed to save Conditional Question.'))
     } finally { setSaving(false) }
@@ -286,6 +314,13 @@ export function CQsSection({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
+                  <button onClick={() => openEdit(cq, true)}
+                    className="text-slate-300 hover:text-emerald-600 shrink-0"
+                    title="Review translations">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
                   <button onClick={() => handleDelete(cq.id)}
                     className="text-slate-300 hover:text-red-500 shrink-0"
                     title="Delete Conditional Question">
@@ -355,6 +390,9 @@ export function CQsSection({
                 <TranslationReview
                   entityType="conditional_question.question_text"
                   entityId={editing.id}
+                  initialExpanded={openWithTranslationsExpanded}
+                  refreshKey={translationRefreshKey}
+                  englishDirty={cqForm.question_text.trim() !== savedQuestionText}
                 />
               )}
 
@@ -401,7 +439,7 @@ export function CQsSection({
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={closeModal}
                   className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm hover:bg-slate-50">
-                  Cancel
+                  {editing ? 'Done' : 'Cancel'}
                 </button>
                 <button type="submit"
                   disabled={saving || !cqForm.question_text.trim() ||
