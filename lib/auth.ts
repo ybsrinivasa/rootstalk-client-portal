@@ -72,6 +72,15 @@ export interface CPClient {
    *  shipped — the layout refreshes branding on mount to backfill. */
   soil_nutrient_module_enabled?: boolean
   has_soil_testing_lab?: boolean
+  /** 2026-10-16 — Coaching workspace access state (hybrid access).
+   *  Present only for is_coaching=true workspaces; absent on real
+   *  clients. Drives the GRACE days-remaining and ARCHIVED read-only
+   *  banners in the portal layout. */
+  coaching_access?: {
+    state: 'NOT_YET_STARTED' | 'ACTIVE' | 'GRACE' | 'ARCHIVED'
+    closed_at: string | null
+    grace_ends_at: string | null
+  }
 }
 
 export interface CPUserWithClient extends CPUser {

@@ -58,6 +58,16 @@ export default function CoachingJoinPage() {
     phone: '',
   })
 
+  // 2026-10-16 — Optional Moment 1 "expectations" questions. Imagination-
+  // oriented, non-job-coded; student can skip entirely. See
+  // project_coaching_student_feedback_design_2026_10_16.md.
+  const [moment1, setMoment1] = useState({
+    q_change_digital: '',
+    q_favorite_tech: '',
+    q_hope_explore: '',
+    q_teach_farmer: '',
+  })
+
   useEffect(() => {
     api.get<InviteContext>(`/coaching/join/${token}`)
       .then(r => setCtx(r.data))
@@ -102,6 +112,12 @@ export default function CoachingJoinPage() {
         address: form.address.trim(),
         organization: form.organization.trim(),
         phone: form.phone.trim(),
+        moment1_answers: {
+          q_change_digital: moment1.q_change_digital.trim(),
+          q_favorite_tech: moment1.q_favorite_tech.trim(),
+          q_hope_explore: moment1.q_hope_explore.trim(),
+          q_teach_farmer: moment1.q_teach_farmer.trim(),
+        },
       })
       setDone(true)
       // Refresh context so subsequent visits see the SUBMITTED state.
@@ -251,6 +267,42 @@ export default function CoachingJoinPage() {
               placeholder="10-digit mobile" required />
           </div>
         </Field>
+
+        {/* 2026-10-16 — Optional expectations. Imagination-oriented;
+            not required. Mirrors the "you can come with no
+            expectations" principle. */}
+        <div className="pt-4 border-t border-slate-200">
+          <p className="text-sm font-medium text-slate-800 mb-1">A few open questions (optional)</p>
+          <p className="text-xs text-slate-500 mb-4">
+            Share if you&apos;d like to — all optional. You can skip any question or come back and edit later.
+          </p>
+          <div className="space-y-4">
+            <Field label="If you could change one thing about the way we use digital tools in farming today, what would it be?">
+              <textarea value={moment1.q_change_digital}
+                onChange={e => setMoment1(m => ({ ...m, q_change_digital: e.target.value }))}
+                rows={2}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </Field>
+            <Field label="Think of an app or technology you've used that just felt right. What was it, and what did you like?">
+              <textarea value={moment1.q_favorite_tech}
+                onChange={e => setMoment1(m => ({ ...m, q_favorite_tech: e.target.value }))}
+                rows={2}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </Field>
+            <Field label="Is there anything you're hoping to notice or try out while exploring RootsTalk?">
+              <textarea value={moment1.q_hope_explore}
+                onChange={e => setMoment1(m => ({ ...m, q_hope_explore: e.target.value }))}
+                rows={2}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </Field>
+            <Field label="If you could teach a farmer one thing using digital tools, what would it be?">
+              <textarea value={moment1.q_teach_farmer}
+                onChange={e => setMoment1(m => ({ ...m, q_teach_farmer: e.target.value }))}
+                rows={2}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </Field>
+          </div>
+        </div>
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">

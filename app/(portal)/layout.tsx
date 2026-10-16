@@ -468,10 +468,50 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
             </button>
           </div>
         )}
+        <CoachingAccessBanner coachingAccess={client?.coaching_access} />
         <main className="flex-1 p-6 bg-[#F7F5F0]">
           {children}
         </main>
       </div>
     </div>
   )
+}
+
+
+// 2026-10-16 — GRACE days-remaining + ARCHIVED banners. Rendered
+// above the main content for coaching workspaces. Absent for real
+// clients (coaching_access undefined).
+function CoachingAccessBanner({
+  coachingAccess,
+}: {
+  coachingAccess: CPClient['coaching_access'] | undefined
+}) {
+  if (!coachingAccess) return null
+  const { state, grace_ends_at } = coachingAccess
+
+  if (state === 'GRACE' && grace_ends_at) {
+    const now = new Date()
+    const end = new Date(grace_ends_at)
+    const msLeft = Math.max(0, end.getTime() - now.getTime())
+    const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24))
+    return (
+      <div className="bg-blue-50 border-b border-blue-200 px-6 py-2 text-sm text-blue-900">
+        <strong>Coaching session complete.</strong>{' '}
+        {daysLeft > 0
+          ? `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} of practice access remaining.`
+          : 'Practice access ends today.'}{' '}
+        Your certification is on record.
+      </div>
+    )
+  }
+
+  if (state === 'ARCHIVED') {
+    return (
+      <div className="bg-slate-100 border-b border-slate-300 px-6 py-2 text-sm text-slate-800">
+        <strong>Archive mode.</strong> This is your coaching workspace archive — read-only. Your certification remains valid.
+      </div>
+    )
+  }
+
+  return null
 }
