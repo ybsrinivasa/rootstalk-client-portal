@@ -67,6 +67,15 @@ export interface CPClient {
    *  link for the QR Brand Portfolio picker. NULL until SA links it.
    */
   cosh_manufacturer_id?: string | null
+  /** 2026-10-16 — Coaching workspace access state (hybrid access).
+   *  Present only for is_coaching=true workspaces; absent on real
+   *  clients. Drives the GRACE days-remaining and ARCHIVED read-only
+   *  banners in the portal layout. */
+  coaching_access?: {
+    state: 'NOT_YET_STARTED' | 'ACTIVE' | 'GRACE' | 'ARCHIVED'
+    closed_at: string | null
+    grace_ends_at: string | null
+  }
 }
 
 export interface CPUserWithClient extends CPUser {
