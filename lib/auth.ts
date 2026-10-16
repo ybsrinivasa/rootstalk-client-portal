@@ -67,6 +67,11 @@ export interface CPClient {
    *  link for the QR Brand Portfolio picker. NULL until SA links it.
    */
   cosh_manufacturer_id?: string | null
+  /** 2026-10-16 — Soil Nutrient module flags. Both gate CA-portal
+   *  sidebar entries; undefined on CPClient cached before this field
+   *  shipped — the layout refreshes branding on mount to backfill. */
+  soil_nutrient_module_enabled?: boolean
+  has_soil_testing_lab?: boolean
 }
 
 export interface CPUserWithClient extends CPUser {

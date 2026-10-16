@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { getToken, getUser, getClient, logout, CPClient, CPUser } from '@/lib/auth'
+import { getToken, getUser, getClient, setClient, logout, CPClient, CPUser } from '@/lib/auth'
 import { isCoachView } from '@/lib/tokenStore'
+import api from '@/lib/api'
 
 // ── SVG icon components ──────────────────────────────────────────────────────
 function IconHome() {
@@ -144,6 +145,11 @@ interface NavItem {
    *  seed companies (org_type includes SEED_COMPANY_COSH_ID). Both
    *  paths coexist for Bayer-shaped clients. */
   manufacturerOrSeedOnly?: boolean
+  /** 2026-10-16 — Hidden unless the Client has
+   *  soil_nutrient_module_enabled=true (SA toggles from SA Portal). */
+  soilNutrientModule?: boolean
+  /** 2026-10-16 — Hidden unless the Client has has_soil_testing_lab=true. */
+  soilTestingLab?: boolean
   group: string
 }
 
@@ -176,11 +182,11 @@ const ALL_NAV: NavItem[] = [
   // hierarchy. Visible to CA/SUBJECT_EXPERT/CM-EDIT. Backend enforces
   // soil_nutrient_module_enabled on every endpoint; page shows a
   // friendly "module not enabled" state if the flag is off.
-  { href: '/soil-nutrient/products', label: 'Soil-Nutrient Products', Icon: IconCustomParams, group: 'CONTENT' },
+  { href: '/soil-nutrient/products', label: 'Soil-Nutrient Products', Icon: IconCustomParams, group: 'CONTENT', soilNutrientModule: true },
   // 2026-10-15 — Soil Nutrient Phase 4 (Decision N). Per-crop
   // Normal Range defaults. Operator shape + Low/High per parameter
   // against the 22-row canon.
-  { href: '/soil-nutrient/normal-ranges', label: 'Soil-Normal Ranges', Icon: IconCustomParams, group: 'CONTENT' },
+  { href: '/soil-nutrient/normal-ranges', label: 'Soil-Normal Ranges', Icon: IconCustomParams, group: 'CONTENT', soilNutrientModule: true },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
@@ -246,6 +252,14 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
     '4b0847f9-a590-452f-9129-ee0e2d946dd9',
   ) ?? false
   const isManufacturer = client?.is_manufacturer ?? false
+  // 2026-10-16 — Soil Nutrient module gating. Hide items that
+  // require soil_nutrient_module_enabled or has_soil_testing_lab
+  // when the Client doesn't have those flags on. Undefined on the
+  // cached CPClient (pre-upgrade localStorage payloads) is treated
+  // the same as false — the layout refreshes the branding on mount
+  // so this becomes correct within a second of first render.
+  const soilNutrientOn = client?.soil_nutrient_module_enabled === true
+  const soilTestingLabOn = client?.has_soil_testing_lab === true
 
   // CA is exclusive (Batch K) — sees everything. CONTENT_MANAGER
   // (Batch Q, 2026-05-18) is the synthesised role for a CM who
@@ -257,6 +271,8 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
     return ALL_NAV.filter(item => {
       if (item.seedOnly && !isSeedClient) return false
       if (item.manufacturerOrSeedOnly && !(isManufacturer || isSeedClient)) return false
+      if (item.soilNutrientModule && !soilNutrientOn) return false
+      if (item.soilTestingLab && !soilTestingLabOn) return false
       return true
     })
   }
@@ -280,6 +296,8 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
     if (!allowedSet.has(item.href)) return false
     if (item.seedOnly && !isSeedClient) return false
     if (item.manufacturerOrSeedOnly && !(isManufacturer || isSeedClient)) return false
+    if (item.soilNutrientModule && !soilNutrientOn) return false
+    if (item.soilTestingLab && !soilTestingLabOn) return false
     if (item.caOnly) return false
     return true
   })
@@ -305,9 +323,27 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     if (!getToken()) { router.replace('/login'); return }
-    setClientState(getClient())
+    const cached = getClient()
+    setClientState(cached)
     setUser(getUser())
     setCoachView(isCoachView())
+
+    // 2026-10-16 — Refresh branding on mount so cached CPClient
+    // payloads pick up newly-shipped flags (soil_nutrient_module_enabled,
+    // has_soil_testing_lab, etc.) without forcing the user to log
+    // out and back in. The /portal/{short_name}/branding endpoint
+    // is public and cheap. If the client's short_name isn't cached
+    // (very old payload), skip — login will catch it on next sign-in.
+    if (cached?.short_name) {
+      api.get<CPClient>(`/portal/${cached.short_name}/branding`)
+        .then(({ data }) => {
+          setClient(data)
+          setClientState(data)
+        })
+        .catch(() => {
+          // Silent — stale cached client is better than a hard failure.
+        })
+    }
   }, [router])
 
   // Prefer portal_roles (Batch K); fall back to portal_role list for
