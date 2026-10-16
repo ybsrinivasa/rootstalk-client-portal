@@ -9,6 +9,7 @@ import { RelationsSection } from '@/components/advisory-authoring/RelationsSecti
 import { CQsSection } from '@/components/advisory-authoring/CQsSection'
 import { useReadOnlyGuard } from '@/components/advisory-authoring/ReadOnlyGuard'
 import { VersionHistorySection, type LineageRow as SharedLineageRow } from '@/components/advisory-authoring/LineageSection'
+import PackageSoilNormalRangesSection from '@/components/advisory-authoring/PackageSoilNormalRangesSection'
 import { practiceShortLabel } from '@/lib/practice-label'
 import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
 import PracticeBrandsModal from '@/components/PracticeBrandsModal'
@@ -1492,6 +1493,16 @@ export default function PackageDetailPage() {
           </ol>
         )}
       </div>
+
+      {/* Phase 5a (2026-10-16) — Package-level Soil Normal Range
+          overrides. Self-gating: hides itself when the Client doesn't
+          have soil_nutrient_module_enabled. */}
+      {pkg && (
+        <PackageSoilNormalRangesSection
+          packageId={pkg.id}
+          cropCoshId={pkg.crop_cosh_id}
+        />
+      )}
 
       {/* Calendar visualisation */}
       {timelines.length > 0 && (
