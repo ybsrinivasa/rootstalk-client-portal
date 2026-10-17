@@ -1,16 +1,27 @@
 'use client'
-// Phase 5a (2026-10-16) — Package-level Normal Range overrides inside the
-// Package editor. Shows the 22 platform soil parameters with each row's
-// effective range (Package override if present, else Client crop default).
-// Hides itself when soil_nutrient_module_enabled is false on the Client.
-//
-// Backend endpoints (Phase 4a):
-//   GET  /client/{cid}/soil-nutrient/parameters      — 22-row canon
-//   GET  /client/{cid}/soil-nutrient/normal-ranges?crop_cosh_id=X — crop defaults
-//   GET  /client/{cid}/soil-nutrient/packages/{pid}/overrides     — overrides
-//   PUT  /client/{cid}/soil-nutrient/packages/{pid}/overrides     — bulk upsert
-//   DELETE /client/{cid}/soil-nutrient/packages/{pid}/overrides/{param_id}
-
+/**
+ * Decision W (2026-10-17) rewrite — Package editor section for Soil
+ * Range configuration.
+ *
+ * Each Package picks a `soil_range_template_id` (geography-based,
+ * client-level library). The template supplies bounds per parameter;
+ * this section lets the SE:
+ *   1. Pick / change / clear the template binding (writes to
+ *      PUT /client/{cid}/packages/{pid}).
+ *   2. Author Package-level overrides — any mix of bounds override
+ *      (operator + low + high) and Decision V adjustments (Low Adj /
+ *      High Adj %), per parameter.
+ *
+ * Shown table columns:
+ *   Parameter | Source | Operator | Low | High | Low Adj % | High Adj %
+ *     | Unit | Action
+ *
+ * Source badge values:
+ *   - "template"       → bounds come from the template row untouched
+ *   - "package"        → operator/low/high set on this Package (override)
+ *   - "package-adj"    → inherit bounds; only adjustments overridden
+ *   - "none"           → neither template nor Package row — not classified
+ */
 import { useEffect, useMemo, useState } from 'react'
 import { getClient } from '@/lib/auth'
 import api from '@/lib/api'
@@ -28,27 +39,41 @@ interface SoilParameter {
   display_order: number
 }
 
-interface NormalRangeRow {
-  id?: string
+interface TemplateRow {
   parameter_id: string
   operator: Operator
+  low_value: number | null
+  high_value: number | null
+}
+
+interface Template {
+  id: string
+  name: string
+  description: string | null
+  status: 'ACTIVE' | 'INACTIVE'
+  rows: TemplateRow[]
+}
+
+interface OverrideRow {
+  id?: string
+  parameter_id: string
+  operator: Operator | null
   low_value: number | null
   high_value: number | null
   low_pct_adjustment: number
   high_pct_adjustment: number
 }
 
-type EffectiveSource = 'package' | 'crop' | 'none'
+type EffectiveSource = 'template' | 'package' | 'package-adj' | 'none'
 
 interface RowState {
   parameter_id: string
   operator: Operator | ''
   low: string
   high: string
-  // Decision V — target % adjustment on classification. Signed.
   low_pct: string
   high_pct: string
-  source: EffectiveSource  // where the current displayed value comes from
+  source: EffectiveSource
   dirty: boolean
 }
 
@@ -76,84 +101,87 @@ function parseFloatOrNull(s: string): number | null {
   return isNaN(n) ? null : n
 }
 
-function stringify(v: number | null): string {
-  return v === null ? '' : String(v)
+function stringify(v: number | null | undefined): string {
+  return v === null || v === undefined ? '' : String(v)
 }
 
-
 export default function PackageSoilNormalRangesSection({
-  packageId, cropCoshId,
+  packageId,
+  initialTemplateId,
 }: {
   packageId: string
-  cropCoshId: string
+  initialTemplateId: string | null
 }) {
   const client = getClient()
   const clientId = client?.id
   const enabled = !!client?.soil_nutrient_module_enabled
 
   const [parameters, setParameters] = useState<SoilParameter[]>([])
-  const [cropDefaults, setCropDefaults] = useState<Record<string, NormalRangeRow>>({})
-  const [overrides, setOverrides] = useState<Record<string, NormalRangeRow>>({})
+  const [templates, setTemplates] = useState<Template[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(initialTemplateId)
+  const [overrides, setOverrides] = useState<Record<string, OverrideRow>>({})
   const [rows, setRows] = useState<Record<string, RowState>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingTpl, setSavingTpl] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
-  useEffect(() => {
-    if (!enabled || !clientId) { setLoading(false); return }
-    void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, clientId, packageId, cropCoshId])
+  useEffect(() => { if (expanded && enabled) load() }, [expanded, enabled, selectedTemplateId])
 
   async function load() {
     if (!clientId) return
-    setLoading(true); setError(null); setSavedMsg(null)
+    setLoading(true); setError(null)
     try {
-      const [p, defaults, ovs] = await Promise.all([
-        api.get<SoilParameter[]>(`/client/${clientId}/soil-nutrient/parameters`),
-        api.get<NormalRangeRow[]>(
-          `/client/${clientId}/soil-nutrient/normal-ranges`,
-          { params: { crop_cosh_id: cropCoshId } },
-        ),
-        api.get<NormalRangeRow[]>(
-          `/client/${clientId}/soil-nutrient/packages/${packageId}/overrides`,
-        ),
+      const [paramsRes, tplsRes, ovsRes] = await Promise.all([
+        api.get(`/client/${clientId}/soil-nutrient/parameters`),
+        api.get(`/client/${clientId}/soil-nutrient/templates`),
+        api.get(`/client/${clientId}/soil-nutrient/packages/${packageId}/overrides`),
       ])
-      setParameters(p.data)
-      const defMap: Record<string, NormalRangeRow> = {}
-      for (const r of defaults.data) defMap[r.parameter_id] = r
-      setCropDefaults(defMap)
-      const ovMap: Record<string, NormalRangeRow> = {}
-      for (const r of ovs.data) ovMap[r.parameter_id] = r
+      const params = (paramsRes.data as SoilParameter[])
+        .sort((a, b) => (a.display_order - b.display_order) || a.name.localeCompare(b.name))
+      setParameters(params)
+      setTemplates(tplsRes.data as Template[])
+      const ovs = ovsRes.data as OverrideRow[]
+      const ovMap: Record<string, OverrideRow> = {}
+      for (const r of ovs) ovMap[r.parameter_id] = r
       setOverrides(ovMap)
-      // Build the row state: Package override wins, else crop default,
-      // else blank (not classified by the engine).
+
+      // Resolve the active template rows (if any).
+      const tplRows: Record<string, TemplateRow> = {}
+      if (selectedTemplateId) {
+        const tpl = (tplsRes.data as Template[]).find(t => t.id === selectedTemplateId)
+        if (tpl) for (const r of tpl.rows) tplRows[r.parameter_id] = r
+      }
+
+      // Build row state: Package override takes precedence; else
+      // template; else blank.
       const next: Record<string, RowState> = {}
-      for (const param of p.data) {
+      for (const param of params) {
         const ov = ovMap[param.id]
-        const def = defMap[param.id]
+        const tplRow = tplRows[param.id]
         if (ov) {
+          const inheritingBounds = ov.operator === null
           next[param.id] = {
             parameter_id: param.id,
-            operator: ov.operator,
-            low: stringify(ov.low_value),
-            high: stringify(ov.high_value),
+            operator: inheritingBounds ? (tplRow?.operator ?? '') : ov.operator!,
+            low: inheritingBounds ? stringify(tplRow?.low_value) : stringify(ov.low_value),
+            high: inheritingBounds ? stringify(tplRow?.high_value) : stringify(ov.high_value),
             low_pct: String(ov.low_pct_adjustment),
             high_pct: String(ov.high_pct_adjustment),
-            source: 'package',
+            source: inheritingBounds ? 'package-adj' : 'package',
             dirty: false,
           }
-        } else if (def) {
+        } else if (tplRow) {
           next[param.id] = {
             parameter_id: param.id,
-            operator: def.operator,
-            low: stringify(def.low_value),
-            high: stringify(def.high_value),
-            low_pct: String(def.low_pct_adjustment),
-            high_pct: String(def.high_pct_adjustment),
-            source: 'crop',
+            operator: tplRow.operator,
+            low: stringify(tplRow.low_value),
+            high: stringify(tplRow.high_value),
+            low_pct: '0',
+            high_pct: '0',
+            source: 'template',
             dirty: false,
           }
         } else {
@@ -182,32 +210,36 @@ export default function PackageSoilNormalRangesSection({
       const current = prev[parameterId]
       return {
         ...prev,
-        [parameterId]: {
-          ...current,
-          ...patch,
-          // Any user edit becomes a Package override (source=package)
-          // and is dirty until saved. Reset button handles the
-          // revert-to-crop-default case separately.
-          source: 'package',
-          dirty: true,
-        },
+        [parameterId]: { ...current, ...patch, source: 'package', dirty: true },
       }
     })
   }
 
-  async function resetToDefault(parameterId: string) {
+  function updateAdjustments(parameterId: string, patch: { low_pct?: string; high_pct?: string }) {
+    setRows(prev => {
+      const current = prev[parameterId]
+      // Pure adjustment edits don't change the bounds-source. If bounds
+      // currently come from template, source becomes 'package-adj'; if
+      // bounds already overridden, source stays 'package'.
+      const newSource: EffectiveSource =
+        current.source === 'package' ? 'package' : 'package-adj'
+      return {
+        ...prev,
+        [parameterId]: { ...current, ...patch, source: newSource, dirty: true },
+      }
+    })
+  }
+
+  async function resetRow(parameterId: string) {
     if (!clientId) return
     const current = rows[parameterId]
     if (!current) return
-    // If the override was never persisted on backend, just revert the
-    // local row to the crop default without a DELETE.
     const hadBackendOverride = !!overrides[parameterId]
     if (hadBackendOverride) {
       try {
         await api.delete(
           `/client/${clientId}/soil-nutrient/packages/${packageId}/overrides/${parameterId}`,
         )
-        // Drop the override from local cache so re-render reflects crop default
         setOverrides(prev => {
           const next = { ...prev }
           delete next[parameterId]
@@ -218,19 +250,20 @@ export default function PackageSoilNormalRangesSection({
         return
       }
     }
-    // Reset the local row to crop default (or blank if no default exists)
-    const def = cropDefaults[parameterId]
+    // Reset local row to template bounds (or blank if no template row).
+    const tpl = templates.find(t => t.id === selectedTemplateId)
+    const tplRow = tpl?.rows.find(r => r.parameter_id === parameterId)
     setRows(prev => ({
       ...prev,
-      [parameterId]: def
+      [parameterId]: tplRow
         ? {
             parameter_id: parameterId,
-            operator: def.operator,
-            low: stringify(def.low_value),
-            high: stringify(def.high_value),
-            low_pct: String(def.low_pct_adjustment),
-            high_pct: String(def.high_pct_adjustment),
-            source: 'crop',
+            operator: tplRow.operator,
+            low: stringify(tplRow.low_value),
+            high: stringify(tplRow.high_value),
+            low_pct: '0',
+            high_pct: '0',
+            source: 'template',
             dirty: false,
           }
         : {
@@ -247,35 +280,90 @@ export default function PackageSoilNormalRangesSection({
     setSavedMsg(null)
   }
 
-  async function saveAll() {
+  async function changeTemplate(newId: string | null) {
+    if (!clientId) return
+    setSavingTpl(true); setError(null); setSavedMsg(null)
+    try {
+      await api.put(`/client/${clientId}/packages/${packageId}`, {
+        soil_range_template_id: newId,
+      })
+      setSelectedTemplateId(newId)
+      setSavedMsg(newId ? 'Template changed.' : 'Template cleared.')
+    } catch (e) {
+      setError(extractErrorMessage(e, 'Template change failed'))
+    } finally {
+      setSavingTpl(false)
+    }
+  }
+
+  async function saveOverrides() {
     if (!clientId) return
     setSaving(true); setError(null); setSavedMsg(null)
     try {
-      const dirtyRows = Object.values(rows).filter(r => r.dirty && r.operator !== '')
-      if (dirtyRows.length === 0) {
+      // Build the payload. For each dirty row, decide whether it
+      // carries a bounds-override (operator was set by the user AND
+      // differs from the template bounds — simplest approximation:
+      // source==='package') or only adjustments (source==='package-adj'
+      // or operator inherits).
+      const tpl = templates.find(t => t.id === selectedTemplateId)
+      const tplRowByParam: Record<string, TemplateRow> = {}
+      if (tpl) for (const r of tpl.rows) tplRowByParam[r.parameter_id] = r
+
+      const dirty = Object.values(rows).filter(r => r.dirty)
+      if (dirty.length === 0) {
         setSavedMsg('No changes to save.')
         setSaving(false)
         return
       }
+
+      const payloadRows = dirty.map(r => {
+        const tplRow = tplRowByParam[r.parameter_id]
+        const op = r.operator as Operator | ''
+        // Decide bounds-override vs inherit:
+        // - If the user has no template row to inherit from, must send
+        //   their own operator + bounds.
+        // - If the user's operator / low / high differ from the
+        //   template row's, send as override.
+        // - Otherwise (matches template), send operator=null to inherit.
+        const matchesTemplate =
+          !!tplRow
+          && op === tplRow.operator
+          && parseFloatOrNull(r.low) === tplRow.low_value
+          && parseFloatOrNull(r.high) === tplRow.high_value
+        const inheritBounds = matchesTemplate
+        const effectiveOp = inheritBounds ? null : (op || null)
+        if (effectiveOp === null && !inheritBounds) {
+          // Pure adjustment, no template to inherit from — must declare
+          // an operator or we can't apply the adjustment. Caller
+          // enforcement: a row with operator='' and no template row is
+          // not classifiable; we'll skip saving it as an override.
+          return null
+        }
+        const lowPct = effectiveOp === 'UPPER_BOUND'
+          ? 0 : (parseFloatOrNull(r.low_pct) ?? 0)
+        const highPct = effectiveOp === 'LOWER_BOUND'
+          ? 0 : (parseFloatOrNull(r.high_pct) ?? 0)
+        return {
+          parameter_id: r.parameter_id,
+          operator: effectiveOp,
+          low_value: inheritBounds ? null : parseFloatOrNull(r.low),
+          high_value: inheritBounds ? null : parseFloatOrNull(r.high),
+          low_pct_adjustment: lowPct,
+          high_pct_adjustment: highPct,
+        }
+      }).filter((x): x is NonNullable<typeof x> => x !== null)
+
+      if (payloadRows.length === 0) {
+        setSavedMsg('Nothing to save — set an operator or pick a template with bounds first.')
+        setSaving(false)
+        return
+      }
+
       await api.put(
         `/client/${clientId}/soil-nutrient/packages/${packageId}/overrides`,
-        {
-          rows: dirtyRows.map(r => {
-            const op = r.operator as Operator
-            const lowPct = op === 'UPPER_BOUND' ? 0 : (parseFloatOrNull(r.low_pct) ?? 0)
-            const highPct = op === 'LOWER_BOUND' ? 0 : (parseFloatOrNull(r.high_pct) ?? 0)
-            return {
-              parameter_id: r.parameter_id,
-              operator: op,
-              low_value: parseFloatOrNull(r.low),
-              high_value: parseFloatOrNull(r.high),
-              low_pct_adjustment: lowPct,
-              high_pct_adjustment: highPct,
-            }
-          }),
-        },
+        { rows: payloadRows },
       )
-      setSavedMsg(`Saved ${dirtyRows.length} override${dirtyRows.length === 1 ? '' : 's'}.`)
+      setSavedMsg(`Saved ${payloadRows.length} row${payloadRows.length === 1 ? '' : 's'}.`)
       await load()
     } catch (e) {
       setError(extractErrorMessage(e, 'Save failed'))
@@ -293,183 +381,200 @@ export default function PackageSoilNormalRangesSection({
     return out
   }, [parameters])
 
-  const overrideCount = Object.values(rows).filter(r => r.source === 'package' && !r.dirty).length
-  const dirtyCount = Object.values(rows).filter(r => r.dirty && r.operator !== '').length
+  const activeTemplates = useMemo(
+    () => templates.filter(t => t.status === 'ACTIVE'),
+    [templates],
+  )
+  const selectedTemplate = useMemo(
+    () => templates.find(t => t.id === selectedTemplateId) || null,
+    [templates, selectedTemplateId],
+  )
 
-  if (!enabled) return null  // Hide section entirely for non-enabled Clients
+  const dirtyCount = Object.values(rows).filter(r => r.dirty).length
+
+  if (!enabled) return null
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="font-semibold text-slate-800">
-            Soil Normal Range Overrides
-            {' '}
-            <span className="text-slate-400 font-normal text-sm">
-              ({overrideCount} override{overrideCount === 1 ? '' : 's'})
-            </span>
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Tweak soil thresholds for this specific Package. Rows inherit from your crop defaults unless you change them here.
+    <div className="mb-6">
+      <button onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50">
+        <div className="text-left">
+          <p className="text-sm font-semibold text-slate-800">
+            Soil Range (Template + Package overrides)
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {expanded
+              ? 'Click to collapse'
+              : selectedTemplate
+                ? `Using template: ${selectedTemplate.name}`
+                : 'No template picked — click to configure'}
           </p>
         </div>
-        <button onClick={() => setExpanded(!expanded)}
-          className="text-sm font-medium px-3 py-1.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50">
-          {expanded ? 'Collapse' : 'Open'}
-        </button>
-      </div>
-
-      {!expanded && (
-        <p className="text-xs text-slate-500">
-          {overrideCount === 0
-            ? 'All 22 parameters inherit from your crop defaults.'
-            : `${overrideCount} of 22 parameters have been overridden for this Package.`}
-        </p>
-      )}
+        <span className="text-slate-400 text-sm">{expanded ? '▴' : '▾'}</span>
+      </button>
 
       {expanded && (
-        <div>
+        <div className="mt-3 space-y-5">
+          {error && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
+          )}
+          {savedMsg && (
+            <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">{savedMsg}</p>
+          )}
+
+          {/* Template picker */}
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <label className="text-xs font-medium text-slate-600 block mb-1">
+              Soil Range Template
+            </label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select value={selectedTemplateId || ''}
+                disabled={savingTpl}
+                onChange={e => changeTemplate(e.target.value || null)}
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white flex-1 min-w-[200px]">
+                <option value="">— no template —</option>
+                {activeTemplates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              {savingTpl && <span className="text-xs text-slate-500">saving…</span>}
+            </div>
+            {selectedTemplate?.description && (
+              <p className="text-[11px] text-slate-500 mt-1.5">{selectedTemplate.description}</p>
+            )}
+            <p className="text-[11px] text-slate-500 mt-2">
+              Templates are managed on the <strong>Soil Range Templates</strong> page.
+              Decision V % adjustments are per-Package (edited in the table below).
+            </p>
+          </div>
+
           {loading ? (
-            <p className="text-center py-12 text-slate-400">Loading…</p>
+            <p className="text-center py-8 text-slate-400">Loading…</p>
           ) : (
             <>
-              {savedMsg && (
-                <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-3 py-2 mb-3">
-                  {savedMsg}
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-slate-500">
+                  {dirtyCount > 0 ? `${dirtyCount} change${dirtyCount === 1 ? '' : 's'} to save` : 'No unsaved changes'}
                 </p>
-              )}
-              {error && (
-                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-3">
-                  {error}
-                </p>
-              )}
-
-              <div className="flex items-center justify-end mb-3">
-                <button onClick={saveAll} disabled={saving || dirtyCount === 0}
-                  className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg">
+                <button onClick={saveOverrides} disabled={saving || dirtyCount === 0}
+                  className="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">
                   {saving ? 'Saving…' : `Save${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
                 </button>
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800 mb-4">
-                Rows showing <strong>crop default</strong> inherit from Portal → Normal Ranges.
-                Change the operator or Low/High to override just for this Package.
-                Use <strong>Reset</strong> to revert a row to the crop default.
-              </div>
-
-              <div className="space-y-5">
-                {grouped.map(({ group, items }) => (
-                  <div key={group}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded ${GROUP_COLOR[group]}`}>
-                        {GROUP_LABEL[group]}
-                      </span>
-                      <span className="text-xs text-slate-400">{items.length}</span>
-                    </div>
-                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-xs text-slate-500 border-b border-slate-200">
-                            <th className="text-left px-3 py-2 font-medium">Parameter</th>
-                            <th className="text-left px-2 py-2 font-medium">Source</th>
-                            <th className="text-left px-2 py-2 font-medium">Operator</th>
-                            <th className="text-right px-2 py-2 font-medium">Low</th>
-                            <th className="text-right px-2 py-2 font-medium">High</th>
-                            <th className="text-right px-2 py-2 font-medium" title="Decision V — target % shift when below Low">Low Adj %</th>
-                            <th className="text-right px-2 py-2 font-medium" title="Decision V — target % shift when above High">High Adj %</th>
-                            <th className="text-left px-2 py-2 font-medium">Unit</th>
-                            <th className="text-right px-3 py-2 font-medium">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {items.map(p => {
-                            const row = rows[p.id]
-                            if (!row) return null
-                            const op = row.operator
-                            const needsLow = op === 'RANGE' || op === 'LOWER_BOUND'
-                            const needsHigh = op === 'RANGE' || op === 'UPPER_BOUND'
-                            const sourceLabel =
-                              row.source === 'package' ? 'this Package'
-                              : row.source === 'crop' ? 'crop default'
-                              : 'not set'
-                            const sourceColor =
-                              row.source === 'package' ? 'bg-amber-100 text-amber-800'
-                              : row.source === 'crop' ? 'bg-slate-100 text-slate-600'
-                              : 'bg-slate-50 text-slate-400 italic'
-                            return (
-                              <tr key={p.id}
-                                className={`border-b border-slate-100 last:border-0 ${row.dirty ? 'bg-amber-50' : ''}`}>
-                                <td className="px-3 py-2">
-                                  <div className="font-medium text-slate-800">{p.name}</div>
-                                  {p.formula && (
-                                    <div className="text-[10px] font-mono text-slate-400">= {p.formula}</div>
-                                  )}
-                                </td>
-                                <td className="px-2 py-2">
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${sourceColor}`}>
-                                    {sourceLabel}
-                                  </span>
-                                </td>
-                                <td className="px-2 py-2">
-                                  <select value={op}
-                                    onChange={e => updateRow(p.id, { operator: e.target.value as Operator | '' })}
-                                    className="w-full border border-slate-300 rounded px-2 py-1 text-xs bg-white">
-                                    <option value="">—</option>
-                                    <option value="RANGE">[a–b]</option>
-                                    <option value="UPPER_BOUND">&lt; x</option>
-                                    <option value="LOWER_BOUND">&gt; x</option>
-                                  </select>
-                                </td>
-                                <td className="px-2 py-2">
-                                  <input type="text" inputMode="decimal"
-                                    disabled={!needsLow}
-                                    value={needsLow ? row.low : ''}
-                                    onChange={e => updateRow(p.id, { low: e.target.value })}
-                                    placeholder={needsLow ? '…' : '—'}
-                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
-                                </td>
-                                <td className="px-2 py-2">
-                                  <input type="text" inputMode="decimal"
-                                    disabled={!needsHigh}
-                                    value={needsHigh ? row.high : ''}
-                                    onChange={e => updateRow(p.id, { high: e.target.value })}
-                                    placeholder={needsHigh ? '…' : '—'}
-                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
-                                </td>
-                                <td className="px-2 py-2">
-                                  <input type="text" inputMode="decimal"
-                                    disabled={!needsLow}
-                                    value={needsLow ? row.low_pct : ''}
-                                    onChange={e => updateRow(p.id, { low_pct: e.target.value })}
-                                    placeholder={needsLow ? '0' : '—'}
-                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
-                                </td>
-                                <td className="px-2 py-2">
-                                  <input type="text" inputMode="decimal"
-                                    disabled={!needsHigh}
-                                    value={needsHigh ? row.high_pct : ''}
-                                    onChange={e => updateRow(p.id, { high_pct: e.target.value })}
-                                    placeholder={needsHigh ? '0' : '—'}
-                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
-                                </td>
-                                <td className="px-2 py-2 text-xs text-slate-500">{p.unit || '—'}</td>
-                                <td className="px-3 py-2 text-right">
-                                  {(row.source === 'package' || row.dirty) && (
-                                    <button onClick={() => resetToDefault(p.id)}
-                                      className="text-xs text-slate-600 hover:text-slate-900">
-                                      Reset
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+              {grouped.map(({ group, items }) => (
+                <div key={group}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded ${GROUP_COLOR[group]}`}>
+                      {GROUP_LABEL[group]}
+                    </span>
+                    <span className="text-xs text-slate-400">{items.length}</span>
                   </div>
-                ))}
-              </div>
+                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-slate-500 border-b border-slate-200">
+                          <th className="text-left px-3 py-2 font-medium">Parameter</th>
+                          <th className="text-left px-2 py-2 font-medium">Source</th>
+                          <th className="text-left px-2 py-2 font-medium">Operator</th>
+                          <th className="text-right px-2 py-2 font-medium">Low</th>
+                          <th className="text-right px-2 py-2 font-medium">High</th>
+                          <th className="text-right px-2 py-2 font-medium">Low Adj %</th>
+                          <th className="text-right px-2 py-2 font-medium">High Adj %</th>
+                          <th className="text-left px-2 py-2 font-medium">Unit</th>
+                          <th className="text-right px-3 py-2 font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.map(p => {
+                          const row = rows[p.id]
+                          if (!row) return null
+                          const op = row.operator
+                          const needsLow = op === 'RANGE' || op === 'LOWER_BOUND'
+                          const needsHigh = op === 'RANGE' || op === 'UPPER_BOUND'
+                          const sourceLabel =
+                            row.source === 'template' ? 'template'
+                            : row.source === 'package' ? 'overridden'
+                            : row.source === 'package-adj' ? 'adj-only'
+                            : 'not set'
+                          const sourceColor =
+                            row.source === 'template' ? 'bg-slate-100 text-slate-600'
+                            : row.source === 'package' ? 'bg-amber-100 text-amber-800'
+                            : row.source === 'package-adj' ? 'bg-sky-100 text-sky-700'
+                            : 'bg-slate-50 text-slate-400 italic'
+                          return (
+                            <tr key={p.id}
+                              className={`border-b border-slate-100 last:border-0 ${row.dirty ? 'bg-amber-50' : ''}`}>
+                              <td className="px-3 py-2">
+                                <div className="font-medium text-slate-800">{p.name}</div>
+                                {p.formula && (
+                                  <div className="text-[10px] font-mono text-slate-400">= {p.formula}</div>
+                                )}
+                              </td>
+                              <td className="px-2 py-2">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${sourceColor}`}>
+                                  {sourceLabel}
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                <select value={op}
+                                  onChange={e => updateRow(p.id, { operator: e.target.value as Operator | '' })}
+                                  className="w-full border border-slate-300 rounded px-2 py-1 text-xs bg-white">
+                                  <option value="">—</option>
+                                  <option value="RANGE">[a–b]</option>
+                                  <option value="UPPER_BOUND">&lt; x</option>
+                                  <option value="LOWER_BOUND">&gt; x</option>
+                                </select>
+                              </td>
+                              <td className="px-2 py-2">
+                                <input type="text" inputMode="decimal"
+                                  disabled={!needsLow}
+                                  value={needsLow ? row.low : ''}
+                                  onChange={e => updateRow(p.id, { low: e.target.value })}
+                                  placeholder={needsLow ? '…' : '—'}
+                                  className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                              </td>
+                              <td className="px-2 py-2">
+                                <input type="text" inputMode="decimal"
+                                  disabled={!needsHigh}
+                                  value={needsHigh ? row.high : ''}
+                                  onChange={e => updateRow(p.id, { high: e.target.value })}
+                                  placeholder={needsHigh ? '…' : '—'}
+                                  className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                              </td>
+                              <td className="px-2 py-2">
+                                <input type="text" inputMode="decimal"
+                                  disabled={!needsLow}
+                                  value={needsLow ? row.low_pct : ''}
+                                  onChange={e => updateAdjustments(p.id, { low_pct: e.target.value })}
+                                  placeholder={needsLow ? '0' : '—'}
+                                  className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                              </td>
+                              <td className="px-2 py-2">
+                                <input type="text" inputMode="decimal"
+                                  disabled={!needsHigh}
+                                  value={needsHigh ? row.high_pct : ''}
+                                  onChange={e => updateAdjustments(p.id, { high_pct: e.target.value })}
+                                  placeholder={needsHigh ? '0' : '—'}
+                                  className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                              </td>
+                              <td className="px-2 py-2 text-xs text-slate-500">{p.unit || '—'}</td>
+                              <td className="px-3 py-2 text-right">
+                                {(row.source === 'package' || row.source === 'package-adj' || row.dirty) && (
+                                  <button onClick={() => resetRow(p.id)}
+                                    className="text-xs text-slate-600 hover:text-slate-900">
+                                    Reset
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
             </>
           )}
         </div>

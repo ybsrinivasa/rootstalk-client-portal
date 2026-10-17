@@ -34,6 +34,9 @@ interface Package {
   // narrowed by the CA.
   cascade_inactivated_reason?: 'locations_cleared_by_cascade' | 'crop_removed_from_belt' | null
   last_cascade_at?: string | null
+  // Decision W (2026-10-17) — Soil Range Template this Package is
+  // classified against. Nullable; may be unpicked.
+  soil_range_template_id?: string | null
 }
 interface LineageRow {
   id: string
@@ -1500,7 +1503,7 @@ export default function PackageDetailPage() {
       {pkg && (
         <PackageSoilNormalRangesSection
           packageId={pkg.id}
-          cropCoshId={pkg.crop_cosh_id}
+          initialTemplateId={pkg.soil_range_template_id ?? null}
         />
       )}
 
