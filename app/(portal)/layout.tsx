@@ -187,6 +187,12 @@ const ALL_NAV: NavItem[] = [
   // Normal Range defaults. Operator shape + Low/High per parameter
   // against the 22-row canon.
   { href: '/soil-nutrient/normal-ranges', label: 'Soil-Normal Ranges', Icon: IconCustomParams, group: 'CONTENT', soilNutrientModule: true },
+  // 2026-10-17 — Soil Nutrient Phase 7 (Mock). Simulate the engine
+  // against a hypothetical soil state for one of this Client's
+  // Packages. Precursor to the Real engine go-live (Decision Q — CAs
+  // need to be satisfied with Mock output before authorising per-
+  // Package go-live).
+  { href: '/soil-nutrient/mock', label: 'Soil Nutrient Mock', Icon: IconCustomParams, group: 'CONTENT', soilNutrientModule: true },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
@@ -221,7 +227,7 @@ const ROLE_NAV: Record<string, string[]> = {
   // without the privilege sees the link but every action will 403
   // with `seed_data_or_ca_only` and a helpful message via Batch W-2
   // error surfacing.
-  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/custom-parameters', '/soil-nutrient/products', '/soil-nutrient/normal-ranges', '/seed'],
+  SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/custom-parameters', '/soil-nutrient/products', '/soil-nutrient/normal-ranges', '/soil-nutrient/mock', '/seed'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager'],
   // CLIENT_RM scoped to Alerts (2026-07-20 user direction). Previously
   // also had /field-manager access; the backend gate

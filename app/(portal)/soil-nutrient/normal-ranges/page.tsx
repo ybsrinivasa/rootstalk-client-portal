@@ -23,6 +23,8 @@ type NormalRange = {
   operator: Operator
   low_value: number | null
   high_value: number | null
+  low_pct_adjustment: number
+  high_pct_adjustment: number
 }
 
 type ClientCrop = { crop_cosh_id: string; crop_name_en: string | null; status: string }
@@ -32,6 +34,11 @@ type RowState = {
   operator: Operator | ''  // empty means "not authored"
   low: string
   high: string
+  // Decision V — per-parameter target adjustment when the farmer's
+  // value falls below Low (low_pct) or above High (high_pct). Stored
+  // as a signed percentage: +X% raises the target, -X% lowers it.
+  low_pct: string
+  high_pct: string
   dirty: boolean
 }
 
@@ -125,6 +132,8 @@ export default function NormalRangesPage() {
           operator: r ? r.operator : '',
           low: r && r.low_value !== null ? String(r.low_value) : '',
           high: r && r.high_value !== null ? String(r.high_value) : '',
+          low_pct: r ? String(r.low_pct_adjustment) : '0',
+          high_pct: r ? String(r.high_pct_adjustment) : '0',
           dirty: false,
         }
       }
@@ -152,7 +161,7 @@ export default function NormalRangesPage() {
         `/client/${clientId}/soil-nutrient/normal-ranges/${parameterId}`,
         { params: { crop_cosh_id: selectedCrop } },
       )
-      updateRow(parameterId, { operator: '', low: '', high: '', dirty: false })
+      updateRow(parameterId, { operator: '', low: '', high: '', low_pct: '0', high_pct: '0', dirty: false })
       setSavedMessage(null)
     } catch (e) {
       setError(extractErrorMessage(e, 'Clear failed'))
@@ -167,12 +176,22 @@ export default function NormalRangesPage() {
       const payload = {
         rows: Object.values(rows)
           .filter(r => r.dirty && r.operator !== '')
-          .map(r => ({
-            parameter_id: r.parameter_id,
-            operator: r.operator as Operator,
-            low_value: parseFloatOrNull(r.low),
-            high_value: parseFloatOrNull(r.high),
-          })),
+          .map(r => {
+            const op = r.operator as Operator
+            // Operator-gated adjustments (also enforced server-side).
+            // UPPER_BOUND has no Low classification → low_pct is 0;
+            // LOWER_BOUND has no High classification → high_pct is 0.
+            const lowPct = op === 'UPPER_BOUND' ? 0 : (parseFloatOrNull(r.low_pct) ?? 0)
+            const highPct = op === 'LOWER_BOUND' ? 0 : (parseFloatOrNull(r.high_pct) ?? 0)
+            return {
+              parameter_id: r.parameter_id,
+              operator: op,
+              low_value: parseFloatOrNull(r.low),
+              high_value: parseFloatOrNull(r.high),
+              low_pct_adjustment: lowPct,
+              high_pct_adjustment: highPct,
+            }
+          }),
       }
       if (payload.rows.length === 0) {
         setSavedMessage('Nothing to save.')
@@ -267,6 +286,9 @@ export default function NormalRangesPage() {
               {' '}<strong>LOWER_BOUND</strong> (e.g. OC &gt; 1.0).
               Partial authoring is fine — a parameter you leave blank simply won&apos;t be classified by the engine for this crop.
             </p>
+            <p className="mt-1.5">
+              <strong>Low Adj % / High Adj %</strong> (Decision V): when a farmer&apos;s value is below Low or above High, the engine shifts the recommendation target by this signed percentage. Example: <code>N Low Adj = +20</code> means &quot;raise the N target by 20% when the farmer&apos;s N is Low&quot;. Leave at 0 if you don&apos;t want a numeric adjustment.
+            </p>
           </div>
 
           {groupedParams.map(({ group, items }) => (
@@ -281,11 +303,13 @@ export default function NormalRangesPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-slate-500 border-b border-slate-200">
-                      <th className="text-left px-4 py-2 font-medium w-[30%]">Parameter</th>
-                      <th className="text-left px-2 py-2 font-medium w-[18%]">Operator</th>
-                      <th className="text-right px-2 py-2 font-medium w-[14%]">Low</th>
-                      <th className="text-right px-2 py-2 font-medium w-[14%]">High</th>
-                      <th className="text-left px-2 py-2 font-medium w-[10%]">Unit</th>
+                      <th className="text-left px-4 py-2 font-medium w-[22%]">Parameter</th>
+                      <th className="text-left px-2 py-2 font-medium w-[14%]">Operator</th>
+                      <th className="text-right px-2 py-2 font-medium w-[10%]">Low</th>
+                      <th className="text-right px-2 py-2 font-medium w-[10%]">High</th>
+                      <th className="text-right px-2 py-2 font-medium w-[11%]" title="If measured value is below Low, raise the target by this % (Decision V).">Low Adj %</th>
+                      <th className="text-right px-2 py-2 font-medium w-[11%]" title="If measured value is above High, change the target by this % (Decision V, usually negative).">High Adj %</th>
+                      <th className="text-left px-2 py-2 font-medium w-[8%]">Unit</th>
                       <th className="text-right px-4 py-2 font-medium w-[14%]">Action</th>
                     </tr>
                   </thead>
@@ -329,6 +353,22 @@ export default function NormalRangesPage() {
                               value={needsHigh ? row.high : ''}
                               onChange={e => updateRow(p.id, { high: e.target.value })}
                               placeholder={needsHigh ? '…' : '—'}
+                              className="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="text" inputMode="decimal"
+                              disabled={!needsLow}
+                              value={needsLow ? row.low_pct : ''}
+                              onChange={e => updateRow(p.id, { low_pct: e.target.value })}
+                              placeholder={needsLow ? '0' : '—'}
+                              className="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="text" inputMode="decimal"
+                              disabled={!needsHigh}
+                              value={needsHigh ? row.high_pct : ''}
+                              onChange={e => updateRow(p.id, { high_pct: e.target.value })}
+                              placeholder={needsHigh ? '0' : '—'}
                               className="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
                           </td>
                           <td className="px-2 py-2 text-xs text-slate-500">{p.unit || '—'}</td>

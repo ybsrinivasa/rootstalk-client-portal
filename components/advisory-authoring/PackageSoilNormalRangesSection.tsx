@@ -34,6 +34,8 @@ interface NormalRangeRow {
   operator: Operator
   low_value: number | null
   high_value: number | null
+  low_pct_adjustment: number
+  high_pct_adjustment: number
 }
 
 type EffectiveSource = 'package' | 'crop' | 'none'
@@ -43,6 +45,9 @@ interface RowState {
   operator: Operator | ''
   low: string
   high: string
+  // Decision V — target % adjustment on classification. Signed.
+  low_pct: string
+  high_pct: string
   source: EffectiveSource  // where the current displayed value comes from
   dirty: boolean
 }
@@ -135,6 +140,8 @@ export default function PackageSoilNormalRangesSection({
             operator: ov.operator,
             low: stringify(ov.low_value),
             high: stringify(ov.high_value),
+            low_pct: String(ov.low_pct_adjustment),
+            high_pct: String(ov.high_pct_adjustment),
             source: 'package',
             dirty: false,
           }
@@ -144,6 +151,8 @@ export default function PackageSoilNormalRangesSection({
             operator: def.operator,
             low: stringify(def.low_value),
             high: stringify(def.high_value),
+            low_pct: String(def.low_pct_adjustment),
+            high_pct: String(def.high_pct_adjustment),
             source: 'crop',
             dirty: false,
           }
@@ -153,6 +162,8 @@ export default function PackageSoilNormalRangesSection({
             operator: '',
             low: '',
             high: '',
+            low_pct: '0',
+            high_pct: '0',
             source: 'none',
             dirty: false,
           }
@@ -217,6 +228,8 @@ export default function PackageSoilNormalRangesSection({
             operator: def.operator,
             low: stringify(def.low_value),
             high: stringify(def.high_value),
+            low_pct: String(def.low_pct_adjustment),
+            high_pct: String(def.high_pct_adjustment),
             source: 'crop',
             dirty: false,
           }
@@ -225,6 +238,8 @@ export default function PackageSoilNormalRangesSection({
             operator: '',
             low: '',
             high: '',
+            low_pct: '0',
+            high_pct: '0',
             source: 'none',
             dirty: false,
           },
@@ -245,12 +260,19 @@ export default function PackageSoilNormalRangesSection({
       await api.put(
         `/client/${clientId}/soil-nutrient/packages/${packageId}/overrides`,
         {
-          rows: dirtyRows.map(r => ({
-            parameter_id: r.parameter_id,
-            operator: r.operator,
-            low_value: parseFloatOrNull(r.low),
-            high_value: parseFloatOrNull(r.high),
-          })),
+          rows: dirtyRows.map(r => {
+            const op = r.operator as Operator
+            const lowPct = op === 'UPPER_BOUND' ? 0 : (parseFloatOrNull(r.low_pct) ?? 0)
+            const highPct = op === 'LOWER_BOUND' ? 0 : (parseFloatOrNull(r.high_pct) ?? 0)
+            return {
+              parameter_id: r.parameter_id,
+              operator: op,
+              low_value: parseFloatOrNull(r.low),
+              high_value: parseFloatOrNull(r.high),
+              low_pct_adjustment: lowPct,
+              high_pct_adjustment: highPct,
+            }
+          }),
         },
       )
       setSavedMsg(`Saved ${dirtyRows.length} override${dirtyRows.length === 1 ? '' : 's'}.`)
@@ -353,6 +375,8 @@ export default function PackageSoilNormalRangesSection({
                             <th className="text-left px-2 py-2 font-medium">Operator</th>
                             <th className="text-right px-2 py-2 font-medium">Low</th>
                             <th className="text-right px-2 py-2 font-medium">High</th>
+                            <th className="text-right px-2 py-2 font-medium" title="Decision V — target % shift when below Low">Low Adj %</th>
+                            <th className="text-right px-2 py-2 font-medium" title="Decision V — target % shift when above High">High Adj %</th>
                             <th className="text-left px-2 py-2 font-medium">Unit</th>
                             <th className="text-right px-3 py-2 font-medium">Action</th>
                           </tr>
@@ -410,6 +434,22 @@ export default function PackageSoilNormalRangesSection({
                                     value={needsHigh ? row.high : ''}
                                     onChange={e => updateRow(p.id, { high: e.target.value })}
                                     placeholder={needsHigh ? '…' : '—'}
+                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                                </td>
+                                <td className="px-2 py-2">
+                                  <input type="text" inputMode="decimal"
+                                    disabled={!needsLow}
+                                    value={needsLow ? row.low_pct : ''}
+                                    onChange={e => updateRow(p.id, { low_pct: e.target.value })}
+                                    placeholder={needsLow ? '0' : '—'}
+                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                                </td>
+                                <td className="px-2 py-2">
+                                  <input type="text" inputMode="decimal"
+                                    disabled={!needsHigh}
+                                    value={needsHigh ? row.high_pct : ''}
+                                    onChange={e => updateRow(p.id, { high_pct: e.target.value })}
+                                    placeholder={needsHigh ? '0' : '—'}
                                     className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
                                 </td>
                                 <td className="px-2 py-2 text-xs text-slate-500">{p.unit || '—'}</td>
