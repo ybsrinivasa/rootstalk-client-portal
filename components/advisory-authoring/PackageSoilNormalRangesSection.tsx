@@ -564,22 +564,34 @@ export default function PackageSoilNormalRangesSection({
                                   className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
                               </td>
                               <td className="px-2 py-2">
-                                <input type="text" inputMode="decimal"
-                                  disabled={!needsLow || !isDosable}
-                                  title={nonDosableTooltip}
-                                  value={needsLow && isDosable ? row.low_pct : ''}
-                                  onChange={e => updateAdjustments(p.id, { low_pct: e.target.value })}
-                                  placeholder={!isDosable ? 'n/a' : needsLow ? '0' : '—'}
-                                  className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                                {!isDosable ? (
+                                  <div className="w-20 px-2 py-1 text-xs font-mono text-right text-slate-400 italic"
+                                    title={nonDosableTooltip}>
+                                    n/a
+                                  </div>
+                                ) : (
+                                  <input type="text" inputMode="decimal"
+                                    disabled={!needsLow}
+                                    value={needsLow ? row.low_pct : ''}
+                                    onChange={e => updateAdjustments(p.id, { low_pct: e.target.value })}
+                                    placeholder={needsLow ? '0' : '—'}
+                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                                )}
                               </td>
                               <td className="px-2 py-2">
-                                <input type="text" inputMode="decimal"
-                                  disabled={!needsHigh || !isDosable}
-                                  title={nonDosableTooltip}
-                                  value={needsHigh && isDosable ? row.high_pct : ''}
-                                  onChange={e => updateAdjustments(p.id, { high_pct: e.target.value })}
-                                  placeholder={!isDosable ? 'n/a' : needsHigh ? '0' : '—'}
-                                  className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                                {!isDosable ? (
+                                  <div className="w-20 px-2 py-1 text-xs font-mono text-right text-slate-400 italic"
+                                    title={nonDosableTooltip}>
+                                    n/a
+                                  </div>
+                                ) : (
+                                  <input type="text" inputMode="decimal"
+                                    disabled={!needsHigh}
+                                    value={needsHigh ? row.high_pct : ''}
+                                    onChange={e => updateAdjustments(p.id, { high_pct: e.target.value })}
+                                    placeholder={needsHigh ? '0' : '—'}
+                                    className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
+                                )}
                               </td>
                               <td className="px-2 py-2 text-xs text-slate-500">{p.unit || '—'}</td>
                               <td className="px-3 py-2 text-right">
