@@ -174,6 +174,14 @@ export default function SoilNutrientMockPage() {
     }
   }
 
+  // Compose a readable label for the currently selected Package —
+  // used in the print header so the saved PDF carries context.
+  function selectedPackageLabel(): string {
+    const p = packages.find(x => x.id === packageId)
+    if (!p) return ''
+    return `${p.name} · ${p.crop_name_en || p.crop_cosh_id} · v${p.version}`
+  }
+
   if (moduleDisabled) {
     return (
       <div className="max-w-3xl mx-auto mt-16 text-center">
@@ -312,18 +320,35 @@ export default function SoilNutrientMockPage() {
           </div>
 
           {/* ── Right: report ── */}
-          <div>
+          <div data-print-area>
             {report ? (
-              <div className="bg-white border border-slate-200 rounded-xl p-6">
-                <div className="flex items-start justify-between mb-4 pb-3 border-b border-slate-100">
+              <div className="bg-white border border-slate-200 rounded-xl p-6 print:border-0 print:rounded-none print:p-0 print:shadow-none">
+                <div className="flex items-start justify-between mb-4 pb-3 border-b border-slate-100 print:mb-3 print:pb-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">Decision Report</p>
+                    <p className="text-sm font-semibold text-slate-800 print:text-base">
+                      Decision Report
+                      <span className="hidden print:inline"> — {selectedPackageLabel()}</span>
+                    </p>
                     <p className="text-[11px] text-slate-500 mt-0.5">
                       Generated {new Date(report.generated_at).toLocaleString()}
+                      {inputMode === 'preset' && presetId && (() => {
+                        const p = presets.find(x => x.id === presetId)
+                        return p ? <> · Preset: <strong>{p.name}</strong></> : null
+                      })()}
+                      {inputMode === 'manual' && <> · Manual soil values</>}
                     </p>
                   </div>
-                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">
-                    Sandbox
+                  <div className="flex items-center gap-2 print:hidden">
+                    <button type="button" onClick={() => window.print()}
+                      className="text-xs border border-slate-300 text-slate-700 hover:bg-slate-50 font-medium px-3 py-1.5 rounded-lg">
+                      ⬇ Download as PDF
+                    </button>
+                    <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">
+                      Sandbox
+                    </span>
+                  </div>
+                  <span className="hidden print:inline-block text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">
+                    Sandbox (Mock)
                   </span>
                 </div>
                 <div className="space-y-4">
@@ -340,6 +365,24 @@ export default function SoilNutrientMockPage() {
           </div>
         </div>
       )}
+
+      {/* Print rules — standard "hide everything, show only the print
+          area" pattern. visibility (not display) keeps the layout
+          calculated so [data-print-area] can be re-positioned to the
+          page top-left without layout shift surprises. */}
+      <style jsx global>{`
+        @media print {
+          @page { margin: 1.2cm; }
+          body { background: white !important; }
+          body * { visibility: hidden !important; }
+          [data-print-area], [data-print-area] * { visibility: visible !important; }
+          [data-print-area] {
+            position: absolute !important;
+            left: 0; top: 0;
+            width: 100%;
+          }
+        }
+      `}</style>
     </div>
   )
 }
