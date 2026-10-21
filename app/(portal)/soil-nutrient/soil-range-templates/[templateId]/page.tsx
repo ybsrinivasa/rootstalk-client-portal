@@ -180,12 +180,20 @@ export default function SoilRangeTemplateEditorPage() {
       const payload = {
         rows: Object.values(rows)
           .filter(r => r.dirty && r.operator !== '')
-          .map(r => ({
-            parameter_id: r.parameter_id,
-            operator: r.operator as Operator,
-            low_value: parseFloatOrNull(r.low),
-            high_value: parseFloatOrNull(r.high),
-          })),
+          .map(r => {
+            const op = r.operator as Operator
+            // Strip the field the operator doesn't need. The UI hides
+            // the input but the row state may still hold a stale value
+            // left over from before the user switched operators —
+            // sending that value trips the backend's per-operator
+            // invariant with an unfriendly "parameter <uuid>" error.
+            return {
+              parameter_id: r.parameter_id,
+              operator: op,
+              low_value: op === 'UPPER_BOUND' ? null : parseFloatOrNull(r.low),
+              high_value: op === 'LOWER_BOUND' ? null : parseFloatOrNull(r.high),
+            }
+          }),
       }
       if (payload.rows.length === 0) {
         setSavedMsg('No row changes to save.')

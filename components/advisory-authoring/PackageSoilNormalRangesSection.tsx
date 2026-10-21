@@ -356,11 +356,22 @@ export default function PackageSoilNormalRangesSection({
           ? 0
           : effectiveOp === 'LOWER_BOUND'
             ? 0 : (parseFloatOrNull(r.high_pct) ?? 0)
+        // Strip the bound the operator doesn't need, same reason as
+        // the template editor: UI hides the input but row state may
+        // still hold a stale value from before the operator switch.
+        const lowValue = inheritBounds
+          ? null
+          : effectiveOp === 'UPPER_BOUND'
+            ? null : parseFloatOrNull(r.low)
+        const highValue = inheritBounds
+          ? null
+          : effectiveOp === 'LOWER_BOUND'
+            ? null : parseFloatOrNull(r.high)
         return {
           parameter_id: r.parameter_id,
           operator: effectiveOp,
-          low_value: inheritBounds ? null : parseFloatOrNull(r.low),
-          high_value: inheritBounds ? null : parseFloatOrNull(r.high),
+          low_value: lowValue,
+          high_value: highValue,
           low_pct_adjustment: lowPct,
           high_pct_adjustment: highPct,
         }
