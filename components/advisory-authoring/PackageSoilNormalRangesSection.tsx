@@ -316,6 +316,13 @@ export default function PackageSoilNormalRangesSection({
         return
       }
 
+      // Decision V-amend (2026-10-21) — index parameter category_group
+      // so the save path can zero-out adjustments for non-dosable rows,
+      // regardless of what the (disabled) input holds.
+      const paramById: Record<string, SoilParameter> = {}
+      for (const p of parameters) paramById[p.id] = p
+      const NON_DOSABLE: CategoryGroup[] = ['BASE', 'OTHER', 'RATIO']
+
       const payloadRows = dirty.map(r => {
         const tplRow = tplRowByParam[r.parameter_id]
         const op = r.operator as Operator | ''
@@ -339,10 +346,16 @@ export default function PackageSoilNormalRangesSection({
           // not classifiable; we'll skip saving it as an override.
           return null
         }
-        const lowPct = effectiveOp === 'UPPER_BOUND'
-          ? 0 : (parseFloatOrNull(r.low_pct) ?? 0)
-        const highPct = effectiveOp === 'LOWER_BOUND'
-          ? 0 : (parseFloatOrNull(r.high_pct) ?? 0)
+        const param = paramById[r.parameter_id]
+        const nonDosable = !!param && NON_DOSABLE.includes(param.category_group)
+        const lowPct = nonDosable
+          ? 0
+          : effectiveOp === 'UPPER_BOUND'
+            ? 0 : (parseFloatOrNull(r.low_pct) ?? 0)
+        const highPct = nonDosable
+          ? 0
+          : effectiveOp === 'LOWER_BOUND'
+            ? 0 : (parseFloatOrNull(r.high_pct) ?? 0)
         return {
           parameter_id: r.parameter_id,
           operator: effectiveOp,
@@ -492,6 +505,14 @@ export default function PackageSoilNormalRangesSection({
                           const op = row.operator
                           const needsLow = op === 'RANGE' || op === 'LOWER_BOUND'
                           const needsHigh = op === 'RANGE' || op === 'UPPER_BOUND'
+                          // Decision V-amend (2026-10-21) — BASE / OTHER / RATIO
+                          // parameters classify fine but have no dose-shift
+                          // semantics (you can't "shift pH target by 20%").
+                          // Disable Adj % cells and surface a tooltip.
+                          const isDosable = !['BASE', 'OTHER', 'RATIO'].includes(p.category_group)
+                          const nonDosableTooltip = isDosable
+                            ? undefined
+                            : `${p.name} isn't a dosable parameter — the engine can't shift its target via a fertilizer product. Classification still works (Low / Optimum / High in Section 2 of the Mock Report).`
                           const sourceLabel =
                             row.source === 'template' ? 'template'
                             : row.source === 'package' ? 'overridden'
@@ -544,18 +565,20 @@ export default function PackageSoilNormalRangesSection({
                               </td>
                               <td className="px-2 py-2">
                                 <input type="text" inputMode="decimal"
-                                  disabled={!needsLow}
-                                  value={needsLow ? row.low_pct : ''}
+                                  disabled={!needsLow || !isDosable}
+                                  title={nonDosableTooltip}
+                                  value={needsLow && isDosable ? row.low_pct : ''}
                                   onChange={e => updateAdjustments(p.id, { low_pct: e.target.value })}
-                                  placeholder={needsLow ? '0' : '—'}
+                                  placeholder={!isDosable ? 'n/a' : needsLow ? '0' : '—'}
                                   className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
                               </td>
                               <td className="px-2 py-2">
                                 <input type="text" inputMode="decimal"
-                                  disabled={!needsHigh}
-                                  value={needsHigh ? row.high_pct : ''}
+                                  disabled={!needsHigh || !isDosable}
+                                  title={nonDosableTooltip}
+                                  value={needsHigh && isDosable ? row.high_pct : ''}
                                   onChange={e => updateAdjustments(p.id, { high_pct: e.target.value })}
-                                  placeholder={needsHigh ? '0' : '—'}
+                                  placeholder={!isDosable ? 'n/a' : needsHigh ? '0' : '—'}
                                   className="w-20 border border-slate-300 rounded px-2 py-1 text-xs font-mono text-right disabled:bg-slate-50 disabled:text-slate-300" />
                               </td>
                               <td className="px-2 py-2 text-xs text-slate-500">{p.unit || '—'}</td>
