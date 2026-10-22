@@ -31,6 +31,7 @@ export default function ReportMarkdown({ body }: { body: string }) {
 type Block =
   | { kind: 'h2'; text: string }
   | { kind: 'h3'; text: string }
+  | { kind: 'h4'; text: string }
   | { kind: 'p'; text: string }
   | { kind: 'ul'; items: string[] }
   | { kind: 'table'; headers: string[]; rows: string[][] }
@@ -45,6 +46,11 @@ function parseBlocks(src: string): Block[] {
 
     if (line.startsWith('## ')) {
       blocks.push({ kind: 'h2', text: line.slice(3) })
+      i++
+      continue
+    }
+    if (line.startsWith('#### ')) {
+      blocks.push({ kind: 'h4', text: line.slice(5) })
       i++
       continue
     }
@@ -81,6 +87,7 @@ function parseBlocks(src: string): Block[] {
       && lines[i].trim()
       && !lines[i].startsWith('## ')
       && !lines[i].startsWith('### ')
+      && !lines[i].startsWith('#### ')
       && !lines[i].startsWith('- ')
       && !lines[i].startsWith('|')) {
       buf.push(lines[i])
@@ -105,6 +112,9 @@ function renderBlock(b: Block, key: number): React.ReactNode {
   }
   if (b.kind === 'h3') {
     return <h3 key={key} className="text-sm font-semibold text-slate-700 mt-3 mb-1">{renderInline(b.text)}</h3>
+  }
+  if (b.kind === 'h4') {
+    return <h4 key={key} className="text-xs font-semibold uppercase tracking-wider text-slate-600 mt-2 mb-1">{renderInline(b.text)}</h4>
   }
   if (b.kind === 'ul') {
     return (
