@@ -31,11 +31,6 @@ function formulationAcronym(name: string): string {
   return (m ? m[1] : name).trim()
 }
 
-function shortBrandName(fullName: string): string {
-  if (!fullName) return ''
-  const idx = fullName.indexOf(' - ')
-  return idx > 0 ? fullName.slice(0, idx).trim() : fullName.trim()
-}
 
 function composeChemistryLine(data: BrandsResponse): string | null {
   const cn = (data.practice_common_name || '').trim()
@@ -137,7 +132,7 @@ export default function PracticeBrandsModal({
                     {data.brands.map((b, idx) => (
                       <div key={`${b.name}-${idx}`}
                         className={`px-4 py-2.5 ${idx > 0 ? 'border-t border-slate-50' : ''}`}>
-                        <p className="font-medium text-slate-800 text-sm">{shortBrandName(b.name)}</p>
+                        <p className="font-medium text-slate-800 text-sm">{b.name}</p>
                         {b.manufacturer && (
                           <p className="text-xs text-slate-500 mt-0.5">{b.manufacturer}</p>
                         )}
