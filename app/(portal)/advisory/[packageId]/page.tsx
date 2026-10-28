@@ -523,8 +523,19 @@ export default function PackageDetailPage() {
     if (!clientId) return
     try {
       const { data } = await api.get<PortalUser[]>(`/client/${clientId}/users`)
+      // Coaching Sandbox (2026-10-28): the student is the sole CA of
+      // their is_coaching workspace and no SE exists there. Backend
+      // set_package_authors already accepts the CA as a valid author
+      // when the workspace is coaching; UI needs to list the CA in
+      // the picker too so the student can actually credit themselves.
+      // CPClient.coaching_access is present only on is_coaching
+      // workspaces (per CPClient type in lib/auth.ts).
+      const client = getClient()
+      const isCoachingWorkspace = !!client?.coaching_access
       setAvailableSEs(
-        data.filter(u => u.role === 'SUBJECT_EXPERT' && u.status === 'ACTIVE'),
+        data.filter(u => u.status === 'ACTIVE'
+          && (u.role === 'SUBJECT_EXPERT'
+              || (isCoachingWorkspace && u.role === 'CA'))),
       )
     } catch {
       setAvailableSEs([])
