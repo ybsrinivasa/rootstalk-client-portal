@@ -634,8 +634,13 @@ export default function PackageDetailPage() {
 
   const loadParameters = async (cropCoshId: string) => {
     if (!clientId) return
+    // 2026-11-03 — pass package_id so the backend hides INACTIVE
+    // custom parameters UNLESS they are already in this package's
+    // signature. Without this, a deactivated custom parameter kept
+    // showing up in every new package (first-cohort CM feedback).
     const { data } = await api.get<ClientParameter[]>(
-      `/client/${clientId}/parameters?crop_cosh_id=${encodeURIComponent(cropCoshId)}`,
+      `/client/${clientId}/parameters?crop_cosh_id=${encodeURIComponent(cropCoshId)}`
+      + `&package_id=${encodeURIComponent(packageId as string)}`,
     )
     setParameters(data)
     const map: Record<string, ClientVariable[]> = {}
