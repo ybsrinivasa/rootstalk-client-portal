@@ -347,6 +347,16 @@ export default function PackageDetailPage() {
   const [newVarForParamId, setNewVarForParamId] = useState<string | null>(null)
   const [newVarName, setNewVarName] = useState('')
   const [pvSaveError, setPvSaveError] = useState('')
+  // 2026-11-03 — list of packages blocking a variable delete, surfaced
+  // under pvSaveError with status badges so the SE sees exactly which
+  // signatures to clear first. Auto-cleared whenever pvSaveError goes
+  // empty, so stale blocking info can't leak into unrelated errors.
+  const [pvBlockingPackages, setPvBlockingPackages] = useState<Array<{
+    id: string; name: string; status: 'DRAFT' | 'ACTIVE' | 'INACTIVE'
+  }>>([])
+  useEffect(() => {
+    if (!pvSaveError) setPvBlockingPackages([])
+  }, [pvSaveError])
   const [creatingParam, setCreatingParam] = useState(false)
   const [paramDraft, setParamDraft] = useState<{ name: string; variables: string[] }>({
     name: '', variables: ['', ''],
@@ -714,12 +724,31 @@ export default function PackageDetailPage() {
   async function handleDeleteVariable(paramId: string, varId: string, varName: string) {
     if (!pkg || !clientId) return
     if (!confirm(`Delete variable "${varName}"?`)) return
-    setPvSaveError('')
+    setPvSaveError(''); setPvBlockingPackages([])
     try {
       await api.delete(`/client/${clientId}/parameters/${paramId}/variables/${varId}`)
       await loadParameters(pkg.crop_cosh_id)
     } catch (err: unknown) {
       setPvSaveError(extractErrorMessage(err, 'Failed to delete variable.'))
+      // 2026-11-03 — if the backend returned a structured
+      // "variable_in_use" error, list the blocking packages with
+      // their status so the SE knows exactly where to clear the
+      // signature. Already-subscribed farmers' "For Your Situation"
+      // screen reads live PackageVariable rows, so pulling a variable
+      // out from under an ACTIVE/INACTIVE package silently gaps their
+      // variant display.
+      const detail = (err as {
+        response?: { data?: { detail?: {
+          code?: string
+          packages?: Array<{ id: string; name: string; status: string }>
+        } } }
+      })?.response?.data?.detail
+      if (detail?.code === 'variable_in_use' && Array.isArray(detail.packages)) {
+        setPvBlockingPackages(detail.packages.map(p => ({
+          id: p.id, name: p.name,
+          status: (p.status as 'DRAFT' | 'ACTIVE' | 'INACTIVE'),
+        })))
+      }
     }
   }
 
@@ -2266,7 +2295,27 @@ export default function PackageDetailPage() {
                 )}
               </div>
 
-              {pvSaveError && <p className="text-xs text-red-600">{pvSaveError}</p>}
+              {pvSaveError && (
+                <div className="text-xs text-red-600">
+                  <p>{pvSaveError}</p>
+                  {pvBlockingPackages.length > 0 && (
+                    <ul className="mt-1.5 space-y-1">
+                      {pvBlockingPackages.map(p => (
+                        <li key={p.id} className="flex items-center gap-2">
+                          <span>• {p.name}</span>
+                          <span className={
+                            p.status === 'ACTIVE' ? 'inline-block text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold'
+                            : p.status === 'DRAFT' ? 'inline-block text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold'
+                            : 'inline-block text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold'
+                          }>
+                            {p.status}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="p-4 border-t border-slate-100 flex justify-end">
