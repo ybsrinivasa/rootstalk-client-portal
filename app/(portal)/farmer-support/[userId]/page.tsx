@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import api from '@/lib/api'
-import { getClient } from '@/lib/auth'
+import { getClient, getUser, hasPortalRole } from '@/lib/auth'
 
 
 interface FarmerHeader {
@@ -101,6 +101,20 @@ interface InputsPayload {
   due_now: InputRow[]
   all: InputRow[]
 }
+interface CallLogEntry {
+  id: string
+  call_type: 'OUTBOUND' | 'INBOUND'
+  call_at: string | null
+  logged_by_user_id: string
+  logged_by_name: string | null
+  created_at: string | null
+}
+interface CallLogPayload {
+  total: number
+  outbound_count: number
+  inbound_count: number
+  rows: CallLogEntry[]
+}
 
 
 const INPUT_STATUS_META: Record<InputRow['status'], { label: string; cls: string }> = {
@@ -151,6 +165,17 @@ export default function FarmerSupportDetailPage() {
   const clientId = client?.id
   const userId = params?.userId
 
+  // 2026-11-10 Phase 4 — gate the "Log a Call" button to users who
+  // can actually log. Backend 403s anyone else; we hide the button so
+  // CAs (who can VIEW the log) aren't tempted by a control that will
+  // only error. `is_cm_for_this_client` covers CM-EDIT SSO users;
+  // CLIENT_RM covers the primary audience.
+  const currentUser = getUser()
+  const canLog = !!(
+    currentUser?.is_cm_for_this_client
+    || hasPortalRole(currentUser, 'CLIENT_RM')
+  )
+
   const [header, setHeader] = useState<FarmerHeader | null>(null)
   const [subs, setSubs] = useState<SubscriptionRow[]>([])
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null)
@@ -163,6 +188,19 @@ export default function FarmerSupportDetailPage() {
   const [queries, setQueries] = useState<QueryRow[]>([])
   const [inputs, setInputs] = useState<InputsPayload>({ due_now: [], all: [] })
   const [subLoading, setSubLoading] = useState(false)
+
+  // Call log is per-FARMER not per-subscription, so it loads at the
+  // farmer level and survives subscription-tab switching.
+  const [callLog, setCallLog] = useState<CallLogPayload>({
+    total: 0, outbound_count: 0, inbound_count: 0, rows: [],
+  })
+  const [callLogLoading, setCallLogLoading] = useState(true)
+  const [logOpen, setLogOpen] = useState(false)
+  const [logType, setLogType] = useState<'OUTBOUND' | 'INBOUND'>('OUTBOUND')
+  const [logDate, setLogDate] = useState<string>('')  // YYYY-MM-DD
+  const [logTime, setLogTime] = useState<string>('')  // HH:mm
+  const [logBusy, setLogBusy] = useState(false)
+  const [logErr, setLogErr] = useState<string | null>(null)
 
   useEffect(() => {
     if (!clientId || !userId) return
@@ -201,6 +239,54 @@ export default function FarmerSupportDetailPage() {
   useEffect(() => {
     if (selectedSubId) loadSubDetails(selectedSubId)
   }, [selectedSubId, loadSubDetails])
+
+  const loadCallLog = useCallback(async () => {
+    if (!clientId || !userId) return
+    setCallLogLoading(true)
+    try {
+      const { data } = await api.get<CallLogPayload>(
+        `/client/${clientId}/farmer-support/farmers/${userId}/call-log`,
+      )
+      setCallLog(data)
+    } catch {
+      // Keep whatever we had; log stays empty on first load failure.
+    } finally { setCallLogLoading(false) }
+  }, [clientId, userId])
+
+  useEffect(() => { loadCallLog() }, [loadCallLog])
+
+  function openLogModal() {
+    // Default date/time = now (local) so the common case is a one-tap
+    // save. Retrospective entries override before submit.
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    setLogDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`)
+    setLogTime(`${pad(now.getHours())}:${pad(now.getMinutes())}`)
+    setLogType('OUTBOUND')
+    setLogErr(null)
+    setLogOpen(true)
+  }
+
+  async function submitLog() {
+    if (!clientId || !userId) return
+    setLogBusy(true); setLogErr(null)
+    try {
+      // Combine the date + time inputs into a local ISO string;
+      // backend normalises to UTC.
+      const callAt = logDate && logTime ? `${logDate}T${logTime}:00` : undefined
+      await api.post(
+        `/client/${clientId}/farmer-support/farmers/${userId}/call-log`,
+        { call_type: logType, call_at: callAt },
+      )
+      setLogOpen(false)
+      await loadCallLog()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: { message?: string } | string } } }
+      const detail = err?.response?.data?.detail
+      const msg = typeof detail === 'object' ? detail?.message : (detail as string)
+      setLogErr(msg || 'Could not log the call.')
+    } finally { setLogBusy(false) }
+  }
 
   const selectedSub = useMemo(
     () => subs.find(s => s.subscription_id === selectedSubId) || null,
@@ -486,19 +572,124 @@ export default function FarmerSupportDetailPage() {
                 )}
               </section>
 
-              {/* Section 4.6: Call Log (Phase 4 stub) */}
-              <section className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-center">
-                <h2 className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Call log
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Coming in Phase 4 — a chronological log of outbound / inbound calls
-                  the RM has made with this farmer.
+              {/* Section 4.6: Call Log — per-farmer, not per-sub, so
+                  it's rendered once at the bottom of the detail stack
+                  regardless of which subscription tab is active. */}
+              <section className="bg-white border border-slate-200 rounded-xl p-5">
+                <div className="flex items-start justify-between flex-wrap gap-2 mb-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                      Call log
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {callLog.total === 0
+                        ? 'No calls logged yet with this farmer.'
+                        : `${callLog.total} call${callLog.total === 1 ? '' : 's'} recorded — ${callLog.outbound_count} outbound · ${callLog.inbound_count} inbound`}
+                    </p>
+                  </div>
+                  {canLog && (
+                    <button onClick={openLogModal}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
+                      + Log a call
+                    </button>
+                  )}
+                </div>
+                {callLogLoading ? (
+                  <p className="text-xs text-slate-400">Loading…</p>
+                ) : callLog.rows.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">
+                    {canLog
+                      ? 'Tap "Log a call" after your next conversation with this farmer.'
+                      : 'Only the Relationship Manager role can add entries here.'}
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {callLog.rows.map(c => (
+                      <li key={c.id} className="py-2 text-xs flex items-center gap-2 flex-wrap">
+                        <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                          c.call_type === 'OUTBOUND'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {c.call_type === 'OUTBOUND' ? 'Outbound' : 'Inbound'}
+                        </span>
+                        <span className="text-slate-700">{fmtDateTime(c.call_at)}</span>
+                        <span className="text-slate-500">· Logged by {c.logged_by_name || '—'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-[10px] text-slate-400 mt-3 italic">
+                  Log entries are permanent — they can&apos;t be edited or deleted. Keeps the contact
+                  history reliable across RM handoffs.
                 </p>
               </section>
             </div>
           )}
         </>
+      )}
+
+      {/* "Log a call" modal — rendered outside the sub-details so it
+          stays open across tab switches. */}
+      {logOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={() => !logBusy && setLogOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5"
+            onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-slate-900 mb-1">Log a call</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              With {header.name || 'this farmer'}. Logged by{' '}
+              <strong className="text-slate-700">{currentUser?.name || '—'}</strong>.
+            </p>
+
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Call type</label>
+            <div className="flex gap-2 mb-3">
+              {(['OUTBOUND', 'INBOUND'] as const).map(t => (
+                <button key={t} onClick={() => setLogType(t)}
+                  className={`flex-1 text-xs py-2 rounded-lg border-2 font-semibold ${
+                    logType === t
+                      ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 text-slate-600 hover:border-slate-400'
+                  }`}>
+                  {t === 'OUTBOUND' ? 'I called the farmer (Outbound)' : 'Farmer called me (Inbound)'}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Date</label>
+                <input type="date" value={logDate}
+                  onChange={e => setLogDate(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Time</label>
+                <input type="time" value={logTime}
+                  onChange={e => setLogTime(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+
+            {logErr && (
+              <p className="text-xs text-red-600 mb-3">{logErr}</p>
+            )}
+
+            <div className="flex gap-2">
+              <button onClick={() => setLogOpen(false)} disabled={logBusy}
+                className="flex-1 text-sm py-2 rounded-lg border border-slate-300 text-slate-700 disabled:opacity-50">
+                Cancel
+              </button>
+              <button onClick={submitLog} disabled={logBusy || !logDate || !logTime}
+                className="flex-1 text-sm py-2 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-50">
+                {logBusy ? 'Saving…' : 'Save log'}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-3 italic">
+              Permanent — this entry can&apos;t be edited or deleted after saving.
+            </p>
+          </div>
+        </div>
       )}
 
       <p className="text-[11px] text-slate-400 mt-6 text-center">
