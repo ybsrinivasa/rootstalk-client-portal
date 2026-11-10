@@ -40,6 +40,8 @@ interface FarmersPage {
 }
 interface BaseAlertRow {
   subscription_id: string
+  farmer_user_id: string  // 2026-11-10 Phase 3 — added backend-side so
+                          // per-row badge match is a hard id-match.
   farmer_name: string | null
   farmer_phone: string | null
   state_cosh_id: string | null
@@ -222,12 +224,11 @@ export default function FarmerSupportPage() {
     NO_ACTIVE_SUBSCRIPTION: noActiveSubs,
   }
   const alertFarmerIdsByType = useMemo(() => {
-    // Alert endpoints return subscription-centric rows. Need user_ids
-    // via the subscription_id column… but the design shape doesn't
-    // currently carry the farmer_user_id. Fall back to matching on
-    // farmer_name + farmer_phone (unique-enough for practical use).
-    // v2: add farmer_user_id to the alert row shape (Phase 1 backend
-    // extension) to avoid this soft match.
+    // 2026-11-10 Phase 3 — alert endpoints now surface
+    // farmer_user_id, so the per-row badge match is a hard id-match.
+    // (The Phase 2 original matched on name+phone; soft-but-adequate
+    // for the sample size we had, but id is the obviously-correct
+    // key now that it's available.)
     const out: Record<AlertType, Set<string>> = {
       MISSING_START_DATE: new Set(),
       OVERDUE_INPUT: new Set(),
@@ -235,11 +236,9 @@ export default function FarmerSupportPage() {
       OVERDUE_EXPERT_QUERY: new Set(),
       NO_ACTIVE_SUBSCRIPTION: new Set(),
     }
-    const keyFor = (name: string | null, phone: string | null) =>
-      `${(name || '').toLowerCase()}|${(phone || '').trim()}`
     for (const t of Object.keys(alertRowsByType) as AlertType[]) {
       for (const r of alertRowsByType[t]) {
-        out[t].add(keyFor(r.farmer_name, r.farmer_phone))
+        if (r.farmer_user_id) out[t].add(r.farmer_user_id)
       }
     }
     return out
@@ -249,16 +248,13 @@ export default function FarmerSupportPage() {
   const visibleRows = useMemo(() => {
     if (!alertType) return farmers.rows
     const allowed = alertFarmerIdsByType[alertType]
-    return farmers.rows.filter(r =>
-      allowed.has(`${(r.name || '').toLowerCase()}|${(r.phone || '').trim()}`),
-    )
+    return farmers.rows.filter(r => allowed.has(r.user_id))
   }, [farmers.rows, alertType, alertFarmerIdsByType])
 
   // Per-row alert tags for badge rendering.
   const rowAlerts = useCallback((r: FarmerRow): AlertType[] => {
-    const key = `${(r.name || '').toLowerCase()}|${(r.phone || '').trim()}`
     return (Object.keys(alertFarmerIdsByType) as AlertType[])
-      .filter(t => alertFarmerIdsByType[t].has(key))
+      .filter(t => alertFarmerIdsByType[t].has(r.user_id))
   }, [alertFarmerIdsByType])
 
   function clearFilters() {
