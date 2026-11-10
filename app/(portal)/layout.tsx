@@ -195,6 +195,10 @@ const ALL_NAV: NavItem[] = [
   // Package go-live).
   { href: '/soil-nutrient/mock', label: 'Soil Nutrient Mock', Icon: IconCustomParams, group: 'CONTENT', soilNutrientModule: true },
   { href: '/field-manager',      label: 'Field Manager',     Icon: IconFieldManager, group: 'FIELD' },
+  // 2026-11-10 — Farmer Support View. Superset of /alerts; adds
+  // full farmer list + 360° view + call log. /alerts stays live for
+  // now (deprecated in Phase 5 once Farmer Support is battle-tested).
+  { href: '/farmer-support',     label: 'Farmer Support',    Icon: IconAlerts,       group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
   { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA', manufacturerOrSeedOnly: true },
@@ -230,12 +234,12 @@ const ROLE_NAV: Record<string, string[]> = {
   // error surfacing.
   SUBJECT_EXPERT:   ['/dashboard', '/cca/crops', '/cha/problems', '/cha/sp/crops', '/qa/crops', '/custom-parameters', '/soil-nutrient/products', '/soil-nutrient/soil-range-templates', '/soil-nutrient/mock', '/seed'],
   FIELD_MANAGER:    ['/dashboard', '/field-manager'],
-  // CLIENT_RM scoped to Alerts (2026-07-20 user direction). Previously
-  // also had /field-manager access; the backend gate
-  // _assert_ca_or_field_manager now rejects CLIENT_RM on those
-  // endpoints, so keeping the sidebar link would produce a 403 on
-  // every click. Alerts is the RM's whole surface.
-  CLIENT_RM:        ['/dashboard', '/alerts'],
+  // CLIENT_RM gets Alerts + Farmer Support (2026-11-10). Farmer
+  // Support is the richer CRM-style home for the role; Alerts stays
+  // temporarily for backwards compatibility until Phase 5 deprecates
+  // it. CLIENT_RM still cannot see /field-manager (backend gate
+  // _assert_ca_or_field_manager rejects the role).
+  CLIENT_RM:        ['/dashboard', '/alerts', '/farmer-support'],
   // Legacy: pre Batch X migration, SDM was its own role. Kept here
   // for any straggler accounts; safe no-op now.
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
