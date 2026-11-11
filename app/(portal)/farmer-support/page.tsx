@@ -24,7 +24,13 @@ interface FarmerRow {
   name: string | null
   phone: string | null
   state_cosh_id: string | null
+  // 2026-11-11 — backend now resolves state/district names (first-cohort
+  // RM reported seeing truncated cosh_ids like "3b9f56d0…" in the
+  // dropdowns). sub_district stays cosh_id-only; the list filter UI
+  // doesn't surface it.
+  state_name: string | null
   district_cosh_id: string | null
+  district_name: string | null
   sub_district_cosh_id: string | null
   latest_subscription_id: string | null
   latest_subscription_status: string | null
@@ -137,19 +143,24 @@ export default function FarmerSupportPage() {
   // Derived state/district options from the loaded farmer rows so the
   // RM doesn't wade through every geography we support. Same pattern
   // the existing /alerts page uses.
+  // Keep (cosh_id, name) pairs so the <option value> stays the id we
+  // POST back to the backend, but the LABEL is the human-readable name
+  // the RM actually recognises.
   const stateOptions = useMemo(() => {
-    const seen = new Set<string>()
-    farmers.rows.forEach(r => { if (r.state_cosh_id) seen.add(r.state_cosh_id) })
-    return Array.from(seen)
+    const seen = new Map<string, string>()
+    farmers.rows.forEach(r => {
+      if (r.state_cosh_id) seen.set(r.state_cosh_id, r.state_name || r.state_cosh_id)
+    })
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]))
   }, [farmers.rows])
   const districtOptions = useMemo(() => {
-    const seen = new Set<string>()
+    const seen = new Map<string, string>()
     farmers.rows.forEach(r => {
       if (!r.district_cosh_id) return
       if (stateFilter && r.state_cosh_id !== stateFilter) return
-      seen.add(r.district_cosh_id)
+      seen.set(r.district_cosh_id, r.district_name || r.district_cosh_id)
     })
-    return Array.from(seen)
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]))
   }, [farmers.rows, stateFilter])
 
   const loadAlerts = useCallback(async () => {
@@ -336,14 +347,14 @@ export default function FarmerSupportPage() {
             onChange={e => { setStateFilter(e.target.value); setDistrictFilter('') }}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
             <option value="">All states</option>
-            {stateOptions.map(s => <option key={s} value={s}>{s.slice(0, 8)}…</option>)}
+            {stateOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
           <select value={districtFilter}
             onChange={e => setDistrictFilter(e.target.value)}
             disabled={!stateFilter && districtOptions.length === 0}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50">
             <option value="">All districts</option>
-            {districtOptions.map(d => <option key={d} value={d}>{d.slice(0, 8)}…</option>)}
+            {districtOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
           <input value={startFrom} onChange={e => setStartFrom(e.target.value)}
             type="date" placeholder="Start date from"
