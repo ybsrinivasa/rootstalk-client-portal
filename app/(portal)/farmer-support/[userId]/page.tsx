@@ -560,17 +560,39 @@ export default function FarmerSupportDetailPage() {
                   <p className="text-xs text-slate-400 italic">No diagnoses raised on this subscription.</p>
                 ) : (
                   <ul className="space-y-2">
-                    {diagnoses.map(d => (
-                      <li key={d.session_id} className="border-l-2 border-slate-200 pl-3 text-xs">
-                        <p className="text-slate-500">{fmtDate(d.created_at)}</p>
-                        <p className="font-medium text-slate-800">
-                          {d.diagnosed_problem_name || <span className="text-slate-400">(unresolved)</span>}
-                        </p>
-                        {d.plant_part_name && (
-                          <p className="text-slate-500">Observed on: {d.plant_part_name}</p>
-                        )}
-                      </li>
-                    ))}
+                    {diagnoses.map(d => {
+                      // 2026-11-11 — OUTSIDE_LIST = farmer completed
+                      // the flow but the catalog had no match → got
+                      // pointed at the expert path. Call it out so
+                      // the RM knows this is a "needs follow-up"
+                      // signal, not a resolved diagnosis.
+                      const isOutside = d.status === 'OUTSIDE_LIST'
+                      return (
+                        <li key={d.session_id}
+                          className={`border-l-4 pl-3 text-xs ${
+                            isOutside ? 'border-amber-400' : 'border-slate-200'
+                          }`}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-slate-500">{fmtDate(d.created_at)}</p>
+                            {isOutside && (
+                              <span className="inline-block text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-100 text-amber-800">
+                                Outside catalogue · expert needed
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-medium text-slate-800 mt-0.5">
+                            {d.diagnosed_problem_name || (
+                              isOutside
+                                ? <span className="text-slate-500 italic">Problem not in RootsTalk catalogue — farmer was shown the expert path</span>
+                                : <span className="text-slate-400">(unresolved)</span>
+                            )}
+                          </p>
+                          {d.plant_part_name && (
+                            <p className="text-slate-500">Observed on: {d.plant_part_name}</p>
+                          )}
+                        </li>
+                      )
+                    })}
                   </ul>
                 )}
               </section>
