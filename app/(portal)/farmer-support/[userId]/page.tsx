@@ -47,6 +47,21 @@ interface SubscriptionRow {
   promoter_name: string | null
   farm_area_acres: number | null
   number_of_plants: number | null
+  // 2026-11-12 — tab badges + follow-up strip.
+  diagnoses_count: number
+  unanswered_queries_count: number
+  alert_receiver: {
+    user_id: string
+    name: string | null
+    phone: string | null
+    gps_lat: number | null
+    gps_lng: number | null
+  } | null
+  promoter_pundit: {
+    user_id: string
+    name: string | null
+    phone: string | null
+  } | null
 }
 interface PracticeRow {
   practice_id: string
@@ -400,6 +415,8 @@ export default function FarmerSupportDetailPage() {
           <div className="flex gap-2 mb-4 flex-wrap">
             {subs.map(s => {
               const active = s.subscription_id === selectedSubId
+              const diagN = s.diagnoses_count || 0
+              const qN = s.unanswered_queries_count || 0
               return (
                 <button key={s.subscription_id}
                   onClick={() => setSelectedSubId(s.subscription_id)}
@@ -415,10 +432,85 @@ export default function FarmerSupportDetailPage() {
                   <p className={`text-[11px] ${active ? 'text-slate-200' : 'text-slate-500'}`}>
                     {s.package_name || '—'} · Start {fmtDate(s.crop_start_date)}
                   </p>
+                  {/* Activity badges — hint at what's inside before the RM clicks. */}
+                  {(diagN > 0 || qN > 0) && (
+                    <p className="mt-1 flex gap-1 flex-wrap">
+                      {diagN > 0 && (
+                        <span className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] font-semibold ${
+                          active ? 'bg-slate-700 text-amber-200' : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          D: {diagN}
+                        </span>
+                      )}
+                      {qN > 0 && (
+                        <span className={`inline-flex items-center rounded-full px-2 py-[1px] text-[10px] font-semibold ${
+                          active ? 'bg-slate-700 text-rose-200' : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          Q: {qN}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  <p className={`mt-1 font-mono text-[10px] ${active ? 'text-slate-400' : 'text-slate-400'}`}>
+                    ID {s.subscription_id.slice(0, 8)}
+                  </p>
                 </button>
               )
             })}
           </div>
+
+          {/* Who follows up — alert receiver + Promoter-Pundit for the
+              active sub. Each receiver's spatial coords are clickable
+              (Google Maps) so the RM can locate them vs. the farmer. */}
+          {selectedSub && (selectedSub.alert_receiver || selectedSub.promoter_pundit) && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap items-start gap-x-6 gap-y-2 text-xs">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold w-full">
+                Who follows up
+              </p>
+              {selectedSub.alert_receiver && (
+                <div>
+                  <p className="text-[10px] text-slate-500">Alert receiver</p>
+                  <p className="font-semibold text-slate-800">
+                    {selectedSub.alert_receiver.name || '—'}
+                    {selectedSub.alert_receiver.phone && (
+                      <>
+                        {' · '}
+                        <a href={`tel:${selectedSub.alert_receiver.phone}`}
+                           className="text-blue-700 hover:underline">
+                          {selectedSub.alert_receiver.phone}
+                        </a>
+                      </>
+                    )}
+                  </p>
+                  {selectedSub.alert_receiver.gps_lat != null && selectedSub.alert_receiver.gps_lng != null && (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${selectedSub.alert_receiver.gps_lat},${selectedSub.alert_receiver.gps_lng}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="text-[11px] text-blue-700 hover:underline font-mono">
+                      📍 {selectedSub.alert_receiver.gps_lat.toFixed(5)}, {selectedSub.alert_receiver.gps_lng.toFixed(5)}
+                    </a>
+                  )}
+                </div>
+              )}
+              {selectedSub.promoter_pundit && (
+                <div>
+                  <p className="text-[10px] text-slate-500">Promoter-Pundit</p>
+                  <p className="font-semibold text-slate-800">
+                    {selectedSub.promoter_pundit.name || '—'}
+                    {selectedSub.promoter_pundit.phone && (
+                      <>
+                        {' · '}
+                        <a href={`tel:${selectedSub.promoter_pundit.phone}`}
+                           className="text-blue-700 hover:underline">
+                          {selectedSub.promoter_pundit.phone}
+                        </a>
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Selected subscription detail */}
           {selectedSub && (
