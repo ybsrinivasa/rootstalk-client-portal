@@ -241,22 +241,39 @@ export default function FarmerSupportDetailPage() {
       .finally(() => setLoading(false))
   }, [clientId, userId])
 
+  // 2026-11-11 — per-section error state so a 500 on any of the four
+  // per-sub endpoints surfaces instead of silently rendering "empty".
+  // Earlier .catch(() => ({data: []})) made a backend crash look
+  // indistinguishable from a legitimately-empty section.
+  const [practicesErr, setPracticesErr] = useState<string | null>(null)
+  const [diagnosesErr, setDiagnosesErr] = useState<string | null>(null)
+  const [queriesErr, setQueriesErr] = useState<string | null>(null)
+  const [inputsErr, setInputsErr] = useState<string | null>(null)
+
   const loadSubDetails = useCallback(async (subId: string) => {
     if (!clientId || !userId) return
     setSubLoading(true)
+    setPracticesErr(null); setDiagnosesErr(null); setQueriesErr(null); setInputsErr(null)
     const base = `/client/${clientId}/farmer-support/farmers/${userId}/subscriptions/${subId}`
-    try {
-      const [p, d, q, i] = await Promise.all([
-        api.get<PracticeRow[]>(`${base}/practices`).catch(() => ({ data: [] })),
-        api.get<DiagnosisRow[]>(`${base}/diagnoses`).catch(() => ({ data: [] })),
-        api.get<QueryRow[]>(`${base}/queries`).catch(() => ({ data: [] })),
-        api.get<InputsPayload>(`${base}/inputs`).catch(() => ({ data: { due_now: [], all: [] } })),
-      ])
-      setPractices(p.data as PracticeRow[])
-      setDiagnoses(d.data as DiagnosisRow[])
-      setQueries(q.data as QueryRow[])
-      setInputs(i.data as InputsPayload)
-    } finally { setSubLoading(false) }
+    const extract = (e: unknown): string => {
+      const err = e as { response?: { status?: number; data?: { detail?: string | { message?: string } } }; message?: string }
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail
+      const detailMsg = typeof detail === 'object' ? detail?.message : (detail as string)
+      if (status) return `Backend ${status}: ${detailMsg || err.message || 'unknown error'}`
+      return `Network error: ${err?.message || 'could not reach the backend'}`
+    }
+    const [pRes, dRes, qRes, iRes] = await Promise.allSettled([
+      api.get<PracticeRow[]>(`${base}/practices`),
+      api.get<DiagnosisRow[]>(`${base}/diagnoses`),
+      api.get<QueryRow[]>(`${base}/queries`),
+      api.get<InputsPayload>(`${base}/inputs`),
+    ])
+    if (pRes.status === 'fulfilled') setPractices(pRes.value.data); else { setPractices([]); setPracticesErr(extract(pRes.reason)) }
+    if (dRes.status === 'fulfilled') setDiagnoses(dRes.value.data); else { setDiagnoses([]); setDiagnosesErr(extract(dRes.reason)) }
+    if (qRes.status === 'fulfilled') setQueries(qRes.value.data); else { setQueries([]); setQueriesErr(extract(qRes.reason)) }
+    if (iRes.status === 'fulfilled') setInputs(iRes.value.data); else { setInputs({ due_now: [], all: [] }); setInputsErr(extract(iRes.reason)) }
+    setSubLoading(false)
   }, [clientId, userId])
 
   useEffect(() => {
@@ -413,6 +430,8 @@ export default function FarmerSupportDetailPage() {
                 </h2>
                 {subLoading ? (
                   <p className="text-xs text-slate-400">Loading…</p>
+                ) : inputsErr ? (
+                  <p className="text-xs text-red-600">{inputsErr}</p>
                 ) : (
                   <>
                     {inputs.due_now.length > 0 && (
@@ -486,6 +505,8 @@ export default function FarmerSupportDetailPage() {
                 </h2>
                 {subLoading ? (
                   <p className="text-xs text-slate-400">Loading…</p>
+                ) : practicesErr ? (
+                  <p className="text-xs text-red-600">{practicesErr}</p>
                 ) : practices.length === 0 ? (
                   <p className="text-xs text-slate-400 italic">No practices on this subscription.</p>
                 ) : (
@@ -533,6 +554,8 @@ export default function FarmerSupportDetailPage() {
                 </h2>
                 {subLoading ? (
                   <p className="text-xs text-slate-400">Loading…</p>
+                ) : diagnosesErr ? (
+                  <p className="text-xs text-red-600">{diagnosesErr}</p>
                 ) : diagnoses.length === 0 ? (
                   <p className="text-xs text-slate-400 italic">No diagnoses raised on this subscription.</p>
                 ) : (
@@ -559,6 +582,8 @@ export default function FarmerSupportDetailPage() {
                 </h2>
                 {subLoading ? (
                   <p className="text-xs text-slate-400">Loading…</p>
+                ) : queriesErr ? (
+                  <p className="text-xs text-red-600">{queriesErr}</p>
                 ) : queries.length === 0 ? (
                   <p className="text-xs text-slate-400 italic">No expert queries on this subscription.</p>
                 ) : (
