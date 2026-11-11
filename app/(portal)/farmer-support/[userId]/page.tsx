@@ -214,7 +214,30 @@ export default function FarmerSupportDetailPage() {
         setSubs(s.data)
         setSelectedSubId(prev => prev || s.data[0]?.subscription_id || null)
       })
-      .catch(() => setError('Could not load this farmer. They may not be subscribed with your company.'))
+      .catch((e: unknown) => {
+        // 2026-11-11 — surface the backend status + detail so we can
+        // tell 404 (gate) apart from 500 (handler crash) apart from
+        // network issues. Earlier generic message was useless when
+        // the user reported "farmer IS subscribed but I see 'may not
+        // be subscribed'" — need signal, not a fallback.
+        const err = e as {
+          response?: {
+            status?: number
+            data?: { detail?: string | { message?: string } }
+          }
+          message?: string
+        }
+        const status = err?.response?.status
+        const detail = err?.response?.data?.detail
+        const detailMsg = typeof detail === 'object' ? detail?.message : (detail as string)
+        if (status === 404) {
+          setError(`Backend 404: ${detailMsg || 'Farmer not found'} (farmer_user_id ${userId}). If this farmer DOES have subscriptions with your company, the client_id on the subscription row may differ from the one your session is bound to — ask ops to check.`)
+        } else if (status) {
+          setError(`Backend ${status}: ${detailMsg || err.message || 'unknown error'}`)
+        } else {
+          setError(`Network error: ${err?.message || 'could not reach the backend'}`)
+        }
+      })
       .finally(() => setLoading(false))
   }, [clientId, userId])
 
