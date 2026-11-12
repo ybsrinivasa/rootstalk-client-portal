@@ -20,9 +20,29 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { useParams } from 'next/navigation'
 import api from '@/lib/api'
 import { getClient, getUser, hasPortalRole } from '@/lib/auth'
+import type {
+  FarmerPin, FacilitatorPin,
+} from '@/components/farmer-support/FacilitatorMap'
+
+// Leaflet touches `window`; ssr:false keeps it out of the server bundle.
+const FacilitatorMap = dynamic(
+  () => import('@/components/farmer-support/FacilitatorMap'),
+  { ssr: false, loading: () => (
+    <div className="w-full h-72 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-xs text-slate-400">
+      Loading map…
+    </div>
+  ) },
+)
+
+interface NearbyPayload {
+  farmer: FarmerPin | { user_id: string; name: string | null; phone: string | null; gps_lat: null; gps_lng: null }
+  facilitators: FacilitatorPin[]
+  reason: string | null
+}
 
 
 interface FarmerHeader {
@@ -210,6 +230,15 @@ export default function FarmerSupportDetailPage() {
     total: 0, outbound_count: 0, inbound_count: 0, rows: [],
   })
   const [callLogLoading, setCallLogLoading] = useState(true)
+
+  // Map of farmer + nearby facilitators — lazy-loaded per sub when
+  // the RM asks for it. Payload is cached by subscription_id so
+  // toggling the map off/on doesn't refetch; switching subs resets.
+  const [mapBySub, setMapBySub] = useState<Record<string, NearbyPayload>>({})
+  const [mapOpenSubId, setMapOpenSubId] = useState<string | null>(null)
+  const [mapLoadingSubId, setMapLoadingSubId] = useState<string | null>(null)
+  const [mapErr, setMapErr] = useState<string | null>(null)
+
   const [logOpen, setLogOpen] = useState(false)
   const [logType, setLogType] = useState<'OUTBOUND' | 'INBOUND'>('OUTBOUND')
   const [logDate, setLogDate] = useState<string>('')  // YYYY-MM-DD
@@ -294,6 +323,35 @@ export default function FarmerSupportDetailPage() {
   useEffect(() => {
     if (selectedSubId) loadSubDetails(selectedSubId)
   }, [selectedSubId, loadSubDetails])
+
+  // Switching subs collapses any open map so the RM doesn't see a
+  // stale pin cluster next to a different sub's "Who follows up".
+  useEffect(() => {
+    setMapOpenSubId(prev => (prev && prev !== selectedSubId ? null : prev))
+  }, [selectedSubId])
+
+  const toggleMap = useCallback(async (subId: string) => {
+    setMapErr(null)
+    if (mapOpenSubId === subId) {
+      setMapOpenSubId(null)
+      return
+    }
+    setMapOpenSubId(subId)
+    if (mapBySub[subId]) return  // cached
+    if (!clientId || !userId) return
+    setMapLoadingSubId(subId)
+    try {
+      const { data } = await api.get<NearbyPayload>(
+        `/client/${clientId}/farmer-support/farmers/${userId}/subscriptions/${subId}/nearby-facilitators`,
+      )
+      setMapBySub(prev => ({ ...prev, [subId]: data }))
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      setMapErr(err?.response?.data?.detail || err?.message || 'Failed to load map data.')
+    } finally {
+      setMapLoadingSubId(null)
+    }
+  }, [clientId, userId, mapOpenSubId, mapBySub])
 
   const loadCallLog = useCallback(async () => {
     if (!clientId || !userId) return
@@ -460,57 +518,116 @@ export default function FarmerSupportDetailPage() {
           </div>
 
           {/* Who follows up — alert receiver + Promoter-Pundit for the
-              active sub. Each receiver's spatial coords are clickable
-              (Google Maps) so the RM can locate them vs. the farmer. */}
-          {selectedSub && (selectedSub.alert_receiver || selectedSub.promoter_pundit) && (
-            <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap items-start gap-x-6 gap-y-2 text-xs">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold w-full">
-                Who follows up
-              </p>
-              {selectedSub.alert_receiver && (
-                <div>
-                  <p className="text-[10px] text-slate-500">Alert receiver</p>
-                  <p className="font-semibold text-slate-800">
-                    {selectedSub.alert_receiver.name || '—'}
-                    {selectedSub.alert_receiver.phone && (
-                      <>
-                        {' · '}
-                        <a href={`tel:${selectedSub.alert_receiver.phone}`}
-                           className="text-blue-700 hover:underline">
-                          {selectedSub.alert_receiver.phone}
-                        </a>
-                      </>
-                    )}
+              active sub, with a toggleable mini-map that plots the
+              farmer (red) + current alert receiver (blue) + other
+              onboarded facilitators (grey/purple/teal by role) so
+              the RM can judge relative distance before calling. */}
+          {selectedSub && (selectedSub.alert_receiver || selectedSub.promoter_pundit) && (() => {
+            const mapOpen = mapOpenSubId === selectedSub.subscription_id
+            const mapLoading = mapLoadingSubId === selectedSub.subscription_id
+            const mapData = mapBySub[selectedSub.subscription_id]
+            return (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 mb-4 text-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                    Who follows up
                   </p>
-                  {selectedSub.alert_receiver.gps_lat != null && selectedSub.alert_receiver.gps_lng != null && (
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${selectedSub.alert_receiver.gps_lat},${selectedSub.alert_receiver.gps_lng}`}
-                      target="_blank" rel="noopener noreferrer"
-                      className="text-[11px] text-blue-700 hover:underline font-mono">
-                      📍 {selectedSub.alert_receiver.gps_lat.toFixed(5)}, {selectedSub.alert_receiver.gps_lng.toFixed(5)}
-                    </a>
+                  <button
+                    type="button"
+                    onClick={() => toggleMap(selectedSub.subscription_id)}
+                    className="text-[11px] text-blue-700 hover:text-blue-900 hover:underline font-semibold">
+                    {mapOpen ? 'Hide map' : 'Show map'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
+                  {selectedSub.alert_receiver && (
+                    <div>
+                      <p className="text-[10px] text-slate-500">Alert receiver</p>
+                      <p className="font-semibold text-slate-800">
+                        {selectedSub.alert_receiver.name || '—'}
+                        {selectedSub.alert_receiver.phone && (
+                          <>
+                            {' · '}
+                            <a href={`tel:${selectedSub.alert_receiver.phone}`}
+                               className="text-blue-700 hover:underline">
+                              {selectedSub.alert_receiver.phone}
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  )}
+                  {selectedSub.promoter_pundit && (
+                    <div>
+                      <p className="text-[10px] text-slate-500">Promoter-Pundit</p>
+                      <p className="font-semibold text-slate-800">
+                        {selectedSub.promoter_pundit.name || '—'}
+                        {selectedSub.promoter_pundit.phone && (
+                          <>
+                            {' · '}
+                            <a href={`tel:${selectedSub.promoter_pundit.phone}`}
+                               className="text-blue-700 hover:underline">
+                              {selectedSub.promoter_pundit.phone}
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    </div>
                   )}
                 </div>
-              )}
-              {selectedSub.promoter_pundit && (
-                <div>
-                  <p className="text-[10px] text-slate-500">Promoter-Pundit</p>
-                  <p className="font-semibold text-slate-800">
-                    {selectedSub.promoter_pundit.name || '—'}
-                    {selectedSub.promoter_pundit.phone && (
+                {mapOpen && (
+                  <div className="mt-3">
+                    {mapLoading && (
+                      <p className="text-[11px] text-slate-400 italic">Loading map…</p>
+                    )}
+                    {mapErr && (
+                      <p className="text-[11px] text-red-600">{mapErr}</p>
+                    )}
+                    {!mapLoading && mapData && mapData.farmer.gps_lat != null && mapData.farmer.gps_lng != null && (
                       <>
-                        {' · '}
-                        <a href={`tel:${selectedSub.promoter_pundit.phone}`}
-                           className="text-blue-700 hover:underline">
-                          {selectedSub.promoter_pundit.phone}
-                        </a>
+                        <FacilitatorMap
+                          farmer={mapData.farmer as FarmerPin}
+                          facilitators={mapData.facilitators}
+                        />
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-600">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block"></span>
+                            Farmer
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block"></span>
+                            Alert receiver
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-violet-600 inline-block"></span>
+                            Promoter-Pundit
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block"></span>
+                            Promoter
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"></span>
+                            Other facilitator
+                          </span>
+                          <span className="italic text-slate-400">
+                            Hover a pin for name · role · distance · phone
+                          </span>
+                        </div>
                       </>
                     )}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+                    {!mapLoading && mapData && (mapData.farmer.gps_lat == null || mapData.farmer.gps_lng == null) && (
+                      <p className="text-[11px] text-slate-500 italic">
+                        {mapData.reason === 'farmer_gps_missing'
+                          ? "Can't show map — this farmer has no GPS location on file."
+                          : "Can't show map — farmer record not found."}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Selected subscription detail */}
           {selectedSub && (
