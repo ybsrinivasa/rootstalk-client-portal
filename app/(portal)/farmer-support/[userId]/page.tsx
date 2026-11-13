@@ -128,7 +128,12 @@ interface InputRow {
   window_start: string | null
   window_end: string | null
   status: 'PURCHASED' | 'ORDERED' | 'DUE_NOW' | 'UPCOMING' | 'MISSED' | 'NOT_REQUIRED'
+  // 2026-11-13 — purchased_via distinguishes the three signals that
+  // can mark a row Purchased so the UI can show pickup date / "farmer
+  // tapped bought" / "accepted dealer offer" context.
+  purchased_via: 'ack' | 'order_pickup' | 'order_approved' | null
   purchased_at: string | null
+  picked_up_at: string | null
   purchased_brand_text: string | null
   purchased_brand_cosh_id: string | null
 }
@@ -692,6 +697,24 @@ export default function FarmerSupportDetailPage() {
                                     <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border font-semibold ${meta.cls}`}>
                                       {meta.label}
                                     </span>
+                                    {/* Second line explains which signal fired so the RM can
+                                        tell "farmer tapped buy" from "in-app order picked up"
+                                        from "accepted dealer offer but not yet picked up". */}
+                                    {r.status === 'PURCHASED' && r.purchased_via === 'order_pickup' && r.picked_up_at && (
+                                      <span className="text-[10px] text-slate-500 block mt-0.5">
+                                        Picked up {fmtDate(r.picked_up_at)}
+                                      </span>
+                                    )}
+                                    {r.status === 'PURCHASED' && r.purchased_via === 'order_approved' && (
+                                      <span className="text-[10px] text-slate-500 block mt-0.5 italic">
+                                        Order approved · pickup pending
+                                      </span>
+                                    )}
+                                    {r.status === 'PURCHASED' && r.purchased_via === 'ack' && r.purchased_at && (
+                                      <span className="text-[10px] text-slate-500 block mt-0.5">
+                                        Marked {fmtDate(r.purchased_at)}
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="px-2 py-2 text-slate-700">
                                     {r.purchased_brand_text || <span className="text-slate-400">—</span>}
