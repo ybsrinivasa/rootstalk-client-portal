@@ -234,6 +234,32 @@ export default function FarmerSupportPage() {
     OVERDUE_EXPERT_QUERY:   overdueQueries,
     NO_ACTIVE_SUBSCRIPTION: noActiveSubs,
   }
+  // 2026-11-14 — collect the subscription_ids that the alert endpoint
+  // emitted PER farmer, so a row click while an alert is active can
+  // forward the exact subs that triggered the alert to the 360° view.
+  // Previously the 360° view only knew the alert type in the CP's
+  // local state → clicking a farmer discarded that context and showed
+  // all subs with no indication of which ones triggered the alert.
+  const alertSubIdsByFarmer = useMemo(() => {
+    const out: Record<AlertType, Record<string, Set<string>>> = {
+      MISSING_START_DATE: {},
+      OVERDUE_INPUT: {},
+      MISSED_INPUT: {},
+      OVERDUE_EXPERT_QUERY: {},
+      NO_ACTIVE_SUBSCRIPTION: {},
+    }
+    for (const t of Object.keys(alertRowsByType) as AlertType[]) {
+      for (const r of alertRowsByType[t]) {
+        if (!r.farmer_user_id || !r.subscription_id) continue
+        const bucket = out[t][r.farmer_user_id] || new Set<string>()
+        bucket.add(r.subscription_id)
+        out[t][r.farmer_user_id] = bucket
+      }
+    }
+    return out
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDates, overdueInputs, missedInputs, overdueQueries, noActiveSubs])
+
   const alertFarmerIdsByType = useMemo(() => {
     // 2026-11-10 Phase 3 — alert endpoints now surface
     // farmer_user_id, so the per-row badge match is a hard id-match.
@@ -428,6 +454,17 @@ export default function FarmerSupportPage() {
                 if (originFilter) subFilterQs.set('origin', originFilter)
                 if (startFrom) subFilterQs.set('start_date_from', startFrom)
                 if (startTo) subFilterQs.set('start_date_to', startTo)
+                // 2026-11-14 pm — if an alert tile is active, forward
+                // the exact subscription_ids that triggered THIS
+                // farmer's alert. Wins over the broader sub-side
+                // filters on the backend (per-sub signal from the
+                // alert endpoint is more specific than any filter).
+                if (alertType) {
+                  const sids = alertSubIdsByFarmer[alertType]?.[r.user_id]
+                  if (sids && sids.size > 0) {
+                    subFilterQs.set('highlight_subscription_ids', Array.from(sids).join(','))
+                  }
+                }
                 const qs = subFilterQs.toString()
                 const href = `/farmer-support/${r.user_id}${qs ? `?${qs}` : ''}`
                 return (
