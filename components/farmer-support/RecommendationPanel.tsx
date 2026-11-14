@@ -14,8 +14,15 @@ interface SignatureChip {
 interface ElementRow {
   element_type: string
   value: string | null
-  cosh_ref: string | null
-  unit_cosh_id: string | null
+  unit: string | null
+}
+interface RecommendedProduct {
+  common_name: string | null
+  trade_name: string | null
+  manufacturer: string | null
+  formulation: string | null
+  ai_concentration: string | null
+  is_brand_locked: boolean
 }
 interface MediaCounts {
   photos: number
@@ -104,6 +111,7 @@ interface RecommendationPayload {
     frequency_days: number | null
     is_brand_locked: boolean
   }
+  recommended_product: RecommendedProduct
   elements: ElementRow[]
   media_counts: MediaCounts
   ack: AckInfo
@@ -184,6 +192,69 @@ export default function RecommendationPanel({
 
   return (
     <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3 text-xs">
+      {/* Recommended product — the SPECIFIC thing to tell the farmer
+          to buy. Shows prominently at the top because it's what the
+          RM reads aloud on the call. Brand-lock gets a highlight so
+          the RM knows the farmer cannot substitute. */}
+      {(data.recommended_product.common_name
+        || data.recommended_product.trade_name
+        || data.recommended_product.manufacturer
+        || data.recommended_product.formulation) && (
+        <div className={`rounded-lg p-3 ${
+          data.recommended_product.is_brand_locked
+            ? 'bg-amber-50 border-2 border-amber-300'
+            : 'bg-white border border-slate-200'
+        }`}>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Recommended product
+            </p>
+            {data.recommended_product.is_brand_locked && (
+              <span className="inline-block text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 bg-amber-400 text-slate-900 rounded">
+                🔒 Brand-locked
+              </span>
+            )}
+          </div>
+          <div className="space-y-0.5">
+            {data.recommended_product.common_name && (
+              <p>
+                <span className="text-slate-500 min-w-[110px] inline-block">Common name</span>
+                <strong className="text-slate-800">{data.recommended_product.common_name}</strong>
+              </p>
+            )}
+            {data.recommended_product.trade_name && (
+              <p>
+                <span className="text-slate-500 min-w-[110px] inline-block">Trade name</span>
+                <strong className="text-slate-800">{data.recommended_product.trade_name}</strong>
+              </p>
+            )}
+            {data.recommended_product.manufacturer && (
+              <p>
+                <span className="text-slate-500 min-w-[110px] inline-block">Manufacturer</span>
+                <span className="text-slate-800">{data.recommended_product.manufacturer}</span>
+              </p>
+            )}
+            {data.recommended_product.formulation && (
+              <p>
+                <span className="text-slate-500 min-w-[110px] inline-block">Formulation</span>
+                <span className="text-slate-800">{data.recommended_product.formulation}</span>
+              </p>
+            )}
+            {data.recommended_product.ai_concentration && (
+              <p>
+                <span className="text-slate-500 min-w-[110px] inline-block">AI concentration</span>
+                <span className="text-slate-800">{data.recommended_product.ai_concentration}</span>
+              </p>
+            )}
+          </div>
+          {data.recommended_product.is_brand_locked && data.recommended_product.trade_name && (
+            <p className="text-[10px] text-amber-800 italic mt-2">
+              Farmer cannot substitute — repeat this exact brand name to them.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Signature context so the RM knows WHY this variant was picked. */}
       {data.signature_chips.length > 0 && (
         <div>
@@ -213,7 +284,10 @@ export default function RecommendationPanel({
                 <span className="text-slate-500 min-w-[140px]">
                   {ELEMENT_LABELS[el.element_type] || el.element_type.replace(/_/g, ' ').toLowerCase()}
                 </span>
-                <span className="text-slate-800">{el.value || el.cosh_ref || '—'}</span>
+                <span className="text-slate-800">
+                  {el.value || '—'}
+                  {el.unit && <span className="text-slate-500"> {el.unit}</span>}
+                </span>
               </li>
             ))}
           </ul>
