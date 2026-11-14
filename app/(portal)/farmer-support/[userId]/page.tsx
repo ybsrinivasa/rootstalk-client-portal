@@ -348,7 +348,11 @@ export default function FarmerSupportDetailPage() {
         }
       })
       .finally(() => setLoading(false))
-  }, [clientId, userId])
+    // subFilterQs is in the dep list so "Clear filter" (which drops
+    // the URL params in place) re-fetches with the empty filter —
+    // without this, matches_filter stays stuck at its last value
+    // even though the URL has changed.
+  }, [clientId, userId, subFilterQs])
 
   // 2026-11-11 — per-section error state so a 500 on any of the four
   // per-sub endpoints surfaces instead of silently rendering "empty".
