@@ -598,22 +598,51 @@ export default function FarmerSupportDetailPage() {
               const diagN = s.diagnoses_count || 0
               const qN = s.unanswered_queries_count || 0
               const matched = s.matches_filter === true
+              // 2026-11-14 pm — tint inactive subs so the RM can see
+              // at a glance which tabs are live vs closed. Specific
+              // status chip (WAITLISTED / CANCELLED / etc) shows what
+              // kind of inactive — each means different things for
+              // the conversation (WAITLISTED = might re-engage;
+              // CANCELLED = promoter rejected; UNSUBSCRIBED = farmer
+              // walked away; LAPSED = crop completed; SUSPENDED =
+              // temporarily paused).
+              const inactive = !s.is_active
+              const statusLabel = (s.status || '').toUpperCase()
               // Matching-filter ring is amber + thick; active tab's
               // dark bg still wins the primary selection cue.
               const matchRingCls = matched
                 ? (active ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-slate-800' : 'ring-2 ring-amber-400')
                 : ''
+              // Inactive tab background tone — muted slate-50 with a
+              // dashed border so it reads as "less important" without
+              // becoming unreadable. Keeps the dark selected-active
+              // treatment for the currently-opened inactive tab.
+              const toneCls = active
+                ? 'bg-slate-800 border-slate-800 text-white'
+                : inactive
+                  ? 'bg-slate-50 border-slate-300 border-dashed text-slate-600 hover:border-slate-500'
+                  : 'bg-white border-slate-200 text-slate-700 hover:border-slate-400'
               return (
                 <button key={s.subscription_id}
                   onClick={() => setSelectedSubId(s.subscription_id)}
-                  className={`text-left rounded-xl border-2 px-4 py-3 text-xs transition ${
-                    active
-                      ? 'bg-slate-800 border-slate-800 text-white'
-                      : 'bg-white border-slate-200 text-slate-700 hover:border-slate-400'
-                  } ${matchRingCls}`}>
+                  className={`text-left rounded-xl border-2 px-4 py-3 text-xs transition ${toneCls} ${matchRingCls}`}>
                   <p className="font-semibold">
                     {s.crop_name || 'Crop'}
                     {s.is_active && <span className="ml-2 text-[10px] uppercase tracking-wider">Active</span>}
+                    {inactive && (
+                      <span className={`ml-2 text-[9px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded ${
+                        active
+                          ? 'bg-slate-600 text-slate-200'
+                          : statusLabel === 'CANCELLED' ? 'bg-rose-100 text-rose-700'
+                          : statusLabel === 'UNSUBSCRIBED' ? 'bg-rose-100 text-rose-700'
+                          : statusLabel === 'WAITLISTED' ? 'bg-sky-100 text-sky-800'
+                          : statusLabel === 'SUSPENDED' ? 'bg-slate-200 text-slate-700'
+                          : statusLabel === 'LAPSED' ? 'bg-slate-200 text-slate-700'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}>
+                        {statusLabel || 'Inactive'}
+                      </span>
+                    )}
                     {matched && (
                       <span className={`ml-2 text-[9px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded ${
                         active ? 'bg-amber-400 text-slate-900' : 'bg-amber-100 text-amber-800'
