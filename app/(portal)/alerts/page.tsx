@@ -142,7 +142,7 @@ export default function AlertsPage() {
         {(['start_date', 'inputs'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === t ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-            {t === 'start_date' ? `Missing Start Date (${pendingDates.length})` : `Overdue Inputs (${overdueInputs.length})`}
+            {t === 'start_date' ? `Awaiting Start Date (${pendingDates.length})` : `Overdue Inputs (${overdueInputs.length})`}
           </button>
         ))}
       </div>
