@@ -226,6 +226,8 @@ export default function FarmerSupportDetailPage() {
     for (const key of [
       'crop_cosh_id', 'subscription_status', 'origin',
       'start_date_from', 'start_date_to', 'promoter_user_id',
+      // 2026-11-14 pm — alert tile forward: exact subs to highlight.
+      'highlight_subscription_ids',
     ] as const) {
       const v = searchParams?.get(key)
       if (v) out.set(key, v)
