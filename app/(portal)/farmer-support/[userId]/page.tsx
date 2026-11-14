@@ -43,6 +43,12 @@ const RecommendationPanel = dynamic(
     <div className="p-4 text-xs text-slate-400 italic">Loading recommendation…</div>
   ) },
 )
+const NearbyContactsPanel = dynamic(
+  () => import('@/components/farmer-support/NearbyContactsPanel'),
+  { ssr: false, loading: () => (
+    <p className="text-xs text-slate-400 italic">Loading nearby contacts…</p>
+  ) },
+)
 
 interface NearbyPayload {
   farmer: FarmerPin | { user_id: string; name: string | null; phone: string | null; gps_lat: null; gps_lng: null }
@@ -292,6 +298,15 @@ export default function FarmerSupportDetailPage() {
   const [mapLoadingSubId, setMapLoadingSubId] = useState<string | null>(null)
   const [mapErr, setMapErr] = useState<string | null>(null)
 
+  // Nearby-contacts panel open state (per sub, same rationale as the
+  // map). 2026-11-14 pt 1 — read-only list of all nearby onboarded
+  // contacts (facilitators + dealers + company-designated promoters)
+  // with distance, phone, address. v2 may add RM-assignment mutations.
+  const [contactsOpenSubId, setContactsOpenSubId] = useState<string | null>(null)
+  function toggleContacts(subId: string) {
+    setContactsOpenSubId(prev => (prev === subId ? null : subId))
+  }
+
   const [logOpen, setLogOpen] = useState(false)
   const [logType, setLogType] = useState<'OUTBOUND' | 'INBOUND'>('OUTBOUND')
   const [logDate, setLogDate] = useState<string>('')  // YYYY-MM-DD
@@ -393,10 +408,11 @@ export default function FarmerSupportDetailPage() {
     if (selectedSubId) loadSubDetails(selectedSubId)
   }, [selectedSubId, loadSubDetails])
 
-  // Switching subs collapses any open map so the RM doesn't see a
-  // stale pin cluster next to a different sub's "Who follows up".
+  // Switching subs collapses any open map / contacts panel so the RM
+  // doesn't see stale data next to a different sub's "Who follows up".
   useEffect(() => {
     setMapOpenSubId(prev => (prev && prev !== selectedSubId ? null : prev))
+    setContactsOpenSubId(prev => (prev && prev !== selectedSubId ? null : prev))
   }, [selectedSubId])
 
   const toggleMap = useCallback(async (subId: string) => {
@@ -685,11 +701,15 @@ export default function FarmerSupportDetailPage() {
               active sub, with a toggleable mini-map that plots the
               farmer (red) + current alert receiver (blue) + other
               onboarded facilitators (grey/purple/teal by role) so
-              the RM can judge relative distance before calling. */}
-          {selectedSub && (selectedSub.alert_receiver || selectedSub.promoter_pundit) && (() => {
+              the RM can judge relative distance before calling.
+              2026-11-14 — strip always renders (even for SELF-subscribed
+              subs with no alert_receiver / no Promoter-Pundit) so the
+              Show-map affordance is available for every sub. */}
+          {selectedSub && (() => {
             const mapOpen = mapOpenSubId === selectedSub.subscription_id
             const mapLoading = mapLoadingSubId === selectedSub.subscription_id
             const mapData = mapBySub[selectedSub.subscription_id]
+            const hasContacts = !!(selectedSub.alert_receiver || selectedSub.promoter_pundit)
             return (
               <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 mb-4 text-xs">
                 <div className="flex items-center justify-between mb-2">
@@ -703,6 +723,12 @@ export default function FarmerSupportDetailPage() {
                     {mapOpen ? 'Hide map' : 'Show map'}
                   </button>
                 </div>
+                {!hasContacts && (
+                  <p className="text-slate-500 italic mb-1">
+                    No alert receiver or Promoter-Pundit assigned on this subscription
+                    {' '}(likely a self-subscribed sub). Open the map to see nearby facilitators.
+                  </p>
+                )}
                 <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
                   {selectedSub.alert_receiver && (
                     <div>
@@ -787,6 +813,39 @@ export default function FarmerSupportDetailPage() {
                           : "Can't show map — farmer record not found."}
                       </p>
                     )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* 2026-11-14 pt 1 — collapsible panel listing all ACTIVE
+              ClientPromoter contacts (facilitators + dealers +
+              company-designated) at this sub's effective client, with
+              distance from farmer + phone + address. Read-only; v2
+              will add assign-as-alert-receiver / assign-as-PP / etc.
+              Lazy-loaded on expand. */}
+          {selectedSub && (() => {
+            const open = contactsOpenSubId === selectedSub.subscription_id
+            return (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 mb-4 text-xs">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                    Nearby promoters &amp; dealers
+                  </p>
+                  <button type="button"
+                    onClick={() => toggleContacts(selectedSub.subscription_id)}
+                    className="text-[11px] text-blue-700 hover:text-blue-900 hover:underline font-semibold">
+                    {open ? 'Hide list' : 'Show list'}
+                  </button>
+                </div>
+                {open && clientId && (
+                  <div className="mt-3">
+                    <NearbyContactsPanel
+                      clientId={clientId}
+                      farmerUserId={userId as string}
+                      subscriptionId={selectedSub.subscription_id}
+                    />
                   </div>
                 )}
               </div>
