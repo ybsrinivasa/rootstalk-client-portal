@@ -446,24 +446,53 @@ export default function FarmerSupportPage() {
                 const alerts = rowAlerts(r)
                 // 2026-11-14 — forward the sub-side filters (not
                 // farmer/user-side ones like search/state/district)
-                // so the 360° view can highlight the matching sub
-                // tabs + pre-select the first match.
+                // so the 360° view can hide non-matching tabs + pre-
+                // select the first match.
                 const subFilterQs = new URLSearchParams()
-                if (cropFilter) subFilterQs.set('crop_cosh_id', cropFilter)
-                if (statusFilter) subFilterQs.set('subscription_status', statusFilter)
-                if (originFilter) subFilterQs.set('origin', originFilter)
-                if (startFrom) subFilterQs.set('start_date_from', startFrom)
-                if (startTo) subFilterQs.set('start_date_to', startTo)
+                const labelParts: string[] = []
+                if (cropFilter) {
+                  subFilterQs.set('crop_cosh_id', cropFilter)
+                  labelParts.push('Crop filter')  // no dropdown label here
+                }
+                if (statusFilter) {
+                  subFilterQs.set('subscription_status', statusFilter)
+                  const statusLabel = {
+                    ACTIVE: 'Status = Active',
+                    COMPLETED: 'Status = Completed',
+                    NOT_STARTED: 'Status = Not started',
+                  }[statusFilter] || statusFilter
+                  labelParts.push(statusLabel)
+                }
+                if (originFilter) {
+                  subFilterQs.set('origin', originFilter)
+                  labelParts.push(originFilter === 'SELF' ? 'Origin = Self' : 'Origin = Promoter')
+                }
+                if (startFrom) {
+                  subFilterQs.set('start_date_from', startFrom)
+                  labelParts.push(`Start ≥ ${startFrom}`)
+                }
+                if (startTo) {
+                  subFilterQs.set('start_date_to', startTo)
+                  labelParts.push(`Start ≤ ${startTo}`)
+                }
                 // 2026-11-14 pm — if an alert tile is active, forward
                 // the exact subscription_ids that triggered THIS
-                // farmer's alert. Wins over the broader sub-side
-                // filters on the backend (per-sub signal from the
-                // alert endpoint is more specific than any filter).
+                // farmer's alert. Alert signal wins over the broader
+                // sub-side filters (per-sub, more specific).
                 if (alertType) {
                   const sids = alertSubIdsByFarmer[alertType]?.[r.user_id]
                   if (sids && sids.size > 0) {
                     subFilterQs.set('highlight_subscription_ids', Array.from(sids).join(','))
+                    // Alert label overrides the sub-side labels —
+                    // backend also prioritises highlight_subscription_ids.
+                    labelParts.splice(0, labelParts.length, ALERT_META[alertType].label)
                   }
+                }
+                // 2026-11-14 pm — pre-formatted label so the 360° view
+                // can display WHAT the filter is without re-resolving
+                // cosh_ids or inventing its own labels.
+                if (labelParts.length > 0) {
+                  subFilterQs.set('filter_label', labelParts.join(' · '))
                 }
                 const qs = subFilterQs.toString()
                 const href = `/farmer-support/${r.user_id}${qs ? `?${qs}` : ''}`

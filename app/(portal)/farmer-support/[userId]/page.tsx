@@ -235,6 +235,11 @@ export default function FarmerSupportDetailPage() {
     return out.toString()
   }, [searchParams])
 
+  // 2026-11-14 pm — human-readable summary of the active filter,
+  // pre-built by the list page. Used verbatim in the strip header so
+  // the RM sees exactly what carried over from the previous screen.
+  const filterLabel = searchParams?.get('filter_label') || null
+
   // 2026-11-10 Phase 4 — gate the "Log a Call" button to users who
   // can actually log. Backend 403s anyone else; we hide the button so
   // CAs (who can VIEW the log) aren't tempted by a control that will
@@ -530,30 +535,61 @@ export default function FarmerSupportDetailPage() {
         </div>
       ) : (
         <>
-          {/* 2026-11-14 — filter-context strip so the RM sees at a
-              glance which subs matched the list-page filter. Only
-              renders when a filter is active on this view. */}
+          {/* 2026-11-14 pm — filter-context strip. When a filter is
+              active, the tab bar below hides non-matching subs; this
+              strip names the filter + offers a Clear button that
+              restores the full list. When there's 0 matches (edge
+              case — shouldn't happen since this farmer was on the
+              filtered list, but defend against it), fall back to
+              showing all subs so the RM isn't stranded. */}
           {(() => {
-            const matchCount = subs.filter(s => s.matches_filter === true).length
             const filterActive = subs.some(s => s.matches_filter !== null)
             if (!filterActive) return null
+            const matchCount = subs.filter(s => s.matches_filter === true).length
+            if (matchCount === 0) {
+              return (
+                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold">
+                    No subscriptions match{filterLabel ? ` filter: ${filterLabel}` : ' the Farmer Support filter'}
+                  </span>
+                  <span className="text-amber-700">· showing all {subs.length} instead</span>
+                  <button
+                    type="button"
+                    onClick={() => router.replace(`/farmer-support/${userId}`)}
+                    className="ml-auto text-amber-800 hover:underline font-semibold">
+                    Clear filter
+                  </button>
+                </div>
+              )
+            }
             return (
               <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-center gap-2 flex-wrap">
                 <span className="font-semibold">
-                  {matchCount} of {subs.length} subscription{subs.length === 1 ? '' : 's'} match your Farmer Support filter
+                  Filter{filterLabel ? `: ${filterLabel}` : ' active'}
                 </span>
-                <span className="text-amber-700">· matching tabs have an amber ring</span>
+                <span className="text-amber-700">
+                  · showing {matchCount} of {subs.length} subscription{subs.length === 1 ? '' : 's'}
+                </span>
                 <button
                   type="button"
                   onClick={() => router.replace(`/farmer-support/${userId}`)}
                   className="ml-auto text-amber-800 hover:underline font-semibold">
-                  Clear filter (show all subs)
+                  Clear filter (show all {subs.length} subs)
                 </button>
               </div>
             )
           })()}
           <div className="flex gap-2 mb-4 flex-wrap">
-            {subs.map(s => {
+            {(() => {
+              // Hide non-matching when a filter is active AND at
+              // least one sub matches; otherwise show all (null = no
+              // filter active, or the 0-match fallback from above).
+              const filterActive = subs.some(s => s.matches_filter !== null)
+              const anyMatch = subs.some(s => s.matches_filter === true)
+              return (filterActive && anyMatch)
+                ? subs.filter(s => s.matches_filter === true)
+                : subs
+            })().map(s => {
               const active = s.subscription_id === selectedSubId
               const diagN = s.diagnoses_count || 0
               const qN = s.unanswered_queries_count || 0
