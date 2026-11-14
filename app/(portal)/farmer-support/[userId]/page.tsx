@@ -277,6 +277,12 @@ export default function FarmerSupportDetailPage() {
   })
   const [callLogLoading, setCallLogLoading] = useState(true)
 
+  // 2026-11-14 pt4 — counter bumped after a mutation that affects
+  // the sub row (e.g. Alert Receiver change) so the subs-fetch
+  // useEffect refires and selectedSub.alert_receiver reflects the
+  // new state.
+  const [subsReloadKey, setSubsReloadKey] = useState(0)
+
   // 2026-11-14 — per-row expand state for recommendation panels on
   // Input Tracking + Practice Timeline. Key = `${practice_id}-${timeline_id}`
   // so an occurrence_id collision across sections doesn't bleed.
@@ -366,8 +372,9 @@ export default function FarmerSupportDetailPage() {
     // subFilterQs is in the dep list so "Clear filter" (which drops
     // the URL params in place) re-fetches with the empty filter —
     // without this, matches_filter stays stuck at its last value
-    // even though the URL has changed.
-  }, [clientId, userId, subFilterQs])
+    // even though the URL has changed. subsReloadKey lets children
+    // (NearbyContactsPanel's Alert Receiver mutation) force a refetch.
+  }, [clientId, userId, subFilterQs, subsReloadKey])
 
   // 2026-11-11 — per-section error state so a 500 on any of the four
   // per-sub endpoints surfaces instead of silently rendering "empty".
@@ -845,6 +852,11 @@ export default function FarmerSupportDetailPage() {
                       clientId={clientId}
                       farmerUserId={userId as string}
                       subscriptionId={selectedSub.subscription_id}
+                      currentAlertReceiverUserId={selectedSub.alert_receiver?.user_id || null}
+                      currentAlertReceiverName={selectedSub.alert_receiver?.name || null}
+                      currentAlertReceiverPhone={selectedSub.alert_receiver?.phone || null}
+                      canAssignAlertReceiver={canLog}
+                      onAlertReceiverChanged={() => setSubsReloadKey(k => k + 1)}
                     />
                   </div>
                 )}
