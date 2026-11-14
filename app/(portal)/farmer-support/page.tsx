@@ -88,7 +88,7 @@ type AlertType =
   | 'NO_ACTIVE_SUBSCRIPTION'
 
 const ALERT_META: Record<AlertType, { label: string; shortLabel: string; tone: string }> = {
-  MISSING_START_DATE:      { label: 'Missing Start Date',      shortLabel: 'No start date',    tone: 'amber' },
+  MISSING_START_DATE:      { label: 'Awaiting Start Date',     shortLabel: 'Awaiting start',   tone: 'amber' },
   OVERDUE_INPUT:           { label: 'Input Due Now, No Order', shortLabel: 'Due now',          tone: 'orange' },
   MISSED_INPUT:            { label: 'Missed Inputs',           shortLabel: 'Missed',           tone: 'red' },
   OVERDUE_EXPERT_QUERY:    { label: 'Unanswered Queries',      shortLabel: 'Query overdue',    tone: 'pink' },
