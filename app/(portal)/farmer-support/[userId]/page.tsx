@@ -855,8 +855,11 @@ export default function FarmerSupportDetailPage() {
                       currentAlertReceiverUserId={selectedSub.alert_receiver?.user_id || null}
                       currentAlertReceiverName={selectedSub.alert_receiver?.name || null}
                       currentAlertReceiverPhone={selectedSub.alert_receiver?.phone || null}
+                      currentPromoterPunditUserId={selectedSub.promoter_pundit?.user_id || null}
+                      currentPromoterPunditName={selectedSub.promoter_pundit?.name || null}
+                      currentPromoterPunditPhone={selectedSub.promoter_pundit?.phone || null}
                       canAssignAlertReceiver={canLog}
-                      onAlertReceiverChanged={() => setSubsReloadKey(k => k + 1)}
+                      onReceiverChanged={() => setSubsReloadKey(k => k + 1)}
                     />
                   </div>
                 )}
