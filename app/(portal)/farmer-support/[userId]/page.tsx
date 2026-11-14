@@ -18,7 +18,7 @@
 // refuse non-owner callers, so this UI deliberately offers no
 // handles — "read and remind, not act".
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
@@ -35,6 +35,12 @@ const FacilitatorMap = dynamic(
     <div className="w-full h-72 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-xs text-slate-400">
       Loading map…
     </div>
+  ) },
+)
+const RecommendationPanel = dynamic(
+  () => import('@/components/farmer-support/RecommendationPanel'),
+  { ssr: false, loading: () => (
+    <div className="p-4 text-xs text-slate-400 italic">Loading recommendation…</div>
   ) },
 )
 
@@ -257,6 +263,19 @@ export default function FarmerSupportDetailPage() {
     total: 0, outbound_count: 0, inbound_count: 0, rows: [],
   })
   const [callLogLoading, setCallLogLoading] = useState(true)
+
+  // 2026-11-14 — per-row expand state for recommendation panels on
+  // Input Tracking + Practice Timeline. Key = `${practice_id}-${timeline_id}`
+  // so an occurrence_id collision across sections doesn't bleed.
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  function toggleRow(key: string) {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   // Map of farmer + nearby facilitators — lazy-loaded per sub when
   // the RM asks for it. Payload is cached by subscription_id so
@@ -744,6 +763,7 @@ export default function FarmerSupportDetailPage() {
                         <table className="w-full text-xs">
                           <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                             <tr>
+                              <th className="w-6"></th>
                               <th className="text-left px-2 py-2">Input practice</th>
                               <th className="text-left px-2 py-2">Window</th>
                               <th className="text-left px-2 py-2">Status</th>
@@ -753,8 +773,15 @@ export default function FarmerSupportDetailPage() {
                           <tbody>
                             {inputs.all.map(r => {
                               const meta = INPUT_STATUS_META[r.status]
+                              const rowKey = `${r.practice_id}-${r.timeline_id}`
+                              const expanded = expandedRows.has(rowKey)
                               return (
-                                <tr key={`${r.practice_id}-${r.timeline_id}`} className="border-b border-slate-50">
+                                <React.Fragment key={rowKey}>
+                                <tr className="border-b border-slate-50 cursor-pointer hover:bg-slate-50"
+                                    onClick={() => toggleRow(rowKey)}>
+                                  <td className="px-2 py-2 text-slate-400 text-center">
+                                    {expanded ? '▾' : '▸'}
+                                  </td>
                                   <td className="px-2 py-2 font-medium text-slate-800">
                                     {r.practice_name || '—'}
                                     <span className="text-slate-400 text-[10px] block">{r.timeline_name}</span>
@@ -789,6 +816,19 @@ export default function FarmerSupportDetailPage() {
                                     {r.purchased_brand_text || <span className="text-slate-400">—</span>}
                                   </td>
                                 </tr>
+                                {expanded && clientId && selectedSubId && (
+                                  <tr>
+                                    <td colSpan={5} className="px-2 pb-3">
+                                      <RecommendationPanel
+                                        clientId={clientId}
+                                        farmerUserId={userId as string}
+                                        subscriptionId={selectedSubId}
+                                        practiceId={r.practice_id}
+                                      />
+                                    </td>
+                                  </tr>
+                                )}
+                                </React.Fragment>
                               )
                             })}
                           </tbody>
@@ -815,6 +855,7 @@ export default function FarmerSupportDetailPage() {
                     <table className="w-full text-xs">
                       <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                         <tr>
+                          <th className="w-6"></th>
                           <th className="text-left px-2 py-2">Practice</th>
                           <th className="text-left px-2 py-2">Window</th>
                           <th className="text-left px-2 py-2">Status</th>
@@ -823,8 +864,15 @@ export default function FarmerSupportDetailPage() {
                       <tbody>
                         {practices.map(p => {
                           const meta = PRACTICE_STATUS_META[p.status]
+                          const rowKey = `pt-${p.practice_id}-${p.timeline_id}`
+                          const expanded = expandedRows.has(rowKey)
                           return (
-                            <tr key={`${p.practice_id}-${p.timeline_id}`} className="border-b border-slate-50">
+                            <React.Fragment key={rowKey}>
+                            <tr className="border-b border-slate-50 cursor-pointer hover:bg-slate-50"
+                                onClick={() => toggleRow(rowKey)}>
+                              <td className="px-2 py-2 text-slate-400 text-center">
+                                {expanded ? '▾' : '▸'}
+                              </td>
                               <td className="px-2 py-2">
                                 <p className="font-medium text-slate-800">{p.practice_name || '—'}</p>
                                 <span className="text-slate-400 text-[10px]">
@@ -840,6 +888,19 @@ export default function FarmerSupportDetailPage() {
                                 </span>
                               </td>
                             </tr>
+                            {expanded && clientId && selectedSubId && (
+                              <tr>
+                                <td colSpan={4} className="px-2 pb-3">
+                                  <RecommendationPanel
+                                    clientId={clientId}
+                                    farmerUserId={userId as string}
+                                    subscriptionId={selectedSubId}
+                                    practiceId={p.practice_id}
+                                  />
+                                </td>
+                              </tr>
+                            )}
+                            </React.Fragment>
                           )
                         })}
                       </tbody>
