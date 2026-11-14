@@ -70,6 +70,10 @@ interface SubscriptionRow {
   subscription_id: string
   status: string
   is_active: boolean
+  // 2026-11-14 pt7 — gates the Follow-up Promoter radio column in
+  // the Nearby Contacts panel. Only 'SELF' subs can get a Follow-up
+  // Promoter in v3; 'ASSIGNED' subs already have a signup promoter.
+  subscription_type: 'SELF' | 'ASSIGNED'
   package_id: string
   package_name: string | null
   crop_cosh_id: string | null
@@ -90,6 +94,14 @@ interface SubscriptionRow {
     gps_lng: number | null
   } | null
   promoter_pundit: {
+    user_id: string
+    name: string | null
+    phone: string | null
+  } | null
+  // 2026-11-14 pt7 — RM-delegated Follow-up Promoter on SELF subs.
+  // Populated only when subscription_type=SELF AND a promoter_user_id
+  // is set (via the RM mutation). ASSIGNED subs leave this null.
+  followup_promoter: {
     user_id: string
     name: string | null
     phone: string | null
@@ -858,6 +870,10 @@ export default function FarmerSupportDetailPage() {
                       currentPromoterPunditUserId={selectedSub.promoter_pundit?.user_id || null}
                       currentPromoterPunditName={selectedSub.promoter_pundit?.name || null}
                       currentPromoterPunditPhone={selectedSub.promoter_pundit?.phone || null}
+                      currentFollowupPromoterUserId={selectedSub.followup_promoter?.user_id || null}
+                      currentFollowupPromoterName={selectedSub.followup_promoter?.name || null}
+                      currentFollowupPromoterPhone={selectedSub.followup_promoter?.phone || null}
+                      subscriptionIsSelfSubscribed={selectedSub.subscription_type === 'SELF'}
                       canAssignAlertReceiver={canLog}
                       onReceiverChanged={() => setSubsReloadKey(k => k + 1)}
                     />

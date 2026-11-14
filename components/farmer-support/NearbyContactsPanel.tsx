@@ -63,6 +63,10 @@ export default function NearbyContactsPanel({
   currentPromoterPunditUserId,
   currentPromoterPunditName,
   currentPromoterPunditPhone,
+  currentFollowupPromoterUserId,
+  currentFollowupPromoterName,
+  currentFollowupPromoterPhone,
+  subscriptionIsSelfSubscribed,
   canAssignAlertReceiver,
   onReceiverChanged,
 }: {
@@ -82,9 +86,17 @@ export default function NearbyContactsPanel({
   currentPromoterPunditUserId: string | null
   currentPromoterPunditName: string | null
   currentPromoterPunditPhone: string | null
+  // 2026-11-14 pt7 — RM-delegated Follow-up Promoter (SELF subs only).
+  // subscriptionIsSelfSubscribed gates the column visibility — for
+  // ASSIGNED subs the backend rejects the mutation anyway.
+  currentFollowupPromoterUserId: string | null
+  currentFollowupPromoterName: string | null
+  currentFollowupPromoterPhone: string | null
+  subscriptionIsSelfSubscribed: boolean
   canAssignAlertReceiver: boolean
-  // Fires after ANY assignment change (alert receiver OR promoter-
-  // pundit). Parent refetches subs so selectedSub reflects new state.
+  // Fires after ANY assignment change (alert receiver / promoter-
+  // pundit / follow-up promoter). Parent refetches subs so
+  // selectedSub reflects the new state.
   onReceiverChanged: () => void
 }) {
   const [data, setData] = useState<Payload | null>(null)
@@ -93,7 +105,7 @@ export default function NearbyContactsPanel({
   const [typeFilter, setTypeFilter] = useState<RoleFilter>('ALL')
   // Pending-assignment state tracks WHICH field is being changed so
   // the confirm modal + the mutation call can route correctly.
-  type PendingField = 'ALERT_RECEIVER' | 'PROMOTER_PUNDIT'
+  type PendingField = 'ALERT_RECEIVER' | 'PROMOTER_PUNDIT' | 'FOLLOWUP_PROMOTER'
   const [pendingField, setPendingField] = useState<PendingField | null>(null)
   const [pendingUserId, setPendingUserId] = useState<string | null>(null)
   const [pendingClear, setPendingClear] = useState<boolean>(false)
@@ -117,7 +129,11 @@ export default function NearbyContactsPanel({
 
   async function doSetAssignment(field: PendingField, newUserId: string | null) {
     setMutating(true); setMutErr(null)
-    const endpoint = field === 'ALERT_RECEIVER' ? 'alert-receiver' : 'promoter-pundit'
+    const endpoint = field === 'ALERT_RECEIVER'
+      ? 'alert-receiver'
+      : field === 'PROMOTER_PUNDIT'
+        ? 'promoter-pundit'
+        : 'followup-promoter'
     try {
       await api.put(
         `/client/${clientId}/farmer-support/farmers/${farmerUserId}/subscriptions/${subscriptionId}/${endpoint}`,
@@ -131,7 +147,11 @@ export default function NearbyContactsPanel({
       const err = e as { response?: { status?: number; data?: { detail?: string | { message?: string } } }; message?: string }
       const detail = err?.response?.data?.detail
       const detailMsg = typeof detail === 'object' ? detail?.message : (detail as string)
-      const label = field === 'ALERT_RECEIVER' ? 'Alert Receiver' : 'Promoter-Pundit'
+      const label = field === 'ALERT_RECEIVER'
+        ? 'Alert Receiver'
+        : field === 'PROMOTER_PUNDIT'
+          ? 'Promoter-Pundit'
+          : 'Follow-up Promoter'
       setMutErr(`${err?.response?.status || ''} ${detailMsg || err?.message || `Failed to update ${label}.`}`.trim())
     } finally {
       setMutating(false)
@@ -228,6 +248,42 @@ export default function NearbyContactsPanel({
             </button>
           )}
         </div>
+        {/* Follow-up Promoter — SELF subs only (RM-delegated
+            facilitator for farmers who signed up without a promoter). */}
+        {subscriptionIsSelfSubscribed && (
+          <div className="flex items-start justify-between gap-3 flex-wrap border-t border-slate-100 pt-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                Current Follow-up Promoter
+              </p>
+              {currentFollowupPromoterUserId ? (
+                <p className="text-slate-800 font-semibold">
+                  {currentFollowupPromoterName || '—'}
+                  {currentFollowupPromoterPhone && (
+                    <>
+                      {' · '}
+                      <a href={`tel:${currentFollowupPromoterPhone}`} className="text-blue-700 hover:underline">
+                        {currentFollowupPromoterPhone}
+                      </a>
+                    </>
+                  )}
+                </p>
+              ) : (
+                <p className="text-slate-500 italic">
+                  None assigned — this farmer self-subscribed. Delegate a facilitator-promoter to share follow-up.
+                </p>
+              )}
+            </div>
+            {canAssignAlertReceiver && currentFollowupPromoterUserId && (
+              <button type="button"
+                onClick={() => { setPendingField('FOLLOWUP_PROMOTER'); setPendingClear(true); setMutErr(null) }}
+                disabled={mutating}
+                className="text-[11px] text-rose-700 hover:text-rose-900 hover:underline font-semibold disabled:opacity-50">
+                Clear (remove delegation)
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Confirmation modal — appears either for a new assignment
@@ -235,14 +291,26 @@ export default function NearbyContactsPanel({
           decides which field (Alert Receiver vs Promoter-Pundit)
           is being changed. */}
       {(pendingNewUser || pendingClear) && pendingField && (() => {
-        const fieldLabel = pendingField === 'ALERT_RECEIVER' ? 'Alert Receiver' : 'Promoter-Pundit'
-        const currentName = pendingField === 'ALERT_RECEIVER' ? currentAlertReceiverName : currentPromoterPunditName
+        const fieldLabel = pendingField === 'ALERT_RECEIVER'
+          ? 'Alert Receiver'
+          : pendingField === 'PROMOTER_PUNDIT'
+            ? 'Promoter-Pundit'
+            : 'Follow-up Promoter'
+        const currentName = pendingField === 'ALERT_RECEIVER'
+          ? currentAlertReceiverName
+          : pendingField === 'PROMOTER_PUNDIT'
+            ? currentPromoterPunditName
+            : currentFollowupPromoterName
         const effectBlurb = pendingField === 'ALERT_RECEIVER'
           ? "They'll start receiving alerts immediately."
-          : "They'll start receiving the farmer's expert queries immediately."
+          : pendingField === 'PROMOTER_PUNDIT'
+            ? "They'll start receiving the farmer's expert queries immediately."
+            : "They'll gain access to the farmer's advisory and start helping with follow-up."
         const clearBlurb = pendingField === 'ALERT_RECEIVER'
           ? "Alerts will go to the default contact (this subscription's promoter)."
-          : "Queries will route via the default rules again."
+          : pendingField === 'PROMOTER_PUNDIT'
+            ? "Queries will route via the default rules again."
+            : "The facilitator will lose advisory access on this subscription. Your RM remains the farmer's primary contact."
         return (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-md w-full p-5 shadow-xl">
@@ -322,6 +390,9 @@ export default function NearbyContactsPanel({
                     <>
                       <th className="text-center px-2 py-2 w-16">Alert<br />Receiver</th>
                       <th className="text-center px-2 py-2 w-16">Promoter-<br />Pundit</th>
+                      {subscriptionIsSelfSubscribed && (
+                        <th className="text-center px-2 py-2 w-16">Follow-up<br />Promoter</th>
+                      )}
                     </>
                   )}
                   <th className="text-left px-2 py-2">Name</th>
@@ -335,11 +406,18 @@ export default function NearbyContactsPanel({
                 {filtered.map(c => {
                   const isCurrentAR = c.user_id === currentAlertReceiverUserId
                   const isCurrentPP = c.user_id === currentPromoterPunditUserId
+                  const isCurrentFP = c.user_id === currentFollowupPromoterUserId
+                  // Follow-up Promoter eligibility: Facilitator (any
+                  // promoter_type incl. FACILITATOR) AND is_promoter=TRUE.
+                  // Backend rejects otherwise with 422.
+                  const isEligibleFP = c.promoter_types.includes('FACILITATOR') && c.is_promoter
                   const rowHighlight = isCurrentAR
                     ? 'bg-amber-50 border-l-4 border-l-amber-400'
                     : isCurrentPP
                       ? 'bg-violet-50 border-l-4 border-l-violet-400'
-                      : ''
+                      : isCurrentFP
+                        ? 'bg-emerald-50 border-l-4 border-l-emerald-500'
+                        : ''
                   return (
                   <tr key={c.user_id} className={`border-b border-slate-50 ${rowHighlight}`}>
                     {canAssignAlertReceiver && (
@@ -376,6 +454,29 @@ export default function NearbyContactsPanel({
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
+                        {subscriptionIsSelfSubscribed && (
+                          <td className="px-2 py-2 text-center">
+                            {/* Only Facilitator-Promoters eligible for
+                                Follow-up Promoter — dealer-promoters
+                                are deliberately excluded (commerce-
+                                primary role). */}
+                            {isEligibleFP ? (
+                              <input type="radio"
+                                name="followup-promoter"
+                                checked={isCurrentFP}
+                                disabled={mutating}
+                                onChange={() => {
+                                  if (isCurrentFP) return
+                                  setPendingField('FOLLOWUP_PROMOTER')
+                                  setPendingUserId(c.user_id)
+                                  setMutErr(null)
+                                }}
+                                aria-label={`Delegate ${c.name || 'contact'} as Follow-up Promoter`} />
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                        )}
                       </>
                     )}
                     <td className="px-2 py-2 font-medium text-slate-800">
@@ -388,6 +489,11 @@ export default function NearbyContactsPanel({
                       {isCurrentPP && (
                         <span className="ml-2 text-[9px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded bg-violet-500 text-white">
                           Current Promoter-Pundit
+                        </span>
+                      )}
+                      {isCurrentFP && (
+                        <span className="ml-2 text-[9px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded bg-emerald-500 text-white">
+                          Current Follow-up Promoter
                         </span>
                       )}
                     </td>
