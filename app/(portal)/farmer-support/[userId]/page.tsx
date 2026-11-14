@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { getClient, getUser, hasPortalRole } from '@/lib/auth'
 import type {
@@ -82,6 +82,10 @@ interface SubscriptionRow {
     name: string | null
     phone: string | null
   } | null
+  // 2026-11-14 — null when no filter was passed in the URL; true/false
+  // when a filter is active. CP highlights matching tabs + pre-selects
+  // the first match so the RM lands directly on a sub of interest.
+  matches_filter: boolean | null
 }
 interface PracticeRow {
   practice_id: string
@@ -201,9 +205,27 @@ function fmtDateTime(iso: string | null | undefined): string {
 
 export default function FarmerSupportDetailPage() {
   const params = useParams<{ userId: string }>()
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const client = getClient()
   const clientId = client?.id
   const userId = params?.userId
+
+  // 2026-11-14 — sub-side filter query echoed by the list page so the
+  // backend can tell us WHICH of this farmer's subs matched the list
+  // filter (so the RM doesn't have to guess which 3 of 8 to open).
+  // Order matters: we forward in the same keys the backend accepts.
+  const subFilterQs = useMemo(() => {
+    const out = new URLSearchParams()
+    for (const key of [
+      'crop_cosh_id', 'subscription_status', 'origin',
+      'start_date_from', 'start_date_to', 'promoter_user_id',
+    ] as const) {
+      const v = searchParams?.get(key)
+      if (v) out.set(key, v)
+    }
+    return out.toString()
+  }, [searchParams])
 
   // 2026-11-10 Phase 4 — gate the "Log a Call" button to users who
   // can actually log. Backend 403s anyone else; we hide the button so
@@ -254,14 +276,26 @@ export default function FarmerSupportDetailPage() {
   useEffect(() => {
     if (!clientId || !userId) return
     setLoading(true); setError(null)
+    const subsUrl = `/client/${clientId}/farmer-support/farmers/${userId}/subscriptions${
+      subFilterQs ? `?${subFilterQs}` : ''
+    }`
     Promise.all([
       api.get<FarmerHeader>(`/client/${clientId}/farmer-support/farmers/${userId}`),
-      api.get<SubscriptionRow[]>(`/client/${clientId}/farmer-support/farmers/${userId}/subscriptions`),
+      api.get<SubscriptionRow[]>(subsUrl),
     ])
       .then(([h, s]) => {
         setHeader(h.data)
         setSubs(s.data)
-        setSelectedSubId(prev => prev || s.data[0]?.subscription_id || null)
+        // Pre-select: prefer the first sub that matches the incoming
+        // filter (so the RM lands on a sub of interest without having
+        // to hunt). Fall back to backend's default order (active
+        // first) when no filter is active or nothing matches.
+        setSelectedSubId(prev => {
+          if (prev) return prev
+          const firstMatch = s.data.find(r => r.matches_filter === true)
+          if (firstMatch) return firstMatch.subscription_id
+          return s.data[0]?.subscription_id || null
+        })
       })
       .catch((e: unknown) => {
         // 2026-11-11 — surface the backend status + detail so we can
@@ -475,11 +509,39 @@ export default function FarmerSupportDetailPage() {
         </div>
       ) : (
         <>
+          {/* 2026-11-14 — filter-context strip so the RM sees at a
+              glance which subs matched the list-page filter. Only
+              renders when a filter is active on this view. */}
+          {(() => {
+            const matchCount = subs.filter(s => s.matches_filter === true).length
+            const filterActive = subs.some(s => s.matches_filter !== null)
+            if (!filterActive) return null
+            return (
+              <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-center gap-2 flex-wrap">
+                <span className="font-semibold">
+                  {matchCount} of {subs.length} subscription{subs.length === 1 ? '' : 's'} match your Farmer Support filter
+                </span>
+                <span className="text-amber-700">· matching tabs have an amber ring</span>
+                <button
+                  type="button"
+                  onClick={() => router.replace(`/farmer-support/${userId}`)}
+                  className="ml-auto text-amber-800 hover:underline font-semibold">
+                  Clear filter (show all subs)
+                </button>
+              </div>
+            )
+          })()}
           <div className="flex gap-2 mb-4 flex-wrap">
             {subs.map(s => {
               const active = s.subscription_id === selectedSubId
               const diagN = s.diagnoses_count || 0
               const qN = s.unanswered_queries_count || 0
+              const matched = s.matches_filter === true
+              // Matching-filter ring is amber + thick; active tab's
+              // dark bg still wins the primary selection cue.
+              const matchRingCls = matched
+                ? (active ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-slate-800' : 'ring-2 ring-amber-400')
+                : ''
               return (
                 <button key={s.subscription_id}
                   onClick={() => setSelectedSubId(s.subscription_id)}
@@ -487,10 +549,17 @@ export default function FarmerSupportDetailPage() {
                     active
                       ? 'bg-slate-800 border-slate-800 text-white'
                       : 'bg-white border-slate-200 text-slate-700 hover:border-slate-400'
-                  }`}>
+                  } ${matchRingCls}`}>
                   <p className="font-semibold">
                     {s.crop_name || 'Crop'}
                     {s.is_active && <span className="ml-2 text-[10px] uppercase tracking-wider">Active</span>}
+                    {matched && (
+                      <span className={`ml-2 text-[9px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded ${
+                        active ? 'bg-amber-400 text-slate-900' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        Filter match
+                      </span>
+                    )}
                   </p>
                   <p className={`text-[11px] ${active ? 'text-slate-200' : 'text-slate-500'}`}>
                     {s.package_name || '—'} · Start {fmtDate(s.crop_start_date)}

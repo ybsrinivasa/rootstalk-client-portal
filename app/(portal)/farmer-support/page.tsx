@@ -418,9 +418,21 @@ export default function FarmerSupportPage() {
             <tbody>
               {visibleRows.map(r => {
                 const alerts = rowAlerts(r)
+                // 2026-11-14 — forward the sub-side filters (not
+                // farmer/user-side ones like search/state/district)
+                // so the 360° view can highlight the matching sub
+                // tabs + pre-select the first match.
+                const subFilterQs = new URLSearchParams()
+                if (cropFilter) subFilterQs.set('crop_cosh_id', cropFilter)
+                if (statusFilter) subFilterQs.set('subscription_status', statusFilter)
+                if (originFilter) subFilterQs.set('origin', originFilter)
+                if (startFrom) subFilterQs.set('start_date_from', startFrom)
+                if (startTo) subFilterQs.set('start_date_to', startTo)
+                const qs = subFilterQs.toString()
+                const href = `/farmer-support/${r.user_id}${qs ? `?${qs}` : ''}`
                 return (
                   <tr key={r.user_id}
-                    onClick={() => router.push(`/farmer-support/${r.user_id}`)}
+                    onClick={() => router.push(href)}
                     className="border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer">
                     <td className="px-4 py-3">
                       <p className="font-medium text-slate-800">{r.name || <span className="text-slate-400">—</span>}</p>
