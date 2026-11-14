@@ -60,8 +60,11 @@ export default function NearbyContactsPanel({
   currentAlertReceiverUserId,
   currentAlertReceiverName,
   currentAlertReceiverPhone,
+  currentPromoterPunditUserId,
+  currentPromoterPunditName,
+  currentPromoterPunditPhone,
   canAssignAlertReceiver,
-  onAlertReceiverChanged,
+  onReceiverChanged,
 }: {
   clientId: string
   farmerUserId: string
@@ -73,13 +76,25 @@ export default function NearbyContactsPanel({
   currentAlertReceiverUserId: string | null
   currentAlertReceiverName: string | null
   currentAlertReceiverPhone: string | null
+  // 2026-11-14 pt6 — RM-pinned Promoter-Pundit. Same gate as Alert
+  // Receiver (canAssignAlertReceiver). Radio enabled only for rows
+  // where is_promoter_pundit=true — the backend rejects otherwise.
+  currentPromoterPunditUserId: string | null
+  currentPromoterPunditName: string | null
+  currentPromoterPunditPhone: string | null
   canAssignAlertReceiver: boolean
-  onAlertReceiverChanged: () => void
+  // Fires after ANY assignment change (alert receiver OR promoter-
+  // pundit). Parent refetches subs so selectedSub reflects new state.
+  onReceiverChanged: () => void
 }) {
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [typeFilter, setTypeFilter] = useState<RoleFilter>('ALL')
+  // Pending-assignment state tracks WHICH field is being changed so
+  // the confirm modal + the mutation call can route correctly.
+  type PendingField = 'ALERT_RECEIVER' | 'PROMOTER_PUNDIT'
+  const [pendingField, setPendingField] = useState<PendingField | null>(null)
   const [pendingUserId, setPendingUserId] = useState<string | null>(null)
   const [pendingClear, setPendingClear] = useState<boolean>(false)
   const [mutating, setMutating] = useState<boolean>(false)
@@ -100,21 +115,24 @@ export default function NearbyContactsPanel({
     return () => { cancelled = true }
   }, [clientId, farmerUserId, subscriptionId])
 
-  async function doSetReceiver(newUserId: string | null) {
+  async function doSetAssignment(field: PendingField, newUserId: string | null) {
     setMutating(true); setMutErr(null)
+    const endpoint = field === 'ALERT_RECEIVER' ? 'alert-receiver' : 'promoter-pundit'
     try {
       await api.put(
-        `/client/${clientId}/farmer-support/farmers/${farmerUserId}/subscriptions/${subscriptionId}/alert-receiver`,
+        `/client/${clientId}/farmer-support/farmers/${farmerUserId}/subscriptions/${subscriptionId}/${endpoint}`,
         { user_id: newUserId },
       )
-      onAlertReceiverChanged()
+      onReceiverChanged()
       setPendingUserId(null)
       setPendingClear(false)
+      setPendingField(null)
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { detail?: string | { message?: string } } }; message?: string }
       const detail = err?.response?.data?.detail
       const detailMsg = typeof detail === 'object' ? detail?.message : (detail as string)
-      setMutErr(`${err?.response?.status || ''} ${detailMsg || err?.message || 'Failed to update Alert Receiver.'}`.trim())
+      const label = field === 'ALERT_RECEIVER' ? 'Alert Receiver' : 'Promoter-Pundit'
+      setMutErr(`${err?.response?.status || ''} ${detailMsg || err?.message || `Failed to update ${label}.`}`.trim())
     } finally {
       setMutating(false)
     }
@@ -146,59 +164,99 @@ export default function NearbyContactsPanel({
 
   return (
     <div className="space-y-3">
-      {/* Current Alert Receiver header — always visible at top of
-          panel so the RM can see the current state without scanning
-          the list. Includes a Clear button when there's an override
-          to clear (RM-only). */}
-      <div className="flex items-start justify-between gap-3 flex-wrap bg-white border border-slate-200 rounded-lg px-3 py-2">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-            Current Alert Receiver
-          </p>
-          {currentAlertReceiverUserId ? (
-            <p className="text-slate-800 font-semibold">
-              {currentAlertReceiverName || '—'}
-              {currentAlertReceiverPhone && (
-                <>
-                  {' · '}
-                  <a href={`tel:${currentAlertReceiverPhone}`} className="text-blue-700 hover:underline">
-                    {currentAlertReceiverPhone}
-                  </a>
-                </>
-              )}
+      {/* Current assignments header — always visible at top of panel.
+          Shows BOTH the Alert Receiver and the pinned Promoter-Pundit.
+          Each has its own Clear button (RM-only). */}
+      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 space-y-2">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Current Alert Receiver
             </p>
-          ) : (
-            <p className="text-slate-500 italic">None assigned — alerts fall back to this sub&apos;s promoter.</p>
+            {currentAlertReceiverUserId ? (
+              <p className="text-slate-800 font-semibold">
+                {currentAlertReceiverName || '—'}
+                {currentAlertReceiverPhone && (
+                  <>
+                    {' · '}
+                    <a href={`tel:${currentAlertReceiverPhone}`} className="text-blue-700 hover:underline">
+                      {currentAlertReceiverPhone}
+                    </a>
+                  </>
+                )}
+              </p>
+            ) : (
+              <p className="text-slate-500 italic">None assigned — alerts fall back to this sub&apos;s promoter.</p>
+            )}
+          </div>
+          {canAssignAlertReceiver && currentAlertReceiverUserId && (
+            <button type="button"
+              onClick={() => { setPendingField('ALERT_RECEIVER'); setPendingClear(true); setMutErr(null) }}
+              disabled={mutating}
+              className="text-[11px] text-rose-700 hover:text-rose-900 hover:underline font-semibold disabled:opacity-50">
+              Clear (restore default)
+            </button>
           )}
         </div>
-        {canAssignAlertReceiver && currentAlertReceiverUserId && (
-          <button type="button"
-            onClick={() => { setPendingClear(true); setMutErr(null) }}
-            disabled={mutating}
-            className="text-[11px] text-rose-700 hover:text-rose-900 hover:underline font-semibold disabled:opacity-50">
-            Clear (restore default)
-          </button>
-        )}
+        <div className="flex items-start justify-between gap-3 flex-wrap border-t border-slate-100 pt-2">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Current Promoter-Pundit
+            </p>
+            {currentPromoterPunditUserId ? (
+              <p className="text-slate-800 font-semibold">
+                {currentPromoterPunditName || '—'}
+                {currentPromoterPunditPhone && (
+                  <>
+                    {' · '}
+                    <a href={`tel:${currentPromoterPunditPhone}`} className="text-blue-700 hover:underline">
+                      {currentPromoterPunditPhone}
+                    </a>
+                  </>
+                )}
+              </p>
+            ) : (
+              <p className="text-slate-500 italic">None pinned — queries route via default rules.</p>
+            )}
+          </div>
+          {canAssignAlertReceiver && currentPromoterPunditUserId && (
+            <button type="button"
+              onClick={() => { setPendingField('PROMOTER_PUNDIT'); setPendingClear(true); setMutErr(null) }}
+              disabled={mutating}
+              className="text-[11px] text-rose-700 hover:text-rose-900 hover:underline font-semibold disabled:opacity-50">
+              Clear (restore default)
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Confirmation modal — appears either for a new assignment
-          (pendingNewUser set) or a Clear (pendingClear). */}
-      {(pendingNewUser || pendingClear) && (
+          (pendingNewUser set) or a Clear (pendingClear). pendingField
+          decides which field (Alert Receiver vs Promoter-Pundit)
+          is being changed. */}
+      {(pendingNewUser || pendingClear) && pendingField && (() => {
+        const fieldLabel = pendingField === 'ALERT_RECEIVER' ? 'Alert Receiver' : 'Promoter-Pundit'
+        const currentName = pendingField === 'ALERT_RECEIVER' ? currentAlertReceiverName : currentPromoterPunditName
+        const effectBlurb = pendingField === 'ALERT_RECEIVER'
+          ? "They'll start receiving alerts immediately."
+          : "They'll start receiving the farmer's expert queries immediately."
+        const clearBlurb = pendingField === 'ALERT_RECEIVER'
+          ? "Alerts will go to the default contact (this subscription's promoter)."
+          : "Queries will route via the default rules again."
+        return (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-md w-full p-5 shadow-xl">
             <p className="text-sm font-bold text-slate-900 mb-2">
-              {pendingClear ? 'Clear Alert Receiver?' : 'Change Alert Receiver?'}
+              {pendingClear ? `Clear ${fieldLabel}?` : `Change ${fieldLabel}?`}
             </p>
             <p className="text-xs text-slate-700 mb-3">
-              {pendingClear ? (
-                <>Alerts will go to the default contact (this subscription&apos;s promoter).</>
-              ) : (
+              {pendingClear ? clearBlurb : (
                 <>
                   Change from{' '}
-                  <strong>{currentAlertReceiverName || 'None'}</strong>
+                  <strong>{currentName || 'None'}</strong>
                   {' '}to{' '}
                   <strong>{pendingNewUser?.name || '—'}</strong>
-                  . They&apos;ll start receiving alerts immediately.
+                  . {effectBlurb}
                 </>
               )}
             </p>
@@ -210,13 +268,13 @@ export default function NearbyContactsPanel({
             )}
             <div className="flex justify-end gap-2">
               <button type="button"
-                onClick={() => { setPendingUserId(null); setPendingClear(false); setMutErr(null) }}
+                onClick={() => { setPendingUserId(null); setPendingClear(false); setPendingField(null); setMutErr(null) }}
                 disabled={mutating}
                 className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded disabled:opacity-50">
                 Cancel
               </button>
               <button type="button"
-                onClick={() => doSetReceiver(pendingClear ? null : (pendingUserId as string))}
+                onClick={() => doSetAssignment(pendingField, pendingClear ? null : (pendingUserId as string))}
                 disabled={mutating}
                 className="px-3 py-1.5 text-xs bg-slate-800 text-white rounded hover:bg-slate-900 disabled:opacity-50">
                 {mutating ? 'Saving…' : (pendingClear ? 'Clear' : 'Change')}
@@ -224,7 +282,8 @@ export default function NearbyContactsPanel({
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {!data.farmer_has_gps && (
         <p className="text-[11px] text-amber-700 italic">
@@ -260,7 +319,10 @@ export default function NearbyContactsPanel({
               <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                 <tr>
                   {canAssignAlertReceiver && (
-                    <th className="text-center px-2 py-2 w-16">Alert<br />Receiver</th>
+                    <>
+                      <th className="text-center px-2 py-2 w-16">Alert<br />Receiver</th>
+                      <th className="text-center px-2 py-2 w-16">Promoter-<br />Pundit</th>
+                    </>
                   )}
                   <th className="text-left px-2 py-2">Name</th>
                   <th className="text-left px-2 py-2">Role</th>
@@ -271,31 +333,61 @@ export default function NearbyContactsPanel({
               </thead>
               <tbody>
                 {filtered.map(c => {
-                  const isCurrent = c.user_id === currentAlertReceiverUserId
+                  const isCurrentAR = c.user_id === currentAlertReceiverUserId
+                  const isCurrentPP = c.user_id === currentPromoterPunditUserId
+                  const rowHighlight = isCurrentAR
+                    ? 'bg-amber-50 border-l-4 border-l-amber-400'
+                    : isCurrentPP
+                      ? 'bg-violet-50 border-l-4 border-l-violet-400'
+                      : ''
                   return (
-                  <tr key={c.user_id}
-                    className={`border-b border-slate-50 ${
-                      isCurrent ? 'bg-amber-50 border-l-4 border-l-amber-400' : ''
-                    }`}>
+                  <tr key={c.user_id} className={`border-b border-slate-50 ${rowHighlight}`}>
                     {canAssignAlertReceiver && (
-                      <td className="px-2 py-2 text-center">
-                        <input type="radio"
-                          name="alert-receiver"
-                          checked={isCurrent}
-                          disabled={mutating}
-                          onChange={() => {
-                            if (isCurrent) return
-                            setPendingUserId(c.user_id)
-                            setMutErr(null)
-                          }}
-                          aria-label={`Assign ${c.name || 'contact'} as Alert Receiver`} />
-                      </td>
+                      <>
+                        <td className="px-2 py-2 text-center">
+                          <input type="radio"
+                            name="alert-receiver"
+                            checked={isCurrentAR}
+                            disabled={mutating}
+                            onChange={() => {
+                              if (isCurrentAR) return
+                              setPendingField('ALERT_RECEIVER')
+                              setPendingUserId(c.user_id)
+                              setMutErr(null)
+                            }}
+                            aria-label={`Assign ${c.name || 'contact'} as Alert Receiver`} />
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          {/* Only P-Ps are eligible — radio hidden on
+                              non-P-P rows to make the valid set obvious. */}
+                          {c.is_promoter_pundit ? (
+                            <input type="radio"
+                              name="promoter-pundit"
+                              checked={isCurrentPP}
+                              disabled={mutating}
+                              onChange={() => {
+                                if (isCurrentPP) return
+                                setPendingField('PROMOTER_PUNDIT')
+                                setPendingUserId(c.user_id)
+                                setMutErr(null)
+                              }}
+                              aria-label={`Pin ${c.name || 'contact'} as Promoter-Pundit`} />
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                      </>
                     )}
                     <td className="px-2 py-2 font-medium text-slate-800">
                       {c.name || '—'}
-                      {isCurrent && (
+                      {isCurrentAR && (
                         <span className="ml-2 text-[9px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded bg-amber-400 text-slate-900">
                           Current Alert Receiver
+                        </span>
+                      )}
+                      {isCurrentPP && (
+                        <span className="ml-2 text-[9px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded bg-violet-500 text-white">
+                          Current Promoter-Pundit
                         </span>
                       )}
                     </td>
