@@ -329,7 +329,7 @@ export default function NearbyContactsPanel({
               )}
             </p>
             <p className="text-[11px] text-slate-500 italic mb-4">
-              The farmer will be notified by SMS (best-effort). This change is permanent-logged in the audit trail.
+              This change is permanent-logged in the audit trail.
             </p>
             {mutErr && (
               <p className="text-xs text-red-600 mb-3">{mutErr}</p>
