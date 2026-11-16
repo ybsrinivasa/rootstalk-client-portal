@@ -256,8 +256,20 @@ export default function UsersPage() {
         }
         byId.set(u.id, g)
       }
-      g.roles.push(u.role)
-      if (u.status === 'ACTIVE') g.anyActive = true
+      // 2026-11-16 — Only push ACTIVE roles. Pre-fix, INACTIVE rows
+      // appeared in the row's chip list AND were pre-checked in the
+      // Edit Roles modal, which would silently re-activate them on
+      // Save (backend reconcile treats the posted list as the target
+      // ACTIVE set). First caught 2026-11-16 at Kalyan RamaRajya: a
+      // user with 3 ACTIVE + 2 INACTIVE roles appeared to have all 5
+      // in the UI — but /me correctly returned only the 3, so the
+      // sidebar's Farmer Support (RM-only) stayed hidden and the
+      // user thought the whole feature was broken. Dedupe too (if
+      // the data carries a historical duplicate row, we want one chip).
+      if (u.status === 'ACTIVE') {
+        if (!g.roles.includes(u.role)) g.roles.push(u.role)
+        g.anyActive = true
+      }
     }
     return Array.from(byId.values())
   }, [users])
