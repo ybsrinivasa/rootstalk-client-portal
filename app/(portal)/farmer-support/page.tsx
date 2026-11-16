@@ -1,17 +1,18 @@
 'use client'
 
-// Farmer Support View (Phase 2, 2026-11-10) — CRM-style list for the
-// CLIENT_RM role (plus CA + CM-EDIT + SA). Alert tiles at the top
-// double as one-tap filters. Clicking a farmer row opens the 360°
-// view — that page is a Phase 3 placeholder for now.
+// Farmer Support — list view (Bundle B, 2026-11-16).
+// CRM-style list for CLIENT_RM (plus CA + CM-EDIT + SA). Alert tiles
+// at the top double as one-tap filters. Farmer rows are collapsed by
+// default; clicking a row expands it inline to show that farmer's
+// matching subscriptions. Each sub row is clickable and navigates to
+// the per-sub detail page (/farmer-support/[userId]/subscriptions/[subId]).
 //
-// Design: ~/Downloads/RootsTalk_ClientPortal_FarmerSupport.docx
-// Backend endpoints live in clients/router.py (Phase 1 shipped 2026-11-10).
+// Default filter: subscription_status=ACTIVE. Keeps the inline sub
+// list naturally bounded to the 1–6 actionable crops the RM typically
+// calls about. "No Active Subscription" alert-tile widens the filter.
 //
-// Read-and-remind principle: this page is view-only. There are no
-// actions on farmer state from here — the farmer-mutation endpoints
-// on the backend refuse non-owner callers anyway, so the UI
-// deliberately offers no handles.
+// Origin is rendered as a secondary chip under Status visually; both
+// are independent URL params so flipping Status doesn't reset Origin.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -24,10 +25,7 @@ interface FarmerRow {
   name: string | null
   phone: string | null
   state_cosh_id: string | null
-  // 2026-11-11 — backend now resolves state/district names (first-cohort
-  // RM reported seeing truncated cosh_ids like "3b9f56d0…" in the
-  // dropdowns). sub_district stays cosh_id-only; the list filter UI
-  // doesn't surface it.
+  // 2026-11-11 — backend-resolved readable names next to cosh_ids.
   state_name: string | null
   district_cosh_id: string | null
   district_name: string | null
@@ -35,7 +33,11 @@ interface FarmerRow {
   latest_subscription_id: string | null
   latest_subscription_status: string | null
   latest_crop_start_date: string | null  // ISO date or null
-  active_subscription_count: number
+  // Bundle B (2026-11-16) — count of subs matching the current
+  // filter set (status / origin / crop / date / promoter). Was
+  // `active_subscription_count` which ignored every sub-level filter
+  // → confusing numbers under Origin/Crop filters.
+  matching_subscription_count: number
   promoter_name: string | null
 }
 interface FarmersPage {
@@ -44,10 +46,28 @@ interface FarmersPage {
   page_size: number
   rows: FarmerRow[]
 }
+
+// Bundle B — per-farmer sub summary, fetched on row expand from
+// /farmer-support/farmers/{uid}/subscriptions with the same filters.
+interface FarmerSub {
+  subscription_id: string
+  status: string
+  is_active: boolean
+  subscription_type: 'SELF' | 'ASSIGNED'
+  package_name: string | null
+  crop_cosh_id: string | null
+  crop_name: string | null
+  crop_start_date: string | null
+  promoter_name: string | null
+  diagnoses_count: number
+  unanswered_queries_count: number
+  auto_remove_at: string | null
+  matches_filter: boolean | null
+}
+
 interface BaseAlertRow {
   subscription_id: string
-  farmer_user_id: string  // 2026-11-10 Phase 3 — added backend-side so
-                          // per-row badge match is a hard id-match.
+  farmer_user_id: string
   farmer_name: string | null
   farmer_phone: string | null
   state_cosh_id: string | null
@@ -105,18 +125,30 @@ function toneClasses(tone: string): { tile: string; badge: string } {
   }
 }
 
+// Status values the list filter accepts. 'ALL' = no status filter
+// (used by the "No Active Subscription" alert tile which needs to
+// override the default-ACTIVE scope). Default on initial page load is
+// 'ACTIVE' — see rationale in the file header.
+type StatusFilter = '' | 'ACTIVE' | 'COMPLETED' | 'NOT_STARTED' | 'ALL'
+
+// sessionStorage key for the expansion state so a back-nav from a
+// sub-detail page lands with the right farmer row re-opened.
+const EXPANSION_KEY = 'rt_fs_expanded_v1'
+
 
 export default function FarmerSupportPage() {
   const router = useRouter()
   const client = getClient()
   const clientId = client?.id
 
-  // Filters
+  // Filters. Default statusFilter = ACTIVE per the Bundle B design —
+  // the collapsed-row list is most useful when it defaults to the
+  // actionable crops. RM can flip to COMPLETED/etc. manually.
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('')
   const [districtFilter, setDistrictFilter] = useState('')
   const [cropFilter, setCropFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'' | 'ACTIVE' | 'COMPLETED' | 'NOT_STARTED'>('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ACTIVE')
   const [originFilter, setOriginFilter] = useState<'' | 'SELF' | 'PROMOTER'>('')
   const [startFrom, setStartFrom] = useState('')
   const [startTo, setStartTo] = useState('')
@@ -132,6 +164,21 @@ export default function FarmerSupportPage() {
   const [farmers, setFarmers] = useState<FarmersPage>({ total: 0, page: 1, page_size: 25, rows: [] })
   const [loading, setLoading] = useState(true)
 
+  // Bundle B — per-farmer expansion state + lazy-fetched sub list.
+  // Hydrated from sessionStorage on mount so returning from a sub-
+  // detail page restores the opened rows.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const raw = sessionStorage.getItem(EXPANSION_KEY)
+      if (!raw) return new Set()
+      return new Set(JSON.parse(raw) as string[])
+    } catch { return new Set() }
+  })
+  const [subsByFarmer, setSubsByFarmer] = useState<Record<string, FarmerSub[]>>({})
+  const [subsLoading, setSubsLoading] = useState<Set<string>>(new Set())
+  const [subsError, setSubsError] = useState<Record<string, string>>({})
+
   // Alert tile data (counts + farmer_user_id set for cross-referencing)
   const [pendingDates, setPendingDates] = useState<PendingStartDateRow[]>([])
   const [overdueInputs, setOverdueInputs] = useState<OverdueInputRow[]>([])
@@ -140,12 +187,7 @@ export default function FarmerSupportPage() {
   const [noActiveSubs, setNoActiveSubs] = useState<NoActiveSubRow[]>([])
   const [alertsLoading, setAlertsLoading] = useState(true)
 
-  // Derived state/district options from the loaded farmer rows so the
-  // RM doesn't wade through every geography we support. Same pattern
-  // the existing /alerts page uses.
-  // Keep (cosh_id, name) pairs so the <option value> stays the id we
-  // POST back to the backend, but the LABEL is the human-readable name
-  // the RM actually recognises.
+  // Derived state/district options from the loaded farmer rows.
   const stateOptions = useMemo(() => {
     const seen = new Map<string, string>()
     farmers.rows.forEach(r => {
@@ -182,6 +224,23 @@ export default function FarmerSupportPage() {
     } finally { setAlertsLoading(false) }
   }, [clientId])
 
+  // Bundle B — current filter-set as a query string. Shared between
+  // the list fetch + the per-farmer subs fetch on row-expand (so the
+  // inline sub list matches the chip the RM saw on the farmer row).
+  // Omits farmer-side filters (search/state/district) which don't
+  // make sense inside a single farmer's sub list.
+  const subFilterQs = useMemo(() => {
+    const p = new URLSearchParams()
+    if (cropFilter) p.set('crop_cosh_id', cropFilter)
+    if (statusFilter && statusFilter !== 'ALL') {
+      p.set('subscription_status', statusFilter)
+    }
+    if (originFilter) p.set('origin', originFilter)
+    if (startFrom) p.set('start_date_from', startFrom)
+    if (startTo) p.set('start_date_to', startTo)
+    return p
+  }, [cropFilter, statusFilter, originFilter, startFrom, startTo])
+
   const loadFarmers = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
@@ -191,7 +250,9 @@ export default function FarmerSupportPage() {
       if (stateFilter) params.set('state_cosh_id', stateFilter)
       if (districtFilter) params.set('district_cosh_id', districtFilter)
       if (cropFilter) params.set('crop_cosh_id', cropFilter)
-      if (statusFilter) params.set('subscription_status', statusFilter)
+      if (statusFilter && statusFilter !== 'ALL') {
+        params.set('subscription_status', statusFilter)
+      }
       if (originFilter) params.set('origin', originFilter)
       if (startFrom) params.set('start_date_from', startFrom)
       if (startTo) params.set('start_date_to', startTo)
@@ -216,17 +277,32 @@ export default function FarmerSupportPage() {
   useEffect(() => { loadFarmers() }, [loadFarmers])
 
   // When any filter (other than page) changes, reset to page 1 so the
-  // user doesn't land on an out-of-range page after narrowing.
-  useEffect(() => { setPage(1) },
-    [search, stateFilter, districtFilter, cropFilter, statusFilter,
-     originFilter, startFrom, startTo, sortBy, sortDir, pageSize, alertType])
+  // user doesn't land on an out-of-range page after narrowing. Also
+  // clear the lazy sub cache — cached subs were fetched under the
+  // previous filter set and would be stale for the new view.
+  useEffect(() => {
+    setPage(1)
+    setSubsByFarmer({})
+    setSubsError({})
+  }, [search, stateFilter, districtFilter, cropFilter, statusFilter,
+      originFilter, startFrom, startTo, sortBy, sortDir, pageSize, alertType])
+
+  // Persist expansion state so back-nav from a sub page restores it.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      sessionStorage.setItem(
+        EXPANSION_KEY,
+        JSON.stringify(Array.from(expandedIds)),
+      )
+    } catch { /* quota exceeded — harmless */ }
+  }, [expandedIds])
 
   // Alert-type filter is applied in the UI rather than pushed down to
-  // the backend: when alertType is set, the rows displayed are the
-  // intersection of (full farmer list) ∩ (farmer_user_ids on that
-  // alert endpoint). The farmers endpoint is slim; the alert endpoint
-  // already returned once as part of the tile summary. No extra
-  // round-trip per filter toggle.
+  // the backend: intersection of (full farmer list) ∩ (farmer_user_ids
+  // on that alert endpoint). Alert tiles for "No Active Subscription"
+  // additionally widen Status to ALL (rows with 0 active subs would
+  // otherwise be hidden by the default-ACTIVE scope).
   const alertRowsByType: Record<AlertType, BaseAlertRow[]> = {
     MISSING_START_DATE:     pendingDates,
     OVERDUE_INPUT:          overdueInputs,
@@ -234,12 +310,6 @@ export default function FarmerSupportPage() {
     OVERDUE_EXPERT_QUERY:   overdueQueries,
     NO_ACTIVE_SUBSCRIPTION: noActiveSubs,
   }
-  // 2026-11-14 — collect the subscription_ids that the alert endpoint
-  // emitted PER farmer, so a row click while an alert is active can
-  // forward the exact subs that triggered the alert to the 360° view.
-  // Previously the 360° view only knew the alert type in the CP's
-  // local state → clicking a farmer discarded that context and showed
-  // all subs with no indication of which ones triggered the alert.
   const alertSubIdsByFarmer = useMemo(() => {
     const out: Record<AlertType, Record<string, Set<string>>> = {
       MISSING_START_DATE: {},
@@ -261,11 +331,6 @@ export default function FarmerSupportPage() {
   }, [pendingDates, overdueInputs, missedInputs, overdueQueries, noActiveSubs])
 
   const alertFarmerIdsByType = useMemo(() => {
-    // 2026-11-10 Phase 3 — alert endpoints now surface
-    // farmer_user_id, so the per-row badge match is a hard id-match.
-    // (The Phase 2 original matched on name+phone; soft-but-adequate
-    // for the sample size we had, but id is the obviously-correct
-    // key now that it's available.)
     const out: Record<AlertType, Set<string>> = {
       MISSING_START_DATE: new Set(),
       OVERDUE_INPUT: new Set(),
@@ -294,10 +359,102 @@ export default function FarmerSupportPage() {
       .filter(t => alertFarmerIdsByType[t].has(r.user_id))
   }, [alertFarmerIdsByType])
 
+  // Alert-tile click. For "No Active Subscription" we also widen the
+  // Status filter to ALL — the rows that trigger the alert have ZERO
+  // active subs, so the default-ACTIVE list scope would hide them.
+  function onAlertTileClick(t: AlertType) {
+    const active = alertType === t
+    if (active) {
+      setAlertType('')
+      return
+    }
+    setAlertType(t)
+    if (t === 'NO_ACTIVE_SUBSCRIPTION' && statusFilter === 'ACTIVE') {
+      setStatusFilter('ALL')
+    }
+  }
+
   function clearFilters() {
     setSearch(''); setStateFilter(''); setDistrictFilter(''); setCropFilter('')
-    setStatusFilter(''); setOriginFilter('')
+    // Reset Status back to the Bundle B default (ACTIVE), not blank —
+    // the design anchor is "actionable crops first".
+    setStatusFilter('ACTIVE'); setOriginFilter('')
     setStartFrom(''); setStartTo(''); setAlertType('')
+  }
+
+  // Bundle B — toggle a farmer's expansion state + lazy-fetch its
+  // sub list on first expand.
+  const toggleExpand = useCallback((userId: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(userId)) {
+        next.delete(userId)
+      } else {
+        next.add(userId)
+      }
+      return next
+    })
+  }, [])
+
+  // Fetch subs for any newly-expanded farmer that doesn't have cached
+  // subs yet. Deliberately NOT a per-row fetch inside the render loop
+  // — we batch through useEffect so changing filters while rows are
+  // open re-fetches cleanly.
+  useEffect(() => {
+    if (!clientId) return
+    for (const uid of expandedIds) {
+      if (subsByFarmer[uid] || subsLoading.has(uid)) continue
+      setSubsLoading(prev => {
+        const next = new Set(prev); next.add(uid); return next
+      })
+      const qs = subFilterQs.toString()
+      api.get<FarmerSub[]>(
+        `/client/${clientId}/farmer-support/farmers/${uid}/subscriptions${qs ? `?${qs}` : ''}`,
+      )
+        .then(({ data }) => {
+          setSubsByFarmer(prev => ({ ...prev, [uid]: data }))
+        })
+        .catch(e => {
+          const err = e as { message?: string; response?: { status?: number } }
+          setSubsError(prev => ({
+            ...prev,
+            [uid]: `Could not load subscriptions (${err?.response?.status || err?.message || 'error'})`,
+          }))
+        })
+        .finally(() => {
+          setSubsLoading(prev => {
+            const next = new Set(prev); next.delete(uid); return next
+          })
+        })
+    }
+  }, [expandedIds, clientId, subsByFarmer, subsLoading, subFilterQs])
+
+  // Build the human-readable filter label passed through to the
+  // sub-detail page so the "came from filter: X" strip there reads
+  // true to what the RM had applied on this list.
+  function filterLabelForFarmer(farmerUserId: string): string {
+    const parts: string[] = []
+    if (cropFilter) parts.push('Crop filter')
+    if (statusFilter && statusFilter !== 'ALL') {
+      const label = {
+        ACTIVE: 'Status = Active',
+        COMPLETED: 'Status = Completed',
+        NOT_STARTED: 'Status = Not started',
+      }[statusFilter] || statusFilter
+      parts.push(label)
+    }
+    if (originFilter) {
+      parts.push(originFilter === 'SELF' ? 'Origin = Self' : 'Origin = Promoter')
+    }
+    if (startFrom) parts.push(`Start ≥ ${startFrom}`)
+    if (startTo) parts.push(`Start ≤ ${startTo}`)
+    if (alertType) {
+      const sids = alertSubIdsByFarmer[alertType]?.[farmerUserId]
+      if (sids && sids.size > 0) {
+        parts.splice(0, parts.length, ALERT_META[alertType].label)
+      }
+    }
+    return parts.join(' · ')
   }
 
   const totalPages = Math.max(1, Math.ceil(farmers.total / pageSize))
@@ -322,7 +479,7 @@ export default function FarmerSupportPage() {
           const active = alertType === t
           return (
             <button key={t}
-              onClick={() => setAlertType(active ? '' : t)}
+              onClick={() => onAlertTileClick(t)}
               disabled={alertsLoading && count === 0}
               className={`text-left rounded-xl border-2 p-3 transition ${tc.tile} ${
                 active ? 'ring-2 ring-slate-800' : 'hover:ring-1 hover:ring-slate-400'
@@ -346,27 +503,37 @@ export default function FarmerSupportPage() {
         </div>
       )}
 
-      {/* Filter bar */}
+      {/* Filter bar — Status + nested Origin on the top row (Bundle B) */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search by name or phone…"
             className="md:col-span-2 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-          <select value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
-            className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-            <option value="">All subscription status</option>
-            <option value="ACTIVE">Active only</option>
-            <option value="COMPLETED">Completed only</option>
-            <option value="NOT_STARTED">Not started (no start date)</option>
-          </select>
-          <select value={originFilter}
-            onChange={e => setOriginFilter(e.target.value as typeof originFilter)}
-            className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-            <option value="">All origins</option>
-            <option value="SELF">Self-subscribed only</option>
-            <option value="PROMOTER">Promoter-assigned only</option>
-          </select>
+          <div className="md:col-span-2 border border-slate-200 rounded-lg px-3 py-2 bg-slate-50">
+            <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+              Subscription status
+            </label>
+            <select value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+              className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white">
+              <option value="ACTIVE">Active only (default)</option>
+              <option value="COMPLETED">Completed only</option>
+              <option value="NOT_STARTED">Not started (no start date)</option>
+              <option value="ALL">All (any status)</option>
+            </select>
+            <div className="mt-2 ml-3 pl-3 border-l-2 border-slate-300">
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                ↳ Origin
+              </label>
+              <select value={originFilter}
+                onChange={e => setOriginFilter(e.target.value as typeof originFilter)}
+                className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white">
+                <option value="">All origins</option>
+                <option value="SELF">Self-subscribed only</option>
+                <option value="PROMOTER">Promoter-assigned only</option>
+              </select>
+            </div>
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
           <select value={stateFilter}
@@ -416,7 +583,7 @@ export default function FarmerSupportPage() {
           </div>
           <button onClick={clearFilters}
             className="text-xs text-slate-500 hover:text-slate-900 underline">
-            Clear all filters
+            Reset to defaults
           </button>
         </div>
       </div>
@@ -433,9 +600,10 @@ export default function FarmerSupportPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
               <tr>
+                <th className="text-left px-4 py-2.5 font-semibold w-8"></th>
                 <th className="text-left px-4 py-2.5 font-semibold">Name</th>
                 <th className="text-left px-4 py-2.5 font-semibold">Phone</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Active subs</th>
+                <th className="text-left px-4 py-2.5 font-semibold">Subs</th>
                 <th className="text-left px-4 py-2.5 font-semibold">Promoter</th>
                 <th className="text-left px-4 py-2.5 font-semibold">Latest start</th>
                 <th className="text-left px-4 py-2.5 font-semibold">Alerts</th>
@@ -444,98 +612,31 @@ export default function FarmerSupportPage() {
             <tbody>
               {visibleRows.map(r => {
                 const alerts = rowAlerts(r)
-                // 2026-11-14 — forward the sub-side filters (not
-                // farmer/user-side ones like search/state/district)
-                // so the 360° view can hide non-matching tabs + pre-
-                // select the first match.
-                const subFilterQs = new URLSearchParams()
-                const labelParts: string[] = []
-                if (cropFilter) {
-                  subFilterQs.set('crop_cosh_id', cropFilter)
-                  labelParts.push('Crop filter')  // no dropdown label here
-                }
-                if (statusFilter) {
-                  subFilterQs.set('subscription_status', statusFilter)
-                  const statusLabel = {
-                    ACTIVE: 'Status = Active',
-                    COMPLETED: 'Status = Completed',
-                    NOT_STARTED: 'Status = Not started',
-                  }[statusFilter] || statusFilter
-                  labelParts.push(statusLabel)
-                }
-                if (originFilter) {
-                  subFilterQs.set('origin', originFilter)
-                  labelParts.push(originFilter === 'SELF' ? 'Origin = Self' : 'Origin = Promoter')
-                }
-                if (startFrom) {
-                  subFilterQs.set('start_date_from', startFrom)
-                  labelParts.push(`Start ≥ ${startFrom}`)
-                }
-                if (startTo) {
-                  subFilterQs.set('start_date_to', startTo)
-                  labelParts.push(`Start ≤ ${startTo}`)
-                }
-                // 2026-11-14 pm — if an alert tile is active, forward
-                // the exact subscription_ids that triggered THIS
-                // farmer's alert. Alert signal wins over the broader
-                // sub-side filters (per-sub, more specific).
-                if (alertType) {
-                  const sids = alertSubIdsByFarmer[alertType]?.[r.user_id]
-                  if (sids && sids.size > 0) {
-                    subFilterQs.set('highlight_subscription_ids', Array.from(sids).join(','))
-                    // Alert label overrides the sub-side labels —
-                    // backend also prioritises highlight_subscription_ids.
-                    labelParts.splice(0, labelParts.length, ALERT_META[alertType].label)
-                  }
-                }
-                // 2026-11-14 pm — pre-formatted label so the 360° view
-                // can display WHAT the filter is without re-resolving
-                // cosh_ids or inventing its own labels.
-                if (labelParts.length > 0) {
-                  subFilterQs.set('filter_label', labelParts.join(' · '))
-                }
-                const qs = subFilterQs.toString()
-                const href = `/farmer-support/${r.user_id}${qs ? `?${qs}` : ''}`
+                const expanded = expandedIds.has(r.user_id)
+                const subs = subsByFarmer[r.user_id]
+                const loadingSubs = subsLoading.has(r.user_id)
+                const errorSubs = subsError[r.user_id]
+                const filterLabel = filterLabelForFarmer(r.user_id)
                 return (
-                  <tr key={r.user_id}
-                    onClick={() => router.push(href)}
-                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-slate-800">{r.name || <span className="text-slate-400">—</span>}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.phone ? (
-                        <a href={`tel:${r.phone}`} onClick={e => e.stopPropagation()}
-                          className="text-emerald-700 hover:underline font-mono text-xs">
-                          {r.phone}
-                        </a>
-                      ) : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{r.active_subscription_count}</td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {r.promoter_name || <span className="text-slate-400 italic">Self</span>}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {r.latest_crop_start_date
-                        ? new Date(r.latest_crop_start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                        : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1 flex-wrap">
-                        {alerts.length === 0 ? (
-                          <span className="text-slate-400 text-xs">—</span>
-                        ) : alerts.map(t => {
-                          const tc = toneClasses(ALERT_META[t].tone)
-                          return (
-                            <span key={t}
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${tc.badge}`}>
-                              {ALERT_META[t].shortLabel}
-                            </span>
-                          )
-                        })}
-                      </div>
-                    </td>
-                  </tr>
+                  <ExpandableFarmerRow
+                    key={r.user_id}
+                    row={r}
+                    alerts={alerts}
+                    expanded={expanded}
+                    onToggle={() => toggleExpand(r.user_id)}
+                    subs={subs}
+                    loadingSubs={loadingSubs}
+                    errorSubs={errorSubs}
+                    filterLabel={filterLabel}
+                    onSubClick={(subId) => {
+                      const qs = new URLSearchParams()
+                      if (filterLabel) qs.set('filter_label', filterLabel)
+                      const q = qs.toString()
+                      router.push(
+                        `/farmer-support/${r.user_id}/subscriptions/${subId}${q ? `?${q}` : ''}`,
+                      )
+                    }}
+                  />
                 )
               })}
             </tbody>
@@ -570,5 +671,177 @@ export default function FarmerSupportPage() {
         with the farmer. This view is for visibility and follow-up.
       </p>
     </div>
+  )
+}
+
+
+// ── Expandable farmer row ─────────────────────────────────────────────────────
+//
+// Click anywhere on the header row (except the phone link) to toggle
+// expansion. When expanded, inline sub rows render underneath with
+// crop / status / origin / promoter / start date / auto-remove chip.
+// Clicking a sub row fires `onSubClick(subscription_id)` which the
+// parent navigates with.
+
+function ExpandableFarmerRow({
+  row, alerts, expanded, onToggle,
+  subs, loadingSubs, errorSubs,
+  filterLabel, onSubClick,
+}: {
+  row: FarmerRow
+  alerts: AlertType[]
+  expanded: boolean
+  onToggle: () => void
+  subs: FarmerSub[] | undefined
+  loadingSubs: boolean
+  errorSubs: string | undefined
+  filterLabel: string
+  onSubClick: (subId: string) => void
+}) {
+  // Capture click events on the phone link separately so tapping the
+  // tel: link doesn't collapse the row.
+  function stop(e: React.MouseEvent) { e.stopPropagation() }
+
+  return (
+    <>
+      <tr
+        onClick={onToggle}
+        className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
+        <td className="px-4 py-3 text-slate-400 w-8">
+          <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>
+            ▸
+          </span>
+        </td>
+        <td className="px-4 py-3">
+          <p className="font-medium text-slate-800">
+            {row.name || <span className="text-slate-400">—</span>}
+          </p>
+        </td>
+        <td className="px-4 py-3">
+          {row.phone ? (
+            <a href={`tel:${row.phone}`} onClick={stop}
+              className="text-emerald-700 hover:underline font-mono text-xs">
+              {row.phone}
+            </a>
+          ) : <span className="text-slate-400">—</span>}
+        </td>
+        <td className="px-4 py-3 text-slate-700">
+          <span className="font-semibold">{row.matching_subscription_count}</span>
+          {row.matching_subscription_count === 0 && (
+            <span className="ml-2 text-[10px] text-slate-400">
+              (no matching subs under current filter)
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-xs text-slate-600">
+          {row.promoter_name || <span className="text-slate-400 italic">Self</span>}
+        </td>
+        <td className="px-4 py-3 text-xs text-slate-600">
+          {row.latest_crop_start_date
+            ? new Date(row.latest_crop_start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+            : <span className="text-slate-400">—</span>}
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex gap-1 flex-wrap">
+            {alerts.length === 0 ? (
+              <span className="text-slate-400 text-xs">—</span>
+            ) : alerts.map(t => {
+              const tc = toneClasses(ALERT_META[t].tone)
+              return (
+                <span key={t}
+                  className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${tc.badge}`}>
+                  {ALERT_META[t].shortLabel}
+                </span>
+              )
+            })}
+          </div>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="border-b border-slate-100 bg-slate-50">
+          <td></td>
+          <td colSpan={6} className="px-4 py-3">
+            {loadingSubs ? (
+              <p className="text-xs text-slate-400 italic">Loading subscriptions…</p>
+            ) : errorSubs ? (
+              <p className="text-xs text-rose-600">{errorSubs}</p>
+            ) : !subs || subs.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">
+                No subscriptions{filterLabel ? ` matching ${filterLabel}` : ''}.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {subs.map(s => (
+                  <SubRow key={s.subscription_id} sub={s} onClick={() => onSubClick(s.subscription_id)} />
+                ))}
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+
+function SubRow({ sub, onClick }: { sub: FarmerSub; onClick: () => void }) {
+  const status = (sub.status || '').toUpperCase()
+  const statusCls = sub.is_active
+    ? 'bg-emerald-100 text-emerald-800'
+    : status === 'CANCELLED' || status === 'UNSUBSCRIBED'
+      ? 'bg-rose-100 text-rose-700'
+      : status === 'WAITLISTED' ? 'bg-sky-100 text-sky-800'
+      : 'bg-slate-200 text-slate-700'
+  // Auto-remove chip — only for training crops with a running clock.
+  let autoRemoveChip: string | null = null
+  if (sub.auto_remove_at) {
+    const diffMs = new Date(sub.auto_remove_at).getTime() - Date.now()
+    const days = Math.ceil(diffMs / (24 * 60 * 60 * 1000))
+    autoRemoveChip = days > 0
+      ? `🎓 Auto-removes in ${days}d`
+      : '🎓 Clearing shortly'
+  }
+  return (
+    <button type="button" onClick={onClick}
+      className="w-full text-left bg-white border border-slate-200 rounded-lg px-3 py-2 hover:border-slate-400 hover:shadow-sm transition">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-semibold text-slate-800">
+          {sub.crop_name || 'Crop'}
+        </span>
+        <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded ${statusCls}`}>
+          {sub.is_active ? 'Active' : status || 'Inactive'}
+        </span>
+        <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded bg-slate-100 text-slate-700">
+          {sub.subscription_type === 'SELF' ? 'Self' : 'Promoter-assigned'}
+        </span>
+        {sub.matches_filter === true && (
+          <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-[1px] rounded bg-amber-100 text-amber-800">
+            Filter match
+          </span>
+        )}
+        {autoRemoveChip && (
+          <span className="text-[10px] font-medium px-2 py-[1px] rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+            {autoRemoveChip}
+          </span>
+        )}
+        {sub.diagnoses_count > 0 && (
+          <span className="text-[10px] font-semibold rounded-full px-2 py-[1px] bg-amber-100 text-amber-800">
+            D: {sub.diagnoses_count}
+          </span>
+        )}
+        {sub.unanswered_queries_count > 0 && (
+          <span className="text-[10px] font-semibold rounded-full px-2 py-[1px] bg-rose-100 text-rose-800">
+            Q: {sub.unanswered_queries_count}
+          </span>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1">
+        {sub.package_name || '—'}
+        {sub.crop_start_date && (
+          <> · Start {new Date(sub.crop_start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</>
+        )}
+        {sub.promoter_name && <> · Promoter: {sub.promoter_name}</>}
+      </p>
+    </button>
   )
 }
