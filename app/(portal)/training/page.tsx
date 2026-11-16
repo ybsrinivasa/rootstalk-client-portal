@@ -1,32 +1,22 @@
 'use client'
 
-// Training Sandbox page — Commit H of the 2026-07-24 build plan.
-// CA-only surface for the lifecycle of a training session:
-//   - When no session is running: a single "Start Training Session"
-//     CTA and a short explainer.
-//   - When a session is running: session summary (dates, remaining
-//     days, counts of subscriptions / farmers / promoters / orders /
-//     queries) plus an "End Session Now" CTA.
-//   - Winding-down state renders the same summary but disables Start
-//     and warns that the 24h grace is running.
+// Training Sandbox page — CA-only.
+// Two states:
+//   - When no session is running: "Start Training Session" CTA.
+//   - When a session is running: summary + "Close Session Now".
 //
-// Per the build plan (2026-07-24, "Summary + View Details for V1"),
-// this is the *summary* surface. No live activity feed; no
-// per-participant drill-down. If CAs ask for a deeper view later,
-// a /training/details page can hang off this tile without churning
-// the summary shape.
+// 2026-11-16 — Session no longer has a timer. Start creates the
+// training child; Close hard-cascade-deletes it. Each training crop
+// auto-removes 12 days after the farmer accepts the promoter's
+// invite (see `Subscription.auto_remove_at` +
+// `app/tasks/training_expiry.py` on the backend). The farmer and
+// the assigning promoter can both remove a training crop early via
+// their own PWA buttons.
 //
 // Backend endpoints:
 //   GET  /client/{cid}/training/current   — session + counts (or {}).
 //   POST /client/{cid}/training/start     — creates the child.
-//   POST /client/{cid}/training/end       — HARD close (cascade-deletes now).
-//   2026-07-25 — Switched from soft to hard close per team feedback:
-//   the DB unique index covers both ACTIVE + WINDING_DOWN, so the
-//   old soft-close blocked the CA from starting a fresh session for
-//   ~25h. Hard-close runs the cascade synchronously and frees the
-//   unique-index slot within seconds. WINDING_DOWN state is now
-//   unreachable via the End button (still reachable via the 12-day
-//   auto-expiry sweep, which keeps its 24h grace).
+//   POST /client/{cid}/training/end       — HARD close (cascades now).
 
 import { useCallback, useEffect, useState } from 'react'
 import { getClient } from '@/lib/auth'
@@ -49,13 +39,11 @@ interface TrainingSession {
   primary_colour: string | null
   logo_url: string | null
   training_started_at: string
-  training_ends_at: string
-  training_status: 'ACTIVE' | 'WINDING_DOWN'
   training_expert_user_id: string | null
   training_dealer_user_id: string | null
-  // 2026-08-19 — Backend now hydrates the assigned dealer's display
-  // info (name, phone, shop) on the /current read so the CA panel
-  // can show more than an opaque "Assigned" badge.
+  // 2026-08-19 — Backend hydrates the assigned dealer's display info
+  // (name, phone, shop) on the /current read so the CA panel can
+  // show more than an opaque "Assigned" badge.
   training_dealer_info?: TrainingDealerInfo | null
   counts: TrainingCounts
 }
@@ -79,20 +67,6 @@ function formatDateTime(iso: string): string {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
-}
-
-function daysRemaining(iso: string): number {
-  const now = Date.now()
-  const target = new Date(iso).getTime()
-  const diffMs = target - now
-  return Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1000)))
-}
-
-function hoursRemaining(iso: string, graceHours: number = 24): number {
-  const now = Date.now()
-  const target = new Date(iso).getTime() + graceHours * 60 * 60 * 1000
-  const diffMs = target - now
-  return Math.max(0, Math.ceil(diffMs / (60 * 60 * 1000)))
 }
 
 export default function TrainingSandboxPage() {
@@ -138,13 +112,13 @@ export default function TrainingSandboxPage() {
 
   const onEnd = useCallback(async () => {
     if (!clientId || busy) return
-    if (!confirm('End the training session now? All practice subscriptions, orders, and queries under it will be cleared immediately. This cannot be undone.')) return
+    if (!confirm('Close the training session now? All practice subscriptions, orders, and queries under it will be cleared immediately. This cannot be undone.')) return
     setBusy('end'); setError('')
     try {
       await api.post(`/client/${clientId}/training/end`, {})
       await load()
     } catch (err) {
-      setError(extractErrorMessage(err, 'Could not end the training session.'))
+      setError(extractErrorMessage(err, 'Could not close the training session.'))
     } finally {
       setBusy(null)
     }
@@ -179,11 +153,12 @@ export default function TrainingSandboxPage() {
             No training session running
           </h2>
           <p className="text-sm text-slate-600 mt-2 max-w-md mx-auto">
-            Start one when your team is ready. The session lasts 12
-            days from creation; after that it winds down over 24 hours
-            and everything under it (subscriptions, orders, queries)
-            is cleared automatically. You can also end it earlier at
-            any time — the clear happens immediately.
+            Start one when your team is ready. The session stays open
+            until you close it. Each training crop assigned to a
+            farmer auto-removes 12 days after the farmer accepts it;
+            the farmer or the promoter can also remove it earlier
+            from their phones. Close the session any time to clear
+            everything (subscriptions, orders, queries) immediately.
           </p>
           <button
             onClick={onStart}
@@ -205,33 +180,17 @@ export default function TrainingSandboxPage() {
                   <h2 className="font-semibold text-slate-900">
                     {session.display_name || 'Training session'}
                   </h2>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
-                    session.training_status === 'ACTIVE'
-                      ? 'bg-amber-200 text-amber-900'
-                      : 'bg-orange-200 text-orange-900'
-                  }`}>
-                    {session.training_status === 'ACTIVE'
-                      ? 'ACTIVE'
-                      : 'WINDING DOWN'}
+                  <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-200 text-amber-900">
+                    ACTIVE
                   </span>
                 </div>
                 <p className="text-xs text-slate-700 mt-1">
                   Started {formatDateTime(session.training_started_at)}
                 </p>
-                {session.training_status === 'ACTIVE' && (
-                  <p className="text-xs text-slate-700 mt-0.5">
-                    Ends {formatDateTime(session.training_ends_at)}{' '}
-                    · {daysRemaining(session.training_ends_at)} day
-                    {daysRemaining(session.training_ends_at) === 1 ? '' : 's'} remaining
-                  </p>
-                )}
-                {session.training_status === 'WINDING_DOWN' && (
-                  <p className="text-xs text-orange-800 mt-0.5">
-                    Winding down — {hoursRemaining(session.training_ends_at)} hour
-                    {hoursRemaining(session.training_ends_at) === 1 ? '' : 's'} until the
-                    sandbox is cleared. No new invitations can be sent.
-                  </p>
-                )}
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Open until you close it. Each training crop
+                  auto-removes 12 days after the farmer accepts.
+                </p>
               </div>
             </div>
           </div>
@@ -263,7 +222,7 @@ export default function TrainingSandboxPage() {
             </div>
           </div>
 
-          {session.training_status === 'ACTIVE' && clientId && (
+          {clientId && (
             <SessionRolesPanel
               clientId={clientId}
               expertUserId={session.training_expert_user_id}
@@ -273,17 +232,15 @@ export default function TrainingSandboxPage() {
             />
           )}
 
-          {session.training_status === 'ACTIVE' && (
-            <div className="flex items-center justify-end">
-              <button
-                onClick={onEnd}
-                disabled={busy !== null}
-                className="px-4 py-2 rounded-lg bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-semibold disabled:opacity-50"
-              >
-                {busy === 'end' ? 'Ending…' : 'End Session Now'}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center justify-end">
+            <button
+              onClick={onEnd}
+              disabled={busy !== null}
+              className="px-4 py-2 rounded-lg bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-semibold disabled:opacity-50"
+            >
+              {busy === 'end' ? 'Closing…' : 'Close Session Now'}
+            </button>
+          </div>
         </>
       )}
     </div>
