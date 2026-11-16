@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { getToken, getUser, getClient, setClient, logout, CPClient, CPUser } from '@/lib/auth'
+import { getToken, getUser, getClient, setClient, setUser as setUserCache, logout, CPClient, CPUser } from '@/lib/auth'
 import { isCoachView } from '@/lib/tokenStore'
 import api from '@/lib/api'
 
@@ -355,6 +355,24 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
           // Silent — stale cached client is better than a hard failure.
         })
     }
+
+    // 2026-11-16 — Refresh the user payload on mount too. Same
+    // pattern as the branding refresh above, same motivation: when
+    // the CA adds a new role (e.g. CLIENT_RM on top of an existing
+    // SUBJECT_EXPERT user), the sidebar's role-gated items should
+    // appear WITHOUT the user having to log out + log back in. The
+    // rt_cp_user payload in localStorage was previously set only at
+    // login time (lib/auth.ts::login). /auth/me is auth-gated so this
+    // uses the existing JWT; silent on failure (keep cached payload).
+    api.get<CPUser>('/auth/me')
+      .then(({ data }) => {
+        setUserCache(data)
+        setUser(data)
+      })
+      .catch(() => {
+        // Silent — stale roles beat a broken layout. Next login
+        // refresh will catch it anyway.
+      })
   }, [router])
 
   // Prefer portal_roles (Batch K); fall back to portal_role list for

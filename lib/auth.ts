@@ -172,6 +172,18 @@ export function setClient(client: CPClient): void {
   if (store) store.setItem('rt_cp_client', JSON.stringify(client))
 }
 
+/**
+ * 2026-11-16 — cache the latest `/auth/me` payload. Used by the
+ * portal layout's on-mount refresh so role changes (CA adds the RM
+ * role to a multi-role user, for example) pick up without forcing
+ * a logout/login dance. Mirrors `setClient` + the `rt_cp_user`
+ * localStorage key already in use by `login()` / `getUser()`.
+ */
+export function setUser(user: CPUser): void {
+  const store = getStore()
+  if (store) store.setItem('rt_cp_user', JSON.stringify(user))
+}
+
 export function hasRole(user: CPUser | null, ...roles: string[]): boolean {
   if (!user) return false
   return user.roles.some(r => r.status === 'ACTIVE' && roles.includes(r.role_type))
