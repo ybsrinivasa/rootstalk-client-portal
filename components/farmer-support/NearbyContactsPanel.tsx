@@ -248,42 +248,45 @@ export default function NearbyContactsPanel({
             </button>
           )}
         </div>
-        {/* Follow-up Promoter — SELF subs only (RM-delegated
-            facilitator for farmers who signed up without a promoter). */}
-        {subscriptionIsSelfSubscribed && (
-          <div className="flex items-start justify-between gap-3 flex-wrap border-t border-slate-100 pt-2">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-                Current Follow-up Promoter
+        {/* Follow-up Promoter — 2026-11-17 shows for both SELF and
+            ASSIGNED subs. SELF: RM delegates a facilitator for
+            farmers who signed up on their own. ASSIGNED: RM
+            reassigns when the signup promoter has left the org
+            (backend widening). Empty-state copy flips by sub type. */}
+        <div className="flex items-start justify-between gap-3 flex-wrap border-t border-slate-100 pt-2">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Current Follow-up Promoter
+            </p>
+            {currentFollowupPromoterUserId ? (
+              <p className="text-slate-800 font-semibold">
+                {currentFollowupPromoterName || '—'}
+                {currentFollowupPromoterPhone && (
+                  <>
+                    {' · '}
+                    <a href={`tel:${currentFollowupPromoterPhone}`} className="text-blue-700 hover:underline">
+                      {currentFollowupPromoterPhone}
+                    </a>
+                  </>
+                )}
               </p>
-              {currentFollowupPromoterUserId ? (
-                <p className="text-slate-800 font-semibold">
-                  {currentFollowupPromoterName || '—'}
-                  {currentFollowupPromoterPhone && (
-                    <>
-                      {' · '}
-                      <a href={`tel:${currentFollowupPromoterPhone}`} className="text-blue-700 hover:underline">
-                        {currentFollowupPromoterPhone}
-                      </a>
-                    </>
-                  )}
-                </p>
-              ) : (
-                <p className="text-slate-500 italic">
-                  None assigned — this farmer self-subscribed. Delegate a facilitator-promoter to share follow-up.
-                </p>
-              )}
-            </div>
-            {canAssignAlertReceiver && currentFollowupPromoterUserId && (
-              <button type="button"
-                onClick={() => { setPendingField('FOLLOWUP_PROMOTER'); setPendingClear(true); setMutErr(null) }}
-                disabled={mutating}
-                className="text-[11px] text-rose-700 hover:text-rose-900 hover:underline font-semibold disabled:opacity-50">
-                Clear (remove delegation)
-              </button>
+            ) : (
+              <p className="text-slate-500 italic">
+                {subscriptionIsSelfSubscribed
+                  ? 'None assigned — this farmer self-subscribed. Delegate a facilitator-promoter to share follow-up.'
+                  : 'None assigned — the signup promoter is still serving this crop. Delegate a follow-up only if a handover is needed (e.g. the original has left).'}
+              </p>
             )}
           </div>
-        )}
+          {canAssignAlertReceiver && currentFollowupPromoterUserId && (
+            <button type="button"
+              onClick={() => { setPendingField('FOLLOWUP_PROMOTER'); setPendingClear(true); setMutErr(null) }}
+              disabled={mutating}
+              className="text-[11px] text-rose-700 hover:text-rose-900 hover:underline font-semibold disabled:opacity-50">
+              Clear (remove delegation)
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Confirmation modal — appears either for a new assignment
@@ -390,9 +393,11 @@ export default function NearbyContactsPanel({
                     <>
                       <th className="text-center px-2 py-2 w-16">Alert<br />Receiver</th>
                       <th className="text-center px-2 py-2 w-16">Promoter-<br />Pundit</th>
-                      {subscriptionIsSelfSubscribed && (
-                        <th className="text-center px-2 py-2 w-16">Follow-up<br />Promoter</th>
-                      )}
+                      {/* 2026-11-17 — Follow-up column always shows.
+                          SELF → Facilitator-Promoter follow-ups only.
+                          ASSIGNED → Facilitator OR Dealer follow-ups
+                          (for departed-original cover). */}
+                      <th className="text-center px-2 py-2 w-16">Follow-up<br />Promoter</th>
                     </>
                   )}
                   <th className="text-left px-2 py-2">Name</th>
@@ -407,10 +412,17 @@ export default function NearbyContactsPanel({
                   const isCurrentAR = c.user_id === currentAlertReceiverUserId
                   const isCurrentPP = c.user_id === currentPromoterPunditUserId
                   const isCurrentFP = c.user_id === currentFollowupPromoterUserId
-                  // Follow-up Promoter eligibility: Facilitator (any
-                  // promoter_type incl. FACILITATOR) AND is_promoter=TRUE.
-                  // Backend rejects otherwise with 422.
-                  const isEligibleFP = c.promoter_types.includes('FACILITATOR') && c.is_promoter
+                  // Follow-up Promoter eligibility.
+                  // 2026-11-17: widened for ASSIGNED subs.
+                  //   SELF sub → Facilitator-Promoter only (2026-11-14 scope).
+                  //   ASSIGNED sub → Facilitator OR Dealer Promoter
+                  //   (for cases where the signup promoter has left
+                  //   the org — the RM replaces like-for-like or
+                  //   with a facilitator). Backend validates with the
+                  //   same shape and 422s on mismatch.
+                  const isEligibleFP = subscriptionIsSelfSubscribed
+                    ? (c.promoter_types.includes('FACILITATOR') && c.is_promoter)
+                    : ((c.promoter_types.includes('FACILITATOR') || c.promoter_types.includes('DEALER')) && c.is_promoter)
                   const rowHighlight = isCurrentAR
                     ? 'bg-amber-50 border-l-4 border-l-amber-400'
                     : isCurrentPP
@@ -454,13 +466,14 @@ export default function NearbyContactsPanel({
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
-                        {subscriptionIsSelfSubscribed && (
-                          <td className="px-2 py-2 text-center">
-                            {/* Only Facilitator-Promoters eligible for
-                                Follow-up Promoter — dealer-promoters
-                                are deliberately excluded (commerce-
-                                primary role). */}
-                            {isEligibleFP ? (
+                        <td className="px-2 py-2 text-center">
+                          {/* 2026-11-17 — Follow-up eligibility now
+                              depends on the sub's signup type: SELF
+                              → Facilitator only; ASSIGNED →
+                              Facilitator OR Dealer. Non-eligible
+                              rows show "—" so the valid set is
+                              obvious at a glance. */}
+                          {isEligibleFP ? (
                               <input type="radio"
                                 name="followup-promoter"
                                 checked={isCurrentFP}
@@ -476,7 +489,6 @@ export default function NearbyContactsPanel({
                               <span className="text-slate-300">—</span>
                             )}
                           </td>
-                        )}
                       </>
                     )}
                     <td className="px-2 py-2 font-medium text-slate-800">

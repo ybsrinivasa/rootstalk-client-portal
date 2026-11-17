@@ -84,6 +84,12 @@ interface SubscriptionRow {
   crop_start_date: string | null
   created_at: string | null
   promoter_name: string | null
+  // 2026-11-17 — Immutable signup attribution. Equal to promoter_name
+  // on untouched ASSIGNED subs; diverges once the RM reassigns via
+  // Follow-up Promoter. NULL on SELF subs. UI surfaces "Signup: X"
+  // alongside "Follow-up: Y" when they differ.
+  signup_promoter_user_id: string | null
+  signup_promoter_name: string | null
   farm_area_acres: number | null
   number_of_plants: number | null
   // 2026-11-12 — tab badges + follow-up strip.
@@ -700,6 +706,25 @@ export default function FarmerSupportDetailPage() {
                             </a>
                           </>
                         )}
+                      </p>
+                    </div>
+                  )}
+                  {/* 2026-11-17 — Signup Promoter attribution. Shown
+                      on ASSIGNED subs where an RM has reassigned a
+                      Follow-up Promoter (promoter_user_id has diverged
+                      from the original). Not shown on SELF subs (no
+                      signup promoter) or on untouched ASSIGNED subs
+                      (would duplicate the Follow-up Promoter display). */}
+                  {selectedSub.signup_promoter_user_id
+                    && selectedSub.followup_promoter
+                    && selectedSub.signup_promoter_user_id !== selectedSub.followup_promoter.user_id && (
+                    <div>
+                      <p className="text-[10px] text-slate-500">Signup promoter</p>
+                      <p className="font-semibold text-slate-600 line-through decoration-slate-400">
+                        {selectedSub.signup_promoter_name || '—'}
+                      </p>
+                      <p className="text-[10px] text-slate-500 italic">
+                        no longer serving
                       </p>
                     </div>
                   )}
