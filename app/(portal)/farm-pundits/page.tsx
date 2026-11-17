@@ -71,6 +71,24 @@ interface CoshLocationsResponse { states: CoshState[] }
 interface CompanyQuery {
   id: string; title: string; status: string; severity: string; created_at: string; farmer_user_id: string
 }
+// 2026-11-17 — Pundit Exclusivity agreement for the CA-side table.
+// Status flow: PENDING_PUNDIT_APPROVAL → ACTIVE (on Pundit accept)
+//              ACTIVE → ENDED_BY_CLIENT | ENDED_BY_PUNDIT_REQUEST
+// Terminal: DECLINED_BY_PUNDIT, ENDED_* — list endpoint hides these
+// by default (pass include_terminal=true for audit view).
+interface Exclusivity {
+  id: string
+  pundit_profile_id: string
+  client_id: string
+  status: 'PENDING_PUNDIT_APPROVAL' | 'ACTIVE'
+         | 'DECLINED_BY_PUNDIT' | 'ENDED_BY_CLIENT' | 'ENDED_BY_PUNDIT_REQUEST'
+  requested_at: string
+  responded_at: string | null
+  ended_at: string | null
+  pundit_end_requested_at: string | null
+  pundit_name: string | null
+  pundit_phone: string | null
+}
 
 const COLOUR = '#3C3489'
 const STATUS_COLOUR: Record<string, string> = {
@@ -181,19 +199,58 @@ export default function FarmPunditsPage() {
     setInviteError('')
   }
 
+  // 2026-11-17 — Pundit Exclusivity agreements for this client.
+  // Keyed by pundit_profile_id so the row renderer can look up
+  // state in O(1). Fetched on mount + after each mutation.
+  const [exclusivities, setExclusivities] = useState<Record<string, Exclusivity>>({})
+
   const load = async () => {
     if (!clientId) return
-    const [p, invPending, invRejected, q] = await Promise.all([
+    const [p, invPending, invRejected, q, excl] = await Promise.all([
       api.get<Pundit[]>(`/client/${clientId}/pundits`).catch(() => ({ data: [] as Pundit[] })),
       api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=PENDING`).catch(() => ({ data: [] as PendingInvitation[] })),
       api.get<PendingInvitation[]>(`/client/${clientId}/pundit-invitations?status=REJECTED`).catch(() => ({ data: [] as PendingInvitation[] })),
       api.get<CompanyQuery[]>(`/client/${clientId}/queries`).catch(() => ({ data: [] as CompanyQuery[] })),
+      api.get<Exclusivity[]>(`/client/${clientId}/pundit-exclusivities`).catch(() => ({ data: [] as Exclusivity[] })),
     ])
     setPundits(p.data)
     setPendingInvitations(invPending.data)
     setRejectedInvitations(invRejected.data)
     setQueries(q.data)
+    const map: Record<string, Exclusivity> = {}
+    for (const a of excl.data) map[a.pundit_profile_id] = a
+    setExclusivities(map)
     setLoading(false)
+  }
+
+  // 2026-11-17 — Mutations for exclusivity flow. All refetch on success.
+  async function requestExclusivity(cpId: string, name: string | null) {
+    if (!confirm(`Request exclusivity on ${name || 'this Expert'}? They will decide via their Pundit PWA. If they accept, they will not appear in any other company's Expert search.`)) return
+    try {
+      await api.post(`/client/${clientId}/pundits/${cpId}/request-exclusivity`, {})
+      await load()
+    } catch (err) {
+      alert(extractErrorMessage(err, 'Could not send the request.'))
+    }
+  }
+  async function endExclusivity(agreementId: string, isPending: boolean) {
+    const verb = isPending ? 'Withdraw the pending request' : 'End the exclusivity agreement'
+    if (!confirm(`${verb}? The Expert will become available to other companies' searches again.`)) return
+    try {
+      await api.delete(`/client/${clientId}/pundit-exclusivities/${agreementId}`, { data: {} })
+      await load()
+    } catch (err) {
+      alert(extractErrorMessage(err, 'Could not end the agreement.'))
+    }
+  }
+  async function approveEndRequest(agreementId: string) {
+    if (!confirm('Approve the Expert\'s request to end exclusivity? They will become available to other companies\' searches.')) return
+    try {
+      await api.post(`/client/${clientId}/pundit-exclusivities/${agreementId}/approve-end-request`, {})
+      await load()
+    } catch (err) {
+      alert(extractErrorMessage(err, 'Could not approve the end request.'))
+    }
   }
 
   useEffect(() => { load() }, [clientId])
@@ -490,6 +547,56 @@ export default function FarmPunditsPage() {
                               Deactivate
                             </button>
                           )}
+                          {/* 2026-11-17 — Pundit Exclusivity inline
+                              controls. PROMOTER_PUNDITs are excluded
+                              (already one-client-locked by role). The
+                              outer p.role filter already keeps them
+                              out of this table — defence in depth. */}
+                          {p.role !== 'PROMOTER_PUNDIT' && (() => {
+                            const ex = exclusivities[p.pundit_id]
+                            if (!ex) {
+                              return p.status === 'ACTIVE' ? (
+                                <button onClick={() => requestExclusivity(p.id, p.name)}
+                                  className="text-xs px-2 py-1 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50">
+                                  🔒 Request exclusivity
+                                </button>
+                              ) : null
+                            }
+                            if (ex.status === 'PENDING_PUNDIT_APPROVAL') {
+                              return (
+                                <>
+                                  <span className="text-[10px] px-2 py-1 rounded-full bg-amber-100 text-amber-800 font-semibold">
+                                    Pending Pundit response
+                                  </span>
+                                  <button onClick={() => endExclusivity(ex.id, true)}
+                                    className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                                    Withdraw
+                                  </button>
+                                </>
+                              )
+                            }
+                            if (ex.status === 'ACTIVE') {
+                              const pundit_wants_out = !!ex.pundit_end_requested_at
+                              return (
+                                <>
+                                  <span className="text-[10px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-800 font-semibold">
+                                    🔒 Exclusive with us
+                                  </span>
+                                  {pundit_wants_out && (
+                                    <button onClick={() => approveEndRequest(ex.id)}
+                                      className="text-xs px-2 py-1 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 font-semibold">
+                                      Pundit wants out · Approve
+                                    </button>
+                                  )}
+                                  <button onClick={() => endExclusivity(ex.id, false)}
+                                    className="text-xs px-2 py-1 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50">
+                                    End exclusivity
+                                  </button>
+                                </>
+                              )
+                            }
+                            return null
+                          })()}
                           {p.status === 'INACTIVE' && (
                             <>
                               <button onClick={() => reactivate(p.id)}
