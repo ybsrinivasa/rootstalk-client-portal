@@ -1,8 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { getToken, getUser, getClient, setClient, setUser as setUserCache, logout, CPClient, CPUser } from '@/lib/auth'
+import { getToken, getUser, getClient, setClient, setUser as setUserCache, logout, installCrossTabLogout, CPClient, CPUser } from '@/lib/auth'
 import { isCoachView } from '@/lib/tokenStore'
 import api from '@/lib/api'
 
@@ -331,6 +331,13 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
   const [user, setUser] = useState<CPUser | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [coachView, setCoachView] = useState(false)
+  // 2026-11-20 — Live user ref for the cross-tab logout installer.
+  // The listener closure needs the current user_id at event time,
+  // not whatever was in scope when the installer mounted. useRef
+  // keeps it fresh across re-renders without re-installing the
+  // BroadcastChannel on every state change.
+  const userRef = useRef<CPUser | null>(null)
+  userRef.current = user
 
   useEffect(() => {
     if (!getToken()) { router.replace('/login'); return }
@@ -374,6 +381,17 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
         // refresh will catch it anyway.
       })
   }, [router])
+
+  // 2026-11-20 — Cross-tab logout. Install on portal mount; sibling
+  // tabs broadcast session changes via BroadcastChannel (storage-event
+  // fallback for older browsers). When a different user_id logs in
+  // elsewhere in the same browser, this tab force-redirects to its
+  // own tenant-branded login URL instead of silently serving the
+  // other tenant's data under this tab's banner.
+  useEffect(() => {
+    const uninstall = installCrossTabLogout(() => userRef.current?.id ?? null)
+    return uninstall
+  }, [])
 
   // Prefer portal_roles (Batch K); fall back to portal_role list for
   // cached payloads from older sessions.

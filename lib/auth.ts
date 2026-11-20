@@ -92,6 +92,53 @@ export interface CPUserWithClient extends CPUser {
   client_short_name?: string | null
 }
 
+// 2026-11-20 — Cross-tab session broadcast. localStorage is shared
+// across tabs in the same browser, so a login in Tab B silently
+// overwrites Tab A's auth state (token + rt_cp_user + rt_cp_client).
+// Tab A then starts making API calls with Tab B's tenant token while
+// its URL / banner still claims to be Tab A's tenant. Observed on
+// staging (Demo 1 / Demo 2) + reported on prod (UAS Raichur / SMS
+// Grow) — see `project_cp_cross_tab_logout_2026_11_20.md`.
+//
+// Fix shape: every login + logout broadcasts a session-change event.
+// Other tabs listening via `installCrossTabLogout()` compare the
+// broadcast's user_id against their own; on mismatch they force-logout
+// to the user's own tenant-branded login URL. Belt-and-suspenders
+// with the backend's cross_client_forbidden guard — the guard
+// still catches any slipped request; this just stops the slip from
+// happening in the first place.
+const CROSS_TAB_CHANNEL = 'rt_cp_session'
+// Storage-event fallback key. Browsers that don't support
+// BroadcastChannel (older Safari) still fire `storage` events
+// cross-tab when a localStorage key is set/removed. The writer
+// toggles this key's value (timestamp) to give sibling tabs a
+// reliable trigger even when `rt_cp_token` already matches what's
+// in localStorage (same-user re-login).
+const CROSS_TAB_STORAGE_PING = 'rt_cp_session_ping'
+
+export interface SessionChangeEvent {
+  kind: 'login' | 'logout'
+  user_id: string | null
+  client_id: string | null
+  at: number
+}
+
+function broadcastSessionChange(evt: SessionChangeEvent): void {
+  if (typeof window === 'undefined') return
+  try {
+    const bc = new BroadcastChannel(CROSS_TAB_CHANNEL)
+    bc.postMessage(evt)
+    bc.close()
+  } catch {
+    // BroadcastChannel missing / disabled — fall through to the
+    // storage-event trigger below, which every mainstream browser
+    // supports.
+  }
+  try {
+    localStorage.setItem(CROSS_TAB_STORAGE_PING, JSON.stringify(evt))
+  } catch { /* quota / privacy mode — can't help it */ }
+}
+
 export async function login(email: string, password: string, clientShortName?: string): Promise<CPUserWithClient> {
   // Tenant isolation (2026-05-18): clear ANY stale state from a prior
   // session before authenticating. Without this, a partial UI failure
@@ -111,6 +158,13 @@ export async function login(email: string, password: string, clientShortName?: s
   localStorage.setItem('rt_cp_token', data.access_token)
   const me = await api.get<CPUserWithClient>('/auth/me')
   localStorage.setItem('rt_cp_user', JSON.stringify(me.data))
+  // 2026-11-20 — Notify sibling tabs so they can eject stale sessions.
+  broadcastSessionChange({
+    kind: 'login',
+    user_id: me.data.id,
+    client_id: me.data.client_id || null,
+    at: Date.now(),
+  })
   return me.data
 }
 
@@ -147,7 +201,70 @@ export function logout(): void {
   localStorage.removeItem('rt_cp_token')
   localStorage.removeItem('rt_cp_user')
   localStorage.removeItem('rt_cp_client')
+  // 2026-11-20 — Logouts also broadcast so sibling tabs that still
+  // think they're authenticated eject cleanly instead of surviving
+  // on stale-React state until the next API 401.
+  broadcastSessionChange({
+    kind: 'logout', user_id: null, client_id: null, at: Date.now(),
+  })
   window.location.href = target
+}
+
+// 2026-11-20 — Called once from the portal layout mount. Listens for
+// cross-tab session-change broadcasts (via BroadcastChannel primary
+// + storage-event fallback). When a sibling tab logs in/out and the
+// event's user_id differs from this tab's own, force-logout: clears
+// in-memory state (via window.location.reload or a redirect, caller's
+// choice) and lands this tab on its own tenant-branded login URL.
+//
+// `currentUserIdResolver` is a callable because the hook runs inside
+// React — the caller passes a stable function that returns the
+// currently-rendered user_id from React state, not a stale closure.
+//
+// Returns an unsubscribe function for React effect cleanup.
+export function installCrossTabLogout(
+  currentUserIdResolver: () => string | null,
+): () => void {
+  if (typeof window === 'undefined') return () => undefined
+  if (isCoachView()) return () => undefined   // coach-view uses per-tab sessionStorage; no cross-tab leak possible
+
+  function handle(evt: SessionChangeEvent): void {
+    const my = currentUserIdResolver()
+    // No current user → nothing to protect.
+    if (!my) return
+    // Same user re-logging in → no action (benign refresh).
+    if (evt.kind === 'login' && evt.user_id === my) return
+    // Otherwise the session has changed under us → eject to our own
+    // tenant-branded login URL. Read the short_name from the CPUser
+    // in localStorage BEFORE it gets clobbered; fall back to generic.
+    let target = '/login'
+    try {
+      const u = JSON.parse(localStorage.getItem('rt_cp_user') || 'null') as CPUserWithClient | null
+      if (u?.client_short_name) target = `/login/${u.client_short_name}`
+    } catch { /* fall through */ }
+    // Hard navigation (not router.push) so every bit of in-memory
+    // React state / React Query cache / zustand store is dropped.
+    window.location.href = target
+  }
+
+  let bc: BroadcastChannel | null = null
+  try {
+    bc = new BroadcastChannel(CROSS_TAB_CHANNEL)
+    bc.onmessage = (e: MessageEvent) => handle(e.data as SessionChangeEvent)
+  } catch { /* fall through to storage event */ }
+
+  function onStorage(e: StorageEvent) {
+    if (e.key !== CROSS_TAB_STORAGE_PING || !e.newValue) return
+    try {
+      handle(JSON.parse(e.newValue) as SessionChangeEvent)
+    } catch { /* malformed — ignore */ }
+  }
+  window.addEventListener('storage', onStorage)
+
+  return () => {
+    if (bc) { try { bc.close() } catch { /* already closed */ } }
+    window.removeEventListener('storage', onStorage)
+  }
 }
 
 export function getToken(): string | null {
