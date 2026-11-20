@@ -2,7 +2,7 @@
 import { useEffect, useState, FormEvent } from 'react'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
-import { getClient } from '@/lib/auth'
+import { getClient, getUser, hasPortalRole } from '@/lib/auth'
 import { LocationPicker, pairKey, unpairKey, type LocationUniverse } from '@/components/locations/LocationPicker'
 
 interface ClientLocation {
@@ -32,12 +32,24 @@ interface CascadeImpact {
   will_inactivate: CascadeImpactPackage[]
 }
 
+// 2026-11-20 — Query-expiry SLA (Ship 2). Shape mirrors backend
+// GET /client/{cid}/settings/query-expiry. `days: null` means fall
+// back to default_days. CA-only edit; everyone else sees read-only.
+interface QuerySlaPayload {
+  days: number | null
+  default_days: number
+  min_days: number
+  max_days: number
+}
+
 export default function SetupPage() {
   const client = getClient()
   const clientId = client?.id
   const colour = client?.primary_colour || '#1A5C2A'
+  const user = getUser()
+  const canEditSla = hasPortalRole(user, 'CA')
 
-  const [tab, setTab] = useState<'locations' | 'crops'>('locations')
+  const [tab, setTab] = useState<'locations' | 'crops' | 'queries'>('locations')
   const [crops, setCrops] = useState<ClientCrop[]>([])
   const [available, setAvailable] = useState<AvailableCrop[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,6 +66,16 @@ export default function SetupPage() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
 
   const [cropForm, setCropForm] = useState({ crop_cosh_id: '' })
+
+  // Query SLA tab state. `sla` is the server-side snapshot (or null
+  // while loading); `slaInput` is the form value — string so empty
+  // means "reset to default" and we don't coerce 0 or NaN into the
+  // POST body. `slaSaved` is the "Saved." toast after a successful PUT.
+  const [sla, setSla] = useState<QuerySlaPayload | null>(null)
+  const [slaInput, setSlaInput] = useState<string>('')
+  const [slaSaving, setSlaSaving] = useState(false)
+  const [slaError, setSlaError] = useState('')
+  const [slaSaved, setSlaSaved] = useState('')
 
   // Footprint cascade confirmation (Batch GG). When the PUT 422s
   // with `footprint_cascade_confirmation_required` we hold the
@@ -80,6 +102,55 @@ export default function SetupPage() {
       setAvailable(availRes.data)
     }).finally(() => setLoading(false))
   }, [clientId])
+
+  // Lazy-load the SLA snapshot when the Queries tab is first opened.
+  // We don't preload it with the other tabs because it's a CA-focused
+  // setting most sessions won't touch; one dedicated round-trip on
+  // tab-click is cheaper than four parallel calls on every Setup mount.
+  useEffect(() => {
+    if (!clientId || tab !== 'queries' || sla !== null) return
+    api
+      .get<QuerySlaPayload>(`/client/${clientId}/settings/query-expiry`)
+      .then(res => {
+        setSla(res.data)
+        setSlaInput(res.data.days === null ? '' : String(res.data.days))
+      })
+      .catch(err => setSlaError(extractErrorMessage(err, 'Failed to load Query SLA.')))
+  }, [clientId, tab, sla])
+
+  async function saveSla(reset: boolean) {
+    if (!clientId || !sla) return
+    setSlaSaving(true); setSlaError(''); setSlaSaved('')
+    // Reset-to-default sends `days: null`; otherwise parse the input
+    // and let the backend reject out-of-range values with a 422 so
+    // we don't duplicate the range check client-side.
+    const trimmed = slaInput.trim()
+    const body: { days: number | null } = reset || trimmed === ''
+      ? { days: null }
+      : { days: Number(trimmed) }
+    if (!reset && body.days !== null && !Number.isInteger(body.days)) {
+      setSlaError('Enter a whole number of days.')
+      setSlaSaving(false)
+      return
+    }
+    try {
+      const { data } = await api.put<QuerySlaPayload>(
+        `/client/${clientId}/settings/query-expiry`,
+        body,
+      )
+      setSla(data)
+      setSlaInput(data.days === null ? '' : String(data.days))
+      setSlaSaved(
+        data.days === null
+          ? `Reset to default (${data.default_days} days).`
+          : `Saved. New queries will expire after ${data.days} day${data.days === 1 ? '' : 's'}.`,
+      )
+    } catch (err: unknown) {
+      setSlaError(extractErrorMessage(err, 'Failed to save Query SLA.'))
+    } finally {
+      setSlaSaving(false)
+    }
+  }
 
   async function saveLocations(force = false) {
     if (!clientId) return
@@ -186,10 +257,10 @@ export default function SetupPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
-        {(['locations', 'crops'] as const).map(t => (
+        {(['locations', 'crops', 'queries'] as const).map(t => (
           <button key={t} onClick={() => { setTab(t); setError('') }}
             className={`px-5 py-2 rounded-lg text-sm font-medium capitalize transition-all ${tab === t ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-            {t}
+            {t === 'queries' ? 'Query SLA' : t}
           </button>
         ))}
       </div>
@@ -294,6 +365,80 @@ export default function SetupPage() {
               </table>
             </div>
           )}
+        </div>
+      ) : tab === 'queries' ? (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
+            <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-800">Query expiry window</h3>
+                <p className="text-xs text-slate-500 mt-0.5 max-w-xl">
+                  Number of days your experts (Primary, Panel, Promoter-Pundit) have to respond to a
+                  farmer query before it auto-expires and an email goes to the CA admin. Changing
+                  this only affects <span className="font-medium text-slate-700">new queries</span>
+                  {' '}created after the change — in-flight queries keep the window they were created with.
+                </p>
+              </div>
+            </div>
+
+            {sla === null && !slaError ? (
+              <div className="text-sm text-slate-400">Loading…</div>
+            ) : sla !== null ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="text-sm text-slate-600">Days to respond</label>
+                  <input
+                    type="number"
+                    min={sla.min_days}
+                    max={sla.max_days}
+                    step={1}
+                    value={slaInput}
+                    onChange={e => setSlaInput(e.target.value)}
+                    disabled={!canEditSla || slaSaving}
+                    placeholder={`default ${sla.default_days}`}
+                    className="w-32 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
+                  />
+                  <span className="text-xs text-slate-400">
+                    (allowed: {sla.min_days}–{sla.max_days} days)
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500">
+                  {sla.days === null ? (
+                    <>Currently using the platform default of <span className="font-medium text-slate-700">{sla.default_days} days</span>.</>
+                  ) : (
+                    <>Currently set to <span className="font-medium text-slate-700">{sla.days} day{sla.days === 1 ? '' : 's'}</span> for this company.</>
+                  )}
+                </div>
+                {canEditSla ? (
+                  <div className="flex gap-3 flex-wrap">
+                    <button
+                      onClick={() => saveSla(false)}
+                      disabled={slaSaving}
+                      className="text-white text-sm font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50"
+                      style={{ background: colour }}>
+                      {slaSaving ? 'Saving…' : '✓ Save'}
+                    </button>
+                    {sla.days !== null && (
+                      <button
+                        onClick={() => saveSla(true)}
+                        disabled={slaSaving}
+                        className="text-sm font-medium px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-50 border border-slate-200 disabled:opacity-50">
+                        Reset to default
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                    Only the CA Admin can change this setting.
+                  </div>
+                )}
+                {slaError && <p className="text-sm text-red-600">{slaError}</p>}
+                {slaSaved && <p className="text-sm text-green-700">{slaSaved}</p>}
+              </div>
+            ) : (
+              <p className="text-sm text-red-600">{slaError}</p>
+            )}
+          </div>
         </div>
       ) : null}
 
