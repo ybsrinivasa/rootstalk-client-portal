@@ -26,7 +26,41 @@ import { practiceEndpoints, type PipeContext } from '@/lib/advisory-pipe'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-interface CoshOption { cosh_id: string; name: string }
+interface CoshOption {
+  cosh_id: string
+  name: string
+  // 2026-11-21 — Nutrient concentrations attached by the backend for
+  // fertilizer Common Names (Chemical Fertilizer Products + Fertigation
+  // Products L2s). Letters: N / P / K / Ca / Mg / S / Zn / Fe / Mn / Cu / B.
+  // Only present when Cosh has data; absent = no data (not zero).
+  concentrations?: Record<string, number>
+}
+
+// Format a Cosh concentration dict into a scannable suffix.
+//   NPK present      → "10-26-26" (always triplet, zeros for missing).
+//                      Secondaries / micros appended as ", 2 Zn, 0.5 B".
+//   Only secondaries → "21% Zn, 0.5% B" (no NPK triplet).
+//   Empty / absent   → "" (caller should skip the suffix).
+// Numbers render as integers when whole ("10"), 1 decimal otherwise ("16.5").
+function formatConcentrationSuffix(c?: Record<string, number>): string {
+  if (!c) return ''
+  const n = c.N ?? 0, p = c.P ?? 0, k = c.K ?? 0
+  const npkPresent = n > 0 || p > 0 || k > 0
+  const num = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1))
+  const secondaryMicroOrder = ['Ca', 'Mg', 'S', 'Zn', 'Fe', 'Mn', 'Cu', 'B']
+  const extras = secondaryMicroOrder
+    .filter(l => (c[l] ?? 0) > 0)
+    .map(l => ({ letter: l, val: c[l] }))
+  if (npkPresent) {
+    const base = `${num(n)}-${num(p)}-${num(k)}`
+    if (extras.length === 0) return base
+    return `${base}, ${extras.map(e => `${num(e.val)} ${e.letter}`).join(', ')}`
+  }
+  if (extras.length > 0) {
+    return extras.map(e => `${num(e.val)}% ${e.letter}`).join(', ')
+  }
+  return ''
+}
 
 interface TaxonomyL2 { id: string; label: string }
 interface TaxonomyL1 { id: string; label: string; l2: TaxonomyL2[] }
@@ -824,9 +858,10 @@ export function PracticeFormModal({
                           const usedElsewhere = isCnGated
                             && usedCommonNames!.has(o.cosh_id)
                             && o.cosh_id !== value
+                          const concSuffix = formatConcentrationSuffix(o.concentrations)
                           return (
                             <option key={o.cosh_id} value={o.cosh_id} disabled={usedElsewhere}>
-                              {o.name}{usedElsewhere ? ' — already used in this Timeline' : ''}
+                              {o.name}{concSuffix ? ` · ${concSuffix}` : ''}{usedElsewhere ? ' — already used in this Timeline' : ''}
                             </option>
                           )
                         })}
