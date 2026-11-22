@@ -179,8 +179,10 @@ export default function NewCampaignPage() {
         rating_scale_type: campaignType === 'FEEDBACK' ? ratingScale : null,
       }
       if (!draftId) {
-        payload.title = (payload.title as string) || (payload.name as string) || 'Untitled campaign'
-        payload.body = (payload.body as string) || ' '
+        // 2026-11-22 — Backend only requires name + campaign_type +
+        // recipient_role at CREATE. title + body stay optional through
+        // Basics/Audience and get validated non-empty at SEND. No more
+        // placeholder hacks.
         const { data } = await api.post<{ campaign: { id: string } }>(
           `/client/${clientId}/messaging/campaigns`, payload,
         )
