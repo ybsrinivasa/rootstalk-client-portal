@@ -51,6 +51,15 @@ function IconAlerts() {
     </svg>
   )
 }
+function IconMegaphone() {
+  // Campaigns / Messaging — chosen to echo the "broadcast" framing
+  // (not a messenger).
+  return (
+    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+    </svg>
+  )
+}
 function IconSeed() {
   return (
     <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
@@ -150,6 +159,9 @@ interface NavItem {
   soilNutrientModule?: boolean
   /** 2026-10-16 — Hidden unless the Client has has_soil_testing_lab=true. */
   soilTestingLab?: boolean
+  /** 2026-11-22 — Hidden unless the Client has messaging_enabled=true
+   *  (SA toggles from SA Portal Feature Access panel). */
+  messagingFeature?: boolean
   group: string
 }
 
@@ -200,6 +212,11 @@ const ALL_NAV: NavItem[] = [
   // now (deprecated in Phase 5 once Farmer Support is battle-tested).
   { href: '/farmer-support',     label: 'Farmer Support',    Icon: IconAlerts,       group: 'FIELD' },
   { href: '/alerts',             label: 'Alerts',            Icon: IconAlerts,       group: 'FIELD' },
+  // 2026-11-22 — Messaging Module (paid add-on). Feature-flag gated
+  // via messaging_enabled on CPClient. CA / CLIENT_RM see it; other
+  // roles invisible. Future entry for Touchpoints will share the group.
+  { href: '/campaigns',          label: 'All Campaigns',     Icon: IconMegaphone,    group: 'CAMPAIGNS', messagingFeature: true },
+  { href: '/campaigns/new',      label: 'New Campaign',      Icon: IconMegaphone,    group: 'CAMPAIGNS', messagingFeature: true },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
   { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA', manufacturerOrSeedOnly: true },
   // 2026-07-24 — Training Sandbox V1. CA-only surface for starting/
@@ -239,7 +256,10 @@ const ROLE_NAV: Record<string, string[]> = {
   // temporarily for backwards compatibility until Phase 5 deprecates
   // it. CLIENT_RM still cannot see /field-manager (backend gate
   // _assert_ca_or_field_manager rejects the role).
-  CLIENT_RM:        ['/dashboard', '/alerts', '/farmer-support'],
+  // CLIENT_RM also gets the Messaging Module per spec §2 (CA + RM
+  // are the only full-access roles). Messaging nav entries are
+  // further gated on the per-client messaging_enabled flag.
+  CLIENT_RM:        ['/dashboard', '/alerts', '/farmer-support', '/campaigns', '/campaigns/new'],
   // Legacy: pre Batch X migration, SDM was its own role. Kept here
   // for any straggler accounts; safe no-op now.
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
@@ -252,7 +272,7 @@ const ROLE_NAV: Record<string, string[]> = {
   REPORT_USER:      ['/reports'],
 }
 
-const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'DATA', 'ACCOUNT']
+const GROUP_ORDER = ['PORTAL', 'CCA', 'CHA', 'QA', 'CONTENT', 'FIELD', 'CAMPAIGNS', 'DATA', 'ACCOUNT']
 
 function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   // 2026-05-22: org types switched from legacy slugs to live Cosh
@@ -271,6 +291,11 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   // so this becomes correct within a second of first render.
   const soilNutrientOn = client?.soil_nutrient_module_enabled === true
   const soilTestingLabOn = client?.has_soil_testing_lab === true
+  // 2026-11-22 — Messaging add-on gate. SA toggles messaging_enabled
+  // per-client with an access_until date; backend returns false once
+  // expired. Undefined on pre-upgrade cached CPClient — treated as
+  // off until the branding refresh lands.
+  const messagingOn = client?.messaging_enabled === true
 
   // CA is exclusive (Batch K) — sees everything. CONTENT_MANAGER
   // (Batch Q, 2026-05-18) is the synthesised role for a CM who
@@ -284,6 +309,7 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
       if (item.manufacturerOrSeedOnly && !(isManufacturer || isSeedClient)) return false
       if (item.soilNutrientModule && !soilNutrientOn) return false
       if (item.soilTestingLab && !soilTestingLabOn) return false
+      if (item.messagingFeature && !messagingOn) return false
       return true
     })
   }
@@ -309,6 +335,7 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
     if (item.manufacturerOrSeedOnly && !(isManufacturer || isSeedClient)) return false
     if (item.soilNutrientModule && !soilNutrientOn) return false
     if (item.soilTestingLab && !soilTestingLabOn) return false
+    if (item.messagingFeature && !messagingOn) return false
     if (item.caOnly) return false
     return true
   })
@@ -516,6 +543,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
           </div>
         )}
         <CoachingAccessBanner coachingAccess={client?.coaching_access} />
+        <FeatureExpiringSoonBanner client={client} />
         <main className="flex-1 p-6 bg-[#F7F5F0]">
           {children}
         </main>
@@ -561,4 +589,48 @@ function CoachingAccessBanner({
   }
 
   return null
+}
+
+
+// 2026-11-22 — Expiring Soon banner for paid Feature Access add-ons.
+// Shown at ≤7 days from access_until per the spec addendum §2.
+// Separate from CoachingAccessBanner because the two can coexist.
+function FeatureExpiringSoonBanner({ client }: { client: CPClient | null }) {
+  if (!client) return null
+  const items: { label: string; days: number; expiresAt: string | null }[] = []
+  if (
+    client.messaging_enabled
+    && typeof client.messaging_days_remaining === 'number'
+    && client.messaging_days_remaining <= 7
+  ) {
+    items.push({
+      label: 'Messaging Module',
+      days: client.messaging_days_remaining,
+      expiresAt: client.messaging_expires_at ?? null,
+    })
+  }
+  if (
+    client.touchpoints_enabled
+    && typeof client.touchpoints_days_remaining === 'number'
+    && client.touchpoints_days_remaining <= 7
+  ) {
+    items.push({
+      label: 'Subscription Touchpoints',
+      days: client.touchpoints_days_remaining,
+      expiresAt: client.touchpoints_expires_at ?? null,
+    })
+  }
+  if (items.length === 0) return null
+  return (
+    <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 text-sm text-amber-900">
+      {items.map((i, idx) => (
+        <span key={i.label}>
+          {idx > 0 && ' · '}
+          <strong>{i.label}</strong> access expires {
+            i.days <= 0 ? 'today' : `in ${i.days} ${i.days === 1 ? 'day' : 'days'}`
+          }. Contact your Neytiri representative to continue.
+        </span>
+      ))}
+    </div>
+  )
 }
