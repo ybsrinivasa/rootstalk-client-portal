@@ -72,6 +72,16 @@ export interface CPClient {
    *  shipped — the layout refreshes branding on mount to backfill. */
   soil_nutrient_module_enabled?: boolean
   has_soil_testing_lab?: boolean
+  /** 2026-11-22 — Feature Access state for Messaging / Touchpoints.
+   *  Gates the CAMPAIGNS nav section; _expires_at + _days_remaining
+   *  drive the Expiring Soon banner (shown ≤7 days). Undefined on
+   *  pre-upgrade cached CPClient — layout refreshes branding on mount. */
+  messaging_enabled?: boolean
+  messaging_expires_at?: string | null
+  messaging_days_remaining?: number | null
+  touchpoints_enabled?: boolean
+  touchpoints_expires_at?: string | null
+  touchpoints_days_remaining?: number | null
   /** 2026-10-16 — Coaching workspace access state (hybrid access).
    *  Present only for is_coaching=true workspaces; absent on real
    *  clients. Drives the GRACE days-remaining and ARCHIVED read-only
