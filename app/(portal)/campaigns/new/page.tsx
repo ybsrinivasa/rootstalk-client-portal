@@ -506,6 +506,16 @@ export default function NewCampaignPage() {
               </select>
             </label>
           )}
+
+          {/* Attachments — up to 3 files × 10 MB each. Composer must
+              save the draft first so the attachment can hang off a
+              real campaign_id; the panel prompts the CA to Next if
+              no draft exists yet. */}
+          <AttachmentsPanel
+            draftId={draftId}
+            clientId={clientId || ''}
+            onError={setError}
+          />
         </section>
       )}
 
@@ -630,18 +640,46 @@ export default function NewCampaignPage() {
 
       {/* ── Step: Send ────────────────────────────────────────────── */}
       {stepLabel === 'Send' && (
-        <section className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 text-center">
-          <h2 className="text-lg font-semibold text-slate-900">Ready to send</h2>
-          <p className="text-sm text-slate-600">
-            {audiencePreview?.matched ?? 0} {roleLabel.toLowerCase()} will receive this campaign immediately.
-          </p>
-          <button
-            type="button" onClick={onSend} disabled={saving}
-            className="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {saving ? 'Sending…' : 'Send now'}
-          </button>
-        </section>
+        <SendStep
+          audienceCount={audiencePreview?.matched ?? 0}
+          roleLabel={roleLabel}
+          expiresAtYmd={expiresAt}
+          setExpiresAtYmd={setExpiresAt}
+          onSendNow={onSend}
+          onScheduleSend={async (localIso: string) => {
+            if (!clientId || !draftId) return
+            setSaving(true); setError('')
+            try {
+              const sendAtIso = new Date(localIso).toISOString()
+              // Expiry defaults to 7 days from send_at; align here so
+              // backend doesn't re-default and surface a different value.
+              const sendAtDate = new Date(sendAtIso)
+              const expIso = new Date(`${expiresAt}T23:59:59`).toISOString()
+              const body: Record<string, unknown> = { send_at: sendAtIso }
+              // Only include expires_at if user picked a date > send_at + 1d
+              const minExp = new Date(sendAtDate.getTime() + 24 * 3600 * 1000)
+              if (new Date(expIso) >= minExp) {
+                body.expires_at = expIso
+              }
+              await api.post(
+                `/client/${clientId}/messaging/campaigns/${draftId}/send`,
+                body,
+              )
+              router.push(`/campaigns/${draftId}`)
+            } catch (err) {
+              const detail = (err as { response?: { data?: { detail?: unknown } } })
+                ?.response?.data?.detail
+              const code = (detail as { code?: string })?.code
+              const message = (detail as { message?: string })?.message
+              setError(message || (code === 'send_at_too_far'
+                ? 'Scheduled send must be within 180 days.'
+                : 'Could not schedule.'))
+            } finally {
+              setSaving(false)
+            }
+          }}
+          saving={saving}
+        />
       )}
 
       {/* ── Nav footer ────────────────────────────────────────────── */}
@@ -671,6 +709,146 @@ export default function NewCampaignPage() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+interface Attachment {
+  id: string
+  kind: 'IMAGE' | 'VIDEO' | 'PDF'
+  url: string
+  original_filename: string
+  mime_type: string
+  size_bytes: number
+  sort_order: number
+}
+
+function AttachmentsPanel({ draftId, clientId, onError }: {
+  draftId: string | null
+  clientId: string
+  onError: (msg: string) => void
+}) {
+  const [items, setItems] = useState<Attachment[]>([])
+  const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+
+  useEffect(() => {
+    if (!draftId || !clientId) return
+    setLoading(true)
+    api.get<{ attachments: Attachment[] }>(
+      `/client/${clientId}/messaging/campaigns/${draftId}/attachments`,
+    )
+      .then(({ data }) => setItems(data.attachments))
+      .catch(() => { /* silent */ })
+      .finally(() => setLoading(false))
+  }, [draftId, clientId])
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!draftId) {
+      onError('Save the draft first — click Next to Audience and come back.')
+      e.target.value = ''
+      return
+    }
+    if (items.length >= 3) {
+      onError('Maximum 3 attachments per campaign.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      onError('File is larger than 10 MB. Compress or pick a smaller file.')
+      e.target.value = ''
+      return
+    }
+    setUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await api.post<Attachment>(
+        `/client/${clientId}/messaging/campaigns/${draftId}/attachments`,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      setItems(prev => [...prev, data])
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })
+        ?.response?.data?.detail
+      const msg = typeof detail === 'string'
+        ? detail
+        : (detail as { message?: string })?.message
+      onError(msg || 'Upload failed.')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function onRemove(id: string) {
+    if (!draftId || !clientId) return
+    const ok = confirm('Remove this attachment?')
+    if (!ok) return
+    try {
+      await api.delete(`/client/${clientId}/messaging/campaigns/${draftId}/attachments/${id}`)
+      setItems(prev => prev.filter(a => a.id !== id))
+    } catch {
+      onError('Could not remove attachment.')
+    }
+  }
+
+  const atCap = items.length >= 3
+
+  return (
+    <div className="border-t border-slate-100 pt-4 space-y-3">
+      <div>
+        <span className="text-xs uppercase tracking-wider text-slate-500">Attachments</span>
+        <p className="text-xs text-slate-400 mt-1">
+          Up to 3 files — images (JPEG/PNG/WebP/GIF), video (MP4/WebM/MOV),
+          or PDF. Each file at most 10 MB.
+        </p>
+        <p className="text-xs text-amber-700 mt-1">
+          Recipients can view and save attachments on their device — do not
+          include confidential material.
+        </p>
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-slate-400">Loading…</p>
+      ) : items.length > 0 ? (
+        <ul className="space-y-2">
+          {items.map(a => (
+            <li key={a.id} className="flex items-center gap-3 border border-slate-200 rounded-lg px-3 py-2">
+              <span className="text-xl shrink-0" aria-hidden>
+                {a.kind === 'IMAGE' ? '🖼️' : a.kind === 'VIDEO' ? '🎞️' : '📄'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-slate-800 truncate">{a.original_filename}</p>
+                <p className="text-xs text-slate-400">
+                  {a.kind} · {Math.round(a.size_bytes / 1024)} KB
+                </p>
+              </div>
+              <button
+                type="button" onClick={() => onRemove(a.id)}
+                className="text-xs text-rose-600 hover:text-rose-800"
+              >Remove</button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {!atCap && (
+        <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="file" onChange={onPick}
+            accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,application/pdf"
+            disabled={uploading}
+            className="hidden"
+          />
+          <span className="px-3 py-1.5 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-slate-400">
+            {uploading ? 'Uploading…' : '+ Add attachment'}
+          </span>
+        </label>
+      )}
     </div>
   )
 }
@@ -756,6 +934,114 @@ function TestSendPanel({ draftId, clientId, onError }: {
         )}
       </div>
     </div>
+  )
+}
+
+function SendStep({ audienceCount, roleLabel, expiresAtYmd, setExpiresAtYmd, onSendNow, onScheduleSend, saving }: {
+  audienceCount: number
+  roleLabel: string
+  expiresAtYmd: string
+  setExpiresAtYmd: (v: string) => void
+  onSendNow: () => void
+  onScheduleSend: (localIso: string) => void | Promise<void>
+  saving: boolean
+}) {
+  const [mode, setMode] = useState<'now' | 'later'>('now')
+  // Default scheduled send: tomorrow 07:00 local — "morning after"
+  // is a common CA ask (compose in the evening, send at breakfast).
+  const [schedDate, setSchedDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1)
+    return d.toISOString().slice(0, 10)
+  })
+  const [schedTime, setSchedTime] = useState('07:00')
+
+  const localIso = `${schedDate}T${schedTime}:00`
+  const chosen = new Date(localIso)
+  const now = new Date()
+  const invalidLater = isNaN(chosen.getTime()) || chosen.getTime() <= now.getTime()
+
+  return (
+    <section className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+      <h2 className="text-lg font-semibold text-slate-900">Ready to send</h2>
+      <p className="text-sm text-slate-600">
+        {audienceCount} {roleLabel.toLowerCase()} will receive this campaign{mode === 'now' ? ' immediately.' : ' at the time you pick.'}
+      </p>
+
+      {/* Mode toggle */}
+      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+        <button
+          type="button"
+          onClick={() => setMode('now')}
+          className={`px-4 py-1.5 text-xs font-medium rounded ${mode === 'now' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}
+        >Send now</button>
+        <button
+          type="button"
+          onClick={() => setMode('later')}
+          className={`px-4 py-1.5 text-xs font-medium rounded ${mode === 'later' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}
+        >Send later</button>
+      </div>
+
+      {mode === 'later' && (
+        <div className="space-y-3 border-t border-slate-100 pt-4">
+          <p className="text-xs text-slate-500">
+            The campaign will stay in <strong>Scheduled</strong> state and go out
+            automatically at the chosen time. Audience is computed at send time, not
+            right now — new {roleLabel.toLowerCase()} who match your filters between now
+            and then will be included.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-sm">
+              <span className="text-xs uppercase tracking-wider text-slate-500">Date</span>
+              <input
+                type="date" value={schedDate}
+                min={(() => { const d = new Date(); return d.toISOString().slice(0, 10) })()}
+                onChange={e => setSchedDate(e.target.value)}
+                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="text-sm">
+              <span className="text-xs uppercase tracking-wider text-slate-500">Time (local)</span>
+              <input
+                type="time" value={schedTime}
+                onChange={e => setSchedTime(e.target.value)}
+                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+          <label className="block text-sm">
+            <span className="text-xs uppercase tracking-wider text-slate-500">Expires on</span>
+            <input
+              type="date" value={expiresAtYmd}
+              onChange={e => setExpiresAtYmd(e.target.value)}
+              min={schedDate}
+              className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+            <p className="text-xs text-slate-400 mt-1">Must be at least 1 day after the send time.</p>
+          </label>
+          {invalidLater && (
+            <p className="text-xs text-rose-600">Pick a date/time in the future.</p>
+          )}
+        </div>
+      )}
+
+      <div className="pt-2 text-center">
+        {mode === 'now' ? (
+          <button
+            type="button" onClick={onSendNow} disabled={saving}
+            className="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {saving ? 'Sending…' : 'Send now'}
+          </button>
+        ) : (
+          <button
+            type="button" onClick={() => onScheduleSend(localIso)} disabled={saving || invalidLater}
+            className="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving ? 'Scheduling…' : `Schedule for ${chosen.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`}
+          </button>
+        )}
+      </div>
+    </section>
   )
 }
 
