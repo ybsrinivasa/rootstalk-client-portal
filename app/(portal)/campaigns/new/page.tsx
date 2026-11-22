@@ -619,6 +619,12 @@ export default function NewCampaignPage() {
             <strong>Once sent, this campaign cannot be edited.</strong>{' '}
             Review carefully. Recipients cannot un-receive. Responses are final — they cannot be edited or withdrawn.
           </div>
+
+          <TestSendPanel
+            draftId={draftId}
+            clientId={clientId || ''}
+            onError={setError}
+          />
         </section>
       )}
 
@@ -664,6 +670,90 @@ export default function NewCampaignPage() {
             </button>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function TestSendPanel({ draftId, clientId, onError }: {
+  draftId: string | null
+  clientId: string
+  onError: (msg: string) => void
+}) {
+  const [phones, setPhones] = useState('')
+  const [sending, setSending] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+
+  async function handleSend() {
+    if (!draftId || !clientId) {
+      onError('Save the draft first (go Back and then Next).')
+      return
+    }
+    const arr = phones.split(',').map(p => p.trim()).filter(Boolean)
+    if (arr.length === 0) {
+      onError('Enter at least one phone number.')
+      return
+    }
+    if (arr.length > 5) {
+      onError('Test-send accepts at most 5 phone numbers.')
+      return
+    }
+    setSending(true); setResult(null)
+    try {
+      const { data } = await api.post<{ resolved_count: number; unresolved: string[] }>(
+        `/client/${clientId}/messaging/campaigns/${draftId}/test-send`,
+        { phones: arr },
+      )
+      let msg = `Test sent to ${data.resolved_count} recipient${data.resolved_count === 1 ? '' : 's'}.`
+      if (data.unresolved?.length) {
+        msg += ` Skipped (no matching account): ${data.unresolved.join(', ')}.`
+      }
+      setResult(msg)
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })
+        ?.response?.data?.detail
+      const code = (detail as { code?: string })?.code
+      const message = (detail as { message?: string })?.message
+      onError(
+        code === 'no_matching_phones'
+          ? 'None of those phones match a RootsTalk account.'
+          : message || 'Test send failed.'
+      )
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+          Test send
+        </p>
+        <p className="text-xs text-slate-500 mt-1">
+          Send a preview to your own phone (and up to 4 others) before the real send.
+          Test recipients see a <strong>TEST</strong> badge and are excluded from analytics.
+        </p>
+      </div>
+      <input
+        type="text"
+        value={phones}
+        onChange={e => setPhones(e.target.value)}
+        placeholder="9876543210, 9123456789"
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono bg-white"
+      />
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={sending || !phones.trim()}
+          className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-slate-700 hover:border-slate-400 disabled:opacity-50"
+        >
+          {sending ? 'Sending…' : 'Send test'}
+        </button>
+        {result && (
+          <span className="text-xs text-emerald-700">{result}</span>
+        )}
       </div>
     </div>
   )
