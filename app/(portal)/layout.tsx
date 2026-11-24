@@ -162,6 +162,9 @@ interface NavItem {
   /** 2026-11-22 — Hidden unless the Client has messaging_enabled=true
    *  (SA toggles from SA Portal Feature Access panel). */
   messagingFeature?: boolean
+  /** 2026-11-24 — Hidden unless the Client has touchpoints_enabled=true
+   *  (SA toggles from SA Portal Feature Access panel). */
+  touchpointsFeature?: boolean
   group: string
 }
 
@@ -217,6 +220,8 @@ const ALL_NAV: NavItem[] = [
   // roles invisible. Future entry for Touchpoints will share the group.
   { href: '/campaigns',          label: 'All Campaigns',     Icon: IconMegaphone,    group: 'CAMPAIGNS', messagingFeature: true },
   { href: '/campaigns/new',      label: 'New Campaign',      Icon: IconMegaphone,    group: 'CAMPAIGNS', messagingFeature: true },
+  { href: '/touchpoints',        label: 'All Touchpoints',   Icon: IconMegaphone,    group: 'CAMPAIGNS', touchpointsFeature: true },
+  { href: '/touchpoints/new',    label: 'New Touchpoint',    Icon: IconMegaphone,    group: 'CAMPAIGNS', touchpointsFeature: true },
   { href: '/seed',               label: 'Seed Varieties',    Icon: IconSeed,         group: 'DATA', seedOnly: true },
   { href: '/qr',                 label: 'QR Codes',          Icon: IconQR,           group: 'DATA', manufacturerOrSeedOnly: true },
   // 2026-07-24 — Training Sandbox V1. CA-only surface for starting/
@@ -259,7 +264,7 @@ const ROLE_NAV: Record<string, string[]> = {
   // CLIENT_RM also gets the Messaging Module per spec §2 (CA + RM
   // are the only full-access roles). Messaging nav entries are
   // further gated on the per-client messaging_enabled flag.
-  CLIENT_RM:        ['/dashboard', '/alerts', '/farmer-support', '/campaigns', '/campaigns/new'],
+  CLIENT_RM:        ['/dashboard', '/alerts', '/farmer-support', '/campaigns', '/campaigns/new', '/touchpoints', '/touchpoints/new'],
   // Legacy: pre Batch X migration, SDM was its own role. Kept here
   // for any straggler accounts; safe no-op now.
   SEED_DATA_MANAGER:['/dashboard', '/seed'],
@@ -296,6 +301,11 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
   // expired. Undefined on pre-upgrade cached CPClient — treated as
   // off until the branding refresh lands.
   const messagingOn = client?.messaging_enabled === true
+  // 2026-11-24 — Subscription Touchpoints add-on gate. Mirror of
+  // messaging — SA toggles per-client with access_until; backend
+  // returns false once expired. Undefined on pre-upgrade cached
+  // CPClient — treated as off until the branding refresh lands.
+  const touchpointsOn = client?.touchpoints_enabled === true
 
   // CA is exclusive (Batch K) — sees everything. CONTENT_MANAGER
   // (Batch Q, 2026-05-18) is the synthesised role for a CM who
@@ -310,6 +320,7 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
       if (item.soilNutrientModule && !soilNutrientOn) return false
       if (item.soilTestingLab && !soilTestingLabOn) return false
       if (item.messagingFeature && !messagingOn) return false
+      if (item.touchpointsFeature && !touchpointsOn) return false
       return true
     })
   }
@@ -336,6 +347,7 @@ function getNavForRoles(roles: string[], client: CPClient | null): NavItem[] {
     if (item.soilNutrientModule && !soilNutrientOn) return false
     if (item.soilTestingLab && !soilTestingLabOn) return false
     if (item.messagingFeature && !messagingOn) return false
+    if (item.touchpointsFeature && !touchpointsOn) return false
     if (item.caOnly) return false
     return true
   })
