@@ -52,9 +52,16 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!clientId) return
+    // Dashboard tiles are the UNION of advisory + pool + alerts + crops.
+    // Non-advisory roles (CLIENT_RM / FIELD_MANAGER / etc.) legitimately
+    // can't view /packages — the X-Tolerate-Forbidden header opts out
+    // of the api.ts /access-denied redirect so the local .catch()
+    // renders an empty tile instead. /alerts + /crops already silence
+    // failures the same way.
+    const tolerant = { headers: { 'X-Tolerate-Forbidden': '1' } }
     Promise.all([
-      api.get<Package[]>(`/client/${clientId}/packages`),
-      api.get<PoolBalance>(`/client/${clientId}/subscription-pool/balance`),
+      api.get<Package[]>(`/client/${clientId}/packages`, tolerant).catch(() => ({ data: [] as Package[] })),
+      api.get<PoolBalance>(`/client/${clientId}/subscription-pool/balance`, tolerant).catch(() => ({ data: { balance: 0 } as PoolBalance })),
       api.get<Alert[]>(`/client/${clientId}/alerts`).catch(() => ({ data: [] })),
       api.get<{ crop_cosh_id: string; crop_name_en?: string | null }[]>(`/client/${clientId}/crops`).catch(() => ({ data: [] })),
     ]).then(([pkgRes, poolRes, alertRes, cropRes]) => {

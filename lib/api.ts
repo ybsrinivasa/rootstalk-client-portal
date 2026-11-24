@@ -52,6 +52,11 @@ api.interceptors.response.use(
         && (code === 'advisory_view_forbidden' || code === 'cross_client_forbidden')
         // Don't loop if we're already on the access-denied page.
         && !window.location.pathname.startsWith('/access-denied')
+        // Opt-out: callers that render per-tile and can tolerate a 403
+        // (e.g. the dashboard's Recent Packages tile for non-advisory
+        // roles) set this header to prevent the whole-page hijack —
+        // their local .catch() renders an empty state instead.
+        && error.config?.headers?.['X-Tolerate-Forbidden'] !== '1'
       ) {
         const wanted = encodeURIComponent(window.location.pathname)
         const reason = encodeURIComponent(

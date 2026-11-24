@@ -356,5 +356,16 @@ export function landingRouteForUser(user: CPUser | null): string {
   if (roles.length === 1 && roles[0] === 'REPORT_USER') {
     return '/reports'
   }
+  // Non-advisory-viewing roles (CLIENT_RM, FIELD_MANAGER, PRODUCT_MANAGER)
+  // can't load /dashboard — its /packages call 403s under
+  // _assert_can_view_client_advisory (SE / CA / CM-EDIT only).
+  // Route them to their primary workspace instead. A user who ALSO
+  // has SE or CA keeps the /dashboard default.
+  const canViewAdvisory = roles.some(r => r === 'SUBJECT_EXPERT' || r === 'CA' || r === 'CONTENT_MANAGER')
+  if (!canViewAdvisory) {
+    if (roles.includes('CLIENT_RM')) return '/farmer-support'
+    if (roles.includes('FIELD_MANAGER')) return '/field-manager'
+    if (roles.includes('PRODUCT_MANAGER')) return '/qr'
+  }
   return '/dashboard'
 }
