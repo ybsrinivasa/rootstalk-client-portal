@@ -15,7 +15,7 @@
 // Draft auto-saves on each Next. Also supports ?draftId=X to resume
 // editing an existing DRAFT or PAUSED touchpoint.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import { extractErrorMessage } from '@/lib/errors'
@@ -74,6 +74,16 @@ function typeNeedsSurveyBuilder(t: ContentType): boolean {
 }
 
 export default function NewTouchpointPage() {
+  // useSearchParams() forces the page onto the client; wrap in
+  // Suspense to satisfy Next.js's CSR-bailout prerender check.
+  return (
+    <Suspense fallback={<div className="max-w-3xl mx-auto px-4 py-6 text-sm text-slate-500">Loading…</div>}>
+      <NewTouchpointInner />
+    </Suspense>
+  )
+}
+
+function NewTouchpointInner() {
   const router = useRouter()
   const search = useSearchParams()
   const resumeDraftId = search?.get('draftId') || null
