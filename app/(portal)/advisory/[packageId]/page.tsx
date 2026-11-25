@@ -53,6 +53,7 @@ interface Timeline {
   from_type: 'DBS' | 'DAS' | 'CALENDAR'
   from_value: number; to_value: number; display_order: number
   status?: 'ACTIVE' | 'INACTIVE'  // Batch 28 — Inactive timelines stay listed but exit farmer advisory
+  lineage_id?: string  // 2026-11-25 — stable identity across republishes; drives AOM content-versioning lock lookup
 }
 interface PracticeElement {
   element_type: string
@@ -1637,6 +1638,10 @@ export default function PackageDetailPage() {
                 {/* Practices */}
                 {expanded === tl.id && (
                   <div className="border-t border-slate-100 px-5 py-4 space-y-2">
+                    <LockImpactPanel
+                      clientId={clientId}
+                      lineageId={tl.lineage_id}
+                    />
                     {!practiceMap[tl.id] ? (
                       <p className="text-xs text-slate-400">Loading practices…</p>
                     ) : practiceMap[tl.id].length === 0 ? (
@@ -2752,6 +2757,127 @@ export default function PackageDetailPage() {
         practiceId={brandsPracticeId}
         onClose={() => setBrandsPracticeId(null)}
       />
+    </div>
+  )
+}
+
+
+// ── AOM content-versioning: lock-impact preview + force-push ────────
+//
+// 2026-11-25 — User's design policy on edit propagation:
+// - Regular edits respect locks (VIEWED + PURCHASE_ACK + PURCHASE_ORDER
+//   snapshots keep their committed content for the farmers who hold them).
+// - Force-push rewrites VIEWED snapshots only. PURCHASE_ACK + PURCHASE_
+//   ORDER are SACROSANCT (farmer's financial commitment is honoured).
+// - Rendered per-Timeline so the CA/CM can see impact AND act (force-
+//   push) without leaving the timeline they're working on.
+
+// Module-scoped error extractor — the parent component defines its own
+// extractErrorMessage inside its closure, which this module-level
+// function can't reach. Minimal duplicate; no plumbing cost.
+function _lipExtractErr(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  return (detail as { message?: string })?.message || fallback
+}
+
+function LockImpactPanel({
+  clientId, lineageId,
+}: {
+  clientId: string | undefined
+  lineageId: string | undefined
+}) {
+  const [preview, setPreview] = useState<{
+    unlocked_count: number
+    viewed_locked_count: number
+    committed_locked_count: number
+    committed_breakdown: { purchase_ack: number; purchase_order: number }
+  } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const [error, setError] = useState('')
+  const [lastPushResult, setLastPushResult] = useState<string | null>(null)
+
+  const loadPreview = async () => {
+    if (!clientId || !lineageId) return
+    setLoading(true); setError('')
+    try {
+      const { data } = await api.get(
+        `/client/${clientId}/timelines/lineage/${lineageId}/edit-preview`,
+      )
+      setPreview(data)
+    } catch (err) {
+      setError(_lipExtractErr(err, 'Could not load lock-impact preview.'))
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => { loadPreview() }, [clientId, lineageId])
+
+  const handleForcePush = async () => {
+    if (!clientId || !lineageId) return
+    const vm = preview?.viewed_locked_count ?? 0
+    const cm = preview?.committed_locked_count ?? 0
+    const ok = confirm(
+      `Force-push the current timeline content to ${vm} in-window farmer${vm === 1 ? '' : 's'}?\n\n` +
+      `${cm} farmer${cm === 1 ? '' : 's'} with "I've purchased this" committed versions will NOT be affected ` +
+      `(their offline-purchase commitment is honoured).\n\n` +
+      `This is for safety-critical corrections (recalled brand, dosage error). Continue?`
+    )
+    if (!ok) return
+    setPushing(true); setError('')
+    try {
+      const { data } = await api.post(
+        `/client/${clientId}/timelines/lineage/${lineageId}/force-push`,
+      )
+      setLastPushResult(
+        `Rewrote ${data.rewritten_count} in-window snapshot${data.rewritten_count === 1 ? '' : 's'}; ` +
+        `skipped ${data.skipped_committed_count} committed.`
+      )
+      await loadPreview()
+    } catch (err) {
+      setError(_lipExtractErr(err, 'Force-push failed.'))
+    } finally { setPushing(false) }
+  }
+
+  if (!lineageId) return null
+  if (loading && !preview) {
+    return <p className="text-xs text-slate-400">Loading lock impact…</p>
+  }
+  if (!preview) {
+    return error ? <p className="text-xs text-rose-600">{error}</p> : null
+  }
+  const total = preview.unlocked_count + preview.viewed_locked_count + preview.committed_locked_count
+  if (total === 0) return null  // no subs touch this timeline yet — hide the panel
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-2 text-xs">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="space-y-0.5">
+          <p className="font-semibold text-slate-700">Lock impact ({total} farmer{total === 1 ? '' : 's'})</p>
+          <p className="text-slate-500">
+            <span className="text-emerald-700 font-medium">{preview.unlocked_count}</span> will receive edits automatically ·{' '}
+            <span className="text-amber-700 font-medium">{preview.viewed_locked_count}</span> in-window (force-pushable) ·{' '}
+            <span className="text-slate-600 font-medium">{preview.committed_locked_count}</span> committed via &quot;I&apos;ve purchased this&quot; (sacrosanct)
+          </p>
+        </div>
+        {preview.viewed_locked_count > 0 && (
+          <button
+            type="button"
+            onClick={handleForcePush}
+            disabled={pushing}
+            className="text-xs px-3 py-1.5 border border-amber-300 rounded-lg text-amber-800 bg-white hover:bg-amber-50 disabled:opacity-50"
+            title="Rewrite the frozen snapshot content for in-window farmers. Use for safety-critical corrections only."
+          >
+            {pushing ? 'Pushing…' : 'Force-push to in-window'}
+          </button>
+        )}
+      </div>
+      {lastPushResult && (
+        <p className="text-emerald-700 mt-2">{lastPushResult}</p>
+      )}
+      {error && (
+        <p className="text-rose-600 mt-2">{error}</p>
+      )}
     </div>
   )
 }
