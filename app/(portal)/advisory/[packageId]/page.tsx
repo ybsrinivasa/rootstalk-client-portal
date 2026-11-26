@@ -70,6 +70,11 @@ interface Practice {
   l1_type: string | null; l2_type: string | null; display_order: number
   is_special_input: boolean; relation_id: string | null
   is_brand_locked?: boolean
+  // 2026-11-26 — single S3 image per brand-locked practice.
+  // Rendered inline below the practice card on farmer PWA so they
+  // recognise the product on the dealer's shelf. Only populated
+  // when is_brand_locked=true; auto-cleared when lock flips off.
+  brand_image_url?: string | null
   frequency_days?: number | null
   elements?: PracticeElement[]
 }
@@ -1700,6 +1705,17 @@ export default function PackageDetailPage() {
                             </div>
                             {isPExpanded && (
                               <div className="ml-2 pl-3 border-l-2 border-slate-100 py-2 space-y-1 mb-2">
+                                {p.is_brand_locked && (
+                                  <BrandImagePanel
+                                    clientId={clientId}
+                                    timelineId={tl.id}
+                                    practice={p}
+                                    onChanged={(updated) => setPracticeMap(m => ({
+                                      ...m,
+                                      [tl.id]: (m[tl.id] || []).map(x => x.id === updated.id ? { ...x, brand_image_url: updated.brand_image_url } : x),
+                                    }))}
+                                  />
+                                )}
                                 {hasElements ? p.elements!.map(el => (
                                   <div key={el.element_type} className="flex items-baseline gap-2 text-xs">
                                     <span className="text-slate-500 min-w-[140px] shrink-0">{el.label}:</span>
@@ -2878,6 +2894,131 @@ function LockImpactPanel({
       {error && (
         <p className="text-rose-600 mt-2">{error}</p>
       )}
+    </div>
+  )
+}
+
+
+// ── Brand-locked practice image (2026-11-26) ────────────────────────
+//
+// Rendered inside each brand-locked practice's expanded view in the
+// package detail page. Lets the CM/CA upload (or replace / remove)
+// a single S3 image per practice; the farmer PWA renders it inline
+// below the practice card so the farmer recognises the product on
+// the dealer's shelf.
+//
+// AOM content-versioning policy applies — see
+// project_aom_content_versioning_v1_shipped_2026_11_25 memory.
+// The image lives on the Practice row → snapshot carries it →
+// PURCHASE_ACK farmers keep their committed image; CM force-push
+// rewrites VIEWED snapshots.
+
+function BrandImagePanel({
+  clientId, timelineId, practice, onChanged,
+}: {
+  clientId: string | undefined
+  timelineId: string
+  practice: Practice
+  onChanged: (updated: Practice) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !clientId) return
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image too large. Max 5 MB.')
+      e.target.value = ''
+      return
+    }
+    setUploading(true); setError('')
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await api.put<Practice>(
+        `/client/${clientId}/timelines/${timelineId}/practices/${practice.id}/brand-image`,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      onChanged(data)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setError(msg || 'Upload failed.')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function onRemove() {
+    if (!clientId) return
+    const ok = confirm('Remove the brand image?')
+    if (!ok) return
+    setUploading(true); setError('')
+    try {
+      const { data } = await api.delete<Practice>(
+        `/client/${clientId}/timelines/${timelineId}/practices/${practice.id}/brand-image`,
+      )
+      onChanged(data)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : (detail as { message?: string })?.message
+      setError(msg || 'Could not remove image.')
+    } finally { setUploading(false) }
+  }
+
+  return (
+    <div className="mb-3 pb-3 border-b border-dashed border-slate-200">
+      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">
+        Brand image
+      </p>
+      {practice.brand_image_url ? (
+        <div className="flex items-start gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={practice.brand_image_url}
+            alt="Brand"
+            className="w-24 h-24 object-contain border border-slate-200 rounded-lg bg-slate-50"
+          />
+          <div className="flex-1 flex flex-col gap-2">
+            <p className="text-xs text-slate-500">
+              Shown below the practice card on the farmer&apos;s advisory.
+            </p>
+            <div className="flex gap-2">
+              <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="file" onChange={onPick}
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={uploading}
+                  className="hidden"
+                />
+                <span className="px-3 py-1 border border-slate-300 rounded-lg text-slate-700 hover:border-slate-400">
+                  {uploading ? 'Uploading…' : 'Replace'}
+                </span>
+              </label>
+              <button
+                type="button" onClick={onRemove} disabled={uploading}
+                className="text-xs px-3 py-1 border border-rose-200 rounded-lg text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+              >Remove</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="file" onChange={onPick}
+            accept="image/jpeg,image/png,image/webp"
+            disabled={uploading}
+            className="hidden"
+          />
+          <span className="px-3 py-1 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-slate-400">
+            {uploading ? 'Uploading…' : '+ Upload brand image (JPEG / PNG / WebP, ≤ 5 MB)'}
+          </span>
+        </label>
+      )}
+      {error && <p className="text-xs text-rose-600 mt-2">{error}</p>}
     </div>
   )
 }
