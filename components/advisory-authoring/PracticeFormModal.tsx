@@ -670,6 +670,21 @@ export function PracticeFormModal({
     // list cache not yet refreshed, timing), causing the warning
     // to silently skip. Dropping that condition makes the warning
     // reliable; the body copy still tells the full story.
+    // TEMP DIAG 2026-11-27 — print state values to the browser
+    // console so we can see why the un-lock warning isn't firing.
+    // Remove once we've nailed the mismatch.
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.log('[UNLOCK-DIAG]', {
+        mode,
+        has_existing: !!existingPractice,
+        existing_is_brand_locked: existingPractice?.is_brand_locked,
+        existing_brand_image_url: existingPractice?.brand_image_url,
+        form_is_brand_locked: practiceForm.is_brand_locked,
+        hasBrandElement,
+        finalBrandLocked,
+      })
+    }
     if (
       mode === 'edit' && existingPractice
       && existingPractice.is_brand_locked
