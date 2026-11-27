@@ -1042,37 +1042,48 @@ export function PracticeFormModal({
           (not window.confirm) because the native dialog can be
           auto-suppressed by Chrome after a few rapid fires, letting
           the destructive save go through with no warning. */}
-      {confirmUnlock && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
-          onClick={() => { if (!saving) { setConfirmUnlock(false); setPendingSaveBody(null) } }}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6"
-            onClick={e => e.stopPropagation()}>
-            <p className="font-bold text-slate-900">Remove the brand lock?</p>
-            <p className="text-sm text-slate-600 mt-2">
-              {existingPractice?.brand_image_url
-                ? 'The uploaded product image for this practice will also be removed. Farmers will then be able to buy any matching brand (not just this one).'
-                : 'Farmers will be able to buy any matching brand, not just this one. Any uploaded product image for this practice will also be removed.'}
-            </p>
-            <div className="flex gap-3 mt-5">
-              <button type="button" disabled={saving}
-                onClick={() => { setConfirmUnlock(false); setPendingSaveBody(null) }}
-                className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm disabled:opacity-50">
-                Keep lock
-              </button>
-              <button type="button" disabled={saving}
-                onClick={async () => {
-                  const b = pendingSaveBody
-                  setConfirmUnlock(false)
-                  if (b) await doSave(b)
-                  setPendingSaveBody(null)
-                }}
-                className="flex-1 bg-red-600 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50">
-                {saving ? 'Saving…' : 'Yes, unlock'}
-              </button>
+      {confirmUnlock && (() => {
+        // 2026-11-27 — "Keep lock" restores the checkbox state so the
+        // UI matches the user's intent ("I changed my mind, keep it
+        // locked"). Without this restore the checkbox stays unticked
+        // after dismiss and the next Save tries to unlock again.
+        const dismissKeepLocked = () => {
+          setPracticeForm(f => ({ ...f, is_brand_locked: true }))
+          setConfirmUnlock(false)
+          setPendingSaveBody(null)
+        }
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
+            onClick={() => { if (!saving) dismissKeepLocked() }}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6"
+              onClick={e => e.stopPropagation()}>
+              <p className="font-bold text-slate-900">Remove the brand lock?</p>
+              <p className="text-sm text-slate-600 mt-2">
+                {existingPractice?.brand_image_url
+                  ? 'The uploaded product image for this practice will also be removed. Farmers will then be able to buy any matching brand (not just this one).'
+                  : 'Farmers will be able to buy any matching brand, not just this one. Any uploaded product image for this practice will also be removed.'}
+              </p>
+              <div className="flex gap-3 mt-5">
+                <button type="button" disabled={saving}
+                  onClick={dismissKeepLocked}
+                  className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm disabled:opacity-50">
+                  Keep lock
+                </button>
+                <button type="button" disabled={saving}
+                  onClick={async () => {
+                    const b = pendingSaveBody
+                    setConfirmUnlock(false)
+                    if (b) await doSave(b)
+                    setPendingSaveBody(null)
+                  }}
+                  className="flex-1 bg-red-600 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50">
+                  {saving ? 'Saving…' : 'Yes, unlock'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
