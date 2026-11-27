@@ -96,6 +96,11 @@ export interface ExistingPractice {
   display_order: number
   is_special_input: boolean
   is_brand_locked?: boolean
+  // 2026-11-27 — Carried so handleSubmit can warn before a brand-
+  // lock un-toggle silently wipes the attached product image.
+  // Backend auto-clears this field when is_brand_locked flips off
+  // (see advisory/router.py update_practice); the warning is UI-only.
+  brand_image_url?: string | null
   elements?: PracticeElement[]
 }
 
@@ -645,13 +650,33 @@ export function PracticeFormModal({
     const hasBrandElement = elements.some(
       el => el.element_type === 'BRAND_NAME' && (el.cosh_ref || '').trim(),
     )
+    const finalBrandLocked = practiceForm.is_brand_locked && hasBrandElement
+
+    // 2026-11-27 — Warn before silently wiping the attached brand
+    // image. Backend auto-clears brand_image_url when is_brand_locked
+    // flips true → false (advisory/router.py update_practice); tell
+    // the SA/CM what's about to happen so they can cancel if they
+    // tapped the toggle by accident.
+    if (
+      mode === 'edit' && existingPractice
+      && existingPractice.is_brand_locked
+      && !finalBrandLocked
+      && existingPractice.brand_image_url
+    ) {
+      const ok = window.confirm(
+        'Removing the brand-lock will also remove the uploaded '
+        + 'product image for this practice. Continue?'
+      )
+      if (!ok) { setSaving(false); return }
+    }
+
     const body = {
       l0_type: practiceForm.l0_type,
       l1_type: practiceForm.l1_type || null,
       l2_type: practiceForm.l2_type || null,
       display_order: parseInt(practiceForm.display_order),
       is_special_input: practiceForm.is_special_input,
-      is_brand_locked: practiceForm.is_brand_locked && hasBrandElement,
+      is_brand_locked: finalBrandLocked,
       frequency_days,
       elements,
     }
