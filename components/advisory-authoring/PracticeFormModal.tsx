@@ -652,21 +652,37 @@ export function PracticeFormModal({
     )
     const finalBrandLocked = practiceForm.is_brand_locked && hasBrandElement
 
-    // 2026-11-27 — Warn before silently wiping the attached brand
-    // image. Backend auto-clears brand_image_url when is_brand_locked
-    // flips true → false (advisory/router.py update_practice); tell
-    // the SA/CM what's about to happen so they can cancel if they
-    // tapped the toggle by accident.
+    // 2026-11-27 — Warn before un-locking a brand. Fires whenever
+    // the lock flips true → false (regardless of whether we know
+    // there's an attached image), because un-locking has two
+    // consequences: (a) farmers can now buy any matching brand, not
+    // just the locked one — report "brand enforced" invariant is
+    // broken; (b) if an image was uploaded, the backend
+    // auto-clears brand_image_url when the lock flips off
+    // (advisory/router.py update_practice). The copy adapts: when
+    // we can see brand_image_url set, we spell out the image
+    // removal; otherwise we warn about the purchase freedom.
+    //
+    // Earlier (same day) this gate also required
+    // existingPractice.brand_image_url to be truthy — that was too
+    // narrow: brand_image_url can reach the modal as undefined for
+    // several benign reasons (page loaded before a backend fix,
+    // list cache not yet refreshed, timing), causing the warning
+    // to silently skip. Dropping that condition makes the warning
+    // reliable; the body copy still tells the full story.
     if (
       mode === 'edit' && existingPractice
       && existingPractice.is_brand_locked
       && !finalBrandLocked
-      && existingPractice.brand_image_url
     ) {
-      const ok = window.confirm(
-        'Removing the brand-lock will also remove the uploaded '
-        + 'product image for this practice. Continue?'
-      )
+      const msg = existingPractice.brand_image_url
+        ? 'Removing the brand-lock will also remove the uploaded '
+          + 'product image for this practice. Farmers will then be '
+          + 'able to buy any matching brand. Continue?'
+        : 'Removing the brand-lock will let farmers buy any matching '
+          + 'brand, not just this one. Any uploaded product image for '
+          + 'this practice will also be removed. Continue?'
+      const ok = window.confirm(msg)
       if (!ok) { setSaving(false); return }
     }
 
