@@ -272,6 +272,15 @@ export function PracticeFormModal({
   const [uploadingByField, setUploadingByField] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // 2026-11-27 — Custom in-app confirm for un-locking a brand.
+  // Previous attempt used native window.confirm which Chrome may
+  // silently suppress ("prevent this page from creating additional
+  // dialogs") → save goes through with no warning. Pattern mirrors
+  // the PWA hide-practice confirm (see PracticeAckFooter).
+  const [confirmUnlock, setConfirmUnlock] = useState(false)
+  const [pendingSaveBody, setPendingSaveBody] = useState<
+    Record<string, unknown> | null
+  >(null)
   // 2026-06-20 — Authoring-time volume-formula combination check.
   // Fires only after both APPLICATION_METHOD and DOSAGE_UNIT are
   // populated (per user direction); debounced so each keystroke
@@ -670,37 +679,6 @@ export function PracticeFormModal({
     // list cache not yet refreshed, timing), causing the warning
     // to silently skip. Dropping that condition makes the warning
     // reliable; the body copy still tells the full story.
-    // TEMP DIAG 2026-11-27 — print state values to the browser
-    // console so we can see why the un-lock warning isn't firing.
-    // Remove once we've nailed the mismatch.
-    if (typeof window !== 'undefined') {
-      // eslint-disable-next-line no-console
-      console.log('[UNLOCK-DIAG]', {
-        mode,
-        has_existing: !!existingPractice,
-        existing_is_brand_locked: existingPractice?.is_brand_locked,
-        existing_brand_image_url: existingPractice?.brand_image_url,
-        form_is_brand_locked: practiceForm.is_brand_locked,
-        hasBrandElement,
-        finalBrandLocked,
-      })
-    }
-    if (
-      mode === 'edit' && existingPractice
-      && existingPractice.is_brand_locked
-      && !finalBrandLocked
-    ) {
-      const msg = existingPractice.brand_image_url
-        ? 'Removing the brand-lock will also remove the uploaded '
-          + 'product image for this practice. Farmers will then be '
-          + 'able to buy any matching brand. Continue?'
-        : 'Removing the brand-lock will let farmers buy any matching '
-          + 'brand, not just this one. Any uploaded product image for '
-          + 'this practice will also be removed. Continue?'
-      const ok = window.confirm(msg)
-      if (!ok) { setSaving(false); return }
-    }
-
     const body = {
       l0_type: practiceForm.l0_type,
       l1_type: practiceForm.l1_type || null,
@@ -712,6 +690,32 @@ export function PracticeFormModal({
       elements,
     }
 
+    // 2026-11-27 — Un-lock-brand confirm. See confirmUnlock state.
+    // Uses a custom in-app modal (not window.confirm) because Chrome's
+    // "prevent this page from creating additional dialogs" can
+    // silently nuke native confirms after a few rapid fires, making
+    // the destructive save go through with no warning. The custom
+    // modal is unblockable and matches the PWA hide-practice
+    // confirm pattern. If we need to ask, stash the payload and
+    // open the modal — the modal's Continue button fires the save.
+    if (
+      mode === 'edit' && existingPractice
+      && existingPractice.is_brand_locked
+      && !finalBrandLocked
+    ) {
+      setPendingSaveBody(body)
+      setConfirmUnlock(true)
+      setSaving(false)
+      return
+    }
+
+    await doSave(body)
+  }
+
+  async function doSave(
+    body: Record<string, unknown>,
+  ) {
+    if (!saving) setSaving(true)
     try {
       if (mode === 'edit' && existingPractice) {
         await api.put(endpoints.update(timelineId, existingPractice.id), body)
@@ -1034,6 +1038,41 @@ export function PracticeFormModal({
           </div>
         </form>
       </div>
+      {/* 2026-11-27 — Un-lock-brand confirm modal. Custom overlay
+          (not window.confirm) because the native dialog can be
+          auto-suppressed by Chrome after a few rapid fires, letting
+          the destructive save go through with no warning. */}
+      {confirmUnlock && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
+          onClick={() => { if (!saving) { setConfirmUnlock(false); setPendingSaveBody(null) } }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6"
+            onClick={e => e.stopPropagation()}>
+            <p className="font-bold text-slate-900">Remove the brand lock?</p>
+            <p className="text-sm text-slate-600 mt-2">
+              {existingPractice?.brand_image_url
+                ? 'The uploaded product image for this practice will also be removed. Farmers will then be able to buy any matching brand (not just this one).'
+                : 'Farmers will be able to buy any matching brand, not just this one. Any uploaded product image for this practice will also be removed.'}
+            </p>
+            <div className="flex gap-3 mt-5">
+              <button type="button" disabled={saving}
+                onClick={() => { setConfirmUnlock(false); setPendingSaveBody(null) }}
+                className="flex-1 border border-slate-200 text-slate-700 font-medium py-2.5 rounded-xl text-sm disabled:opacity-50">
+                Keep lock
+              </button>
+              <button type="button" disabled={saving}
+                onClick={async () => {
+                  const b = pendingSaveBody
+                  setConfirmUnlock(false)
+                  if (b) await doSave(b)
+                  setPendingSaveBody(null)
+                }}
+                className="flex-1 bg-red-600 text-white font-semibold py-2.5 rounded-xl text-sm disabled:opacity-50">
+                {saving ? 'Saving…' : 'Yes, unlock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
