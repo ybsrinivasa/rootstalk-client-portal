@@ -233,16 +233,18 @@ export default function DashboardPage() {
           const isAttention = idx >= 4
           const borderLeftColor = isAttention ? '#D97706' : accent
           // Top-right icon tint matches the left-border accent so the
-          // tile reads as a single visual unit. Muted on purpose so the
-          // big number stays the focal point — icon is a sidekick, not
-          // a competitor.
-          const iconClass = isAttention ? 'text-amber-300' : 'text-stone-300'
+          // tile reads as a single visual unit. Slightly stronger than
+          // a watermark — big enough and dark enough to catch the eye
+          // but still clearly subordinate to the number.
+          // (2026-11-28 bump: was stone-300 / amber-300 @ 20px — too
+          // timid per user feedback; moved two shades darker + 24px.)
+          const iconClass = isAttention ? 'text-amber-500' : 'text-stone-500'
           return (
             <Link key={s.label} href={s.href}
               title={s.title}
               className="bg-white rounded-xl p-5 shadow-sm border border-stone-200 hover:shadow-md transition-shadow overflow-hidden relative"
               style={{ borderLeftWidth: 3, borderLeftColor }}>
-              <div className={`absolute top-4 right-4 w-5 h-5 ${iconClass}`} aria-hidden="true">
+              <div className={`absolute top-4 right-4 w-6 h-6 ${iconClass}`} aria-hidden="true">
                 {s.icon}
               </div>
               <p className={`font-bold text-stone-800 ${isUnlimitedPool && isString ? 'text-2xl' : 'text-3xl'}`}>{value}</p>
