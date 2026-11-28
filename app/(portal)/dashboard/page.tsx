@@ -13,7 +13,24 @@ interface PoolBalance {
   unlimited?: boolean
   enterprise_to_date?: string | null
 }
-interface Alert { id: string }
+// 2026-11-28 — Dashboard summary endpoint added on the same day.
+// Replaces the earlier pattern of calling /packages + a non-existent
+// /alerts and computing tile counts in the browser (which had a
+// nasty slice(0,6) bug — see git log for context).
+interface DashboardSummary {
+  packages: { total: number; active: number }
+  active_farmers: number
+  alerts: {
+    total: number
+    by_type: {
+      pending_start_dates: number
+      overdue_inputs: number
+      missed_inputs: number
+      overdue_expert_queries: number
+      no_active_subscription: number
+    }
+  }
+}
 
 const STATUS_COLOUR = {
   DRAFT: 'bg-amber-100 text-amber-700',
@@ -44,7 +61,7 @@ export default function DashboardPage() {
   const [balance, setBalance] = useState<number | null>(null)
   const [unlimited, setUnlimited] = useState(false)
   const [enterpriseToDate, setEnterpriseToDate] = useState<string | null>(null)
-  const [alertCount, setAlertCount] = useState<number | null>(null)
+  const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [loading, setLoading] = useState(true)
   // Crop friendly-name lookup so the Recent Packages row shows
   // "Tomato" instead of the raw Cosh UUID.
@@ -52,24 +69,32 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!clientId) return
-    // Dashboard tiles are the UNION of advisory + pool + alerts + crops.
-    // Non-advisory roles (CLIENT_RM / FIELD_MANAGER / etc.) legitimately
-    // can't view /packages — the X-Tolerate-Forbidden header opts out
-    // of the api.ts /access-denied redirect so the local .catch()
-    // renders an empty tile instead. /alerts + /crops already silence
-    // failures the same way.
+    // Dashboard tiles are the UNION of summary + pool + packages-list
+    // + crops. Non-advisory roles (CLIENT_RM / FIELD_MANAGER / etc.)
+    // legitimately can't view /packages — the X-Tolerate-Forbidden
+    // header opts out of the api.ts /access-denied redirect so the
+    // local .catch() renders an empty tile instead.
     const tolerant = { headers: { 'X-Tolerate-Forbidden': '1' } }
     Promise.all([
-      api.get<Package[]>(`/client/${clientId}/packages`, tolerant).catch(() => ({ data: [] as Package[] })),
+      // 2026-11-28 — Server-side summary. Replaces the earlier
+      // client-side slice(0,6).length miscount pattern.
+      api.get<DashboardSummary>(`/client/${clientId}/dashboard-summary`, tolerant).catch(() => null),
       api.get<PoolBalance>(`/client/${clientId}/subscription-pool/balance`, tolerant).catch(() => ({ data: { balance: 0 } as PoolBalance })),
-      api.get<Alert[]>(`/client/${clientId}/alerts`).catch(() => ({ data: [] })),
+      // Full packages list (for the Recent Packages table ONLY — the
+      // count tiles now read from summary, so the slice below is the
+      // only consumer).
+      api.get<Package[]>(`/client/${clientId}/packages`, tolerant).catch(() => ({ data: [] as Package[] })),
       api.get<{ crop_cosh_id: string; crop_name_en?: string | null }[]>(`/client/${clientId}/crops`).catch(() => ({ data: [] })),
-    ]).then(([pkgRes, poolRes, alertRes, cropRes]) => {
-      setPackages(pkgRes.data.slice(0, 6))
+    ]).then(([summaryRes, poolRes, pkgRes, cropRes]) => {
+      if (summaryRes && 'data' in summaryRes) setSummary(summaryRes.data)
       setBalance(poolRes.data.balance)
       setUnlimited(!!poolRes.data.unlimited)
       setEnterpriseToDate(poolRes.data.enterprise_to_date ?? null)
-      setAlertCount(Array.isArray(alertRes.data) ? alertRes.data.length : 0)
+      // Most-recent packages for the table. Backend returns ordered
+      // by created_at asc; we want the latest 6 → slice from the
+      // tail and reverse so newest is at top.
+      const latest = pkgRes.data.slice(-6).reverse()
+      setPackages(latest)
       const m: Record<string, string> = {}
       for (const c of cropRes.data) if (c.crop_name_en) m[c.crop_cosh_id] = c.crop_name_en
       setCropNameByCoshId(m)
@@ -84,11 +109,25 @@ export default function DashboardPage() {
   const poolHint: string | null = unlimited && enterpriseToDate
     ? `Closes ${new Date(enterpriseToDate).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}`
     : null
-  const stats: Array<{ label: string; value: React.ReactNode; href: string; hint?: string | null }> = [
-    { label: 'Total Packages',    value: packages.length,                                   href: '/advisory' },
-    { label: 'Active Packages',   value: packages.filter(p => p.status === 'ACTIVE').length, href: '/advisory' },
-    { label: 'Subscription Pool', value: poolValue,                                          href: '/subscription', hint: poolHint },
-    { label: 'Recent Alerts',     value: alertCount === null ? '…' : alertCount,             href: '/alerts' },
+  const alertHint = summary ? (() => {
+    const b = summary.alerts.by_type
+    const parts: string[] = []
+    if (b.pending_start_dates) parts.push(`${b.pending_start_dates} start-date pending`)
+    if (b.overdue_inputs)      parts.push(`${b.overdue_inputs} input due now`)
+    if (b.missed_inputs)       parts.push(`${b.missed_inputs} input missed`)
+    if (b.overdue_expert_queries) parts.push(`${b.overdue_expert_queries} query overdue`)
+    if (b.no_active_subscription) parts.push(`${b.no_active_subscription} to re-engage`)
+    return parts.join(' · ') || null
+  })() : null
+  const stats: Array<{ label: string; value: React.ReactNode; href: string; hint?: string | null; title?: string }> = [
+    { label: 'Total Packages',    value: summary ? summary.packages.total : '…',           href: '/advisory' },
+    { label: 'Active Packages',   value: summary ? summary.packages.active : '…',          href: '/advisory' },
+    { label: 'Active Farmers',    value: summary ? summary.active_farmers : '…',           href: '/farmer-support',
+      hint: 'Farmers with a current crop',
+      title: 'Distinct farmers with at least one ACTIVE subscription that has a crop_start_date set.' },
+    { label: 'Subscription Pool', value: poolValue,                                         href: '/subscription', hint: poolHint },
+    { label: 'Open Alerts',       value: summary ? summary.alerts.total : '…',             href: '/farmer-support', hint: alertHint,
+      title: 'Click to open Farmer Support for the drill-down.' },
   ]
 
   return (
@@ -112,20 +151,22 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stats — 5 tiles. Grid collapses to 2 cols on mobile, 3 on
+          tablet, 5 on desktop so each tile stays legible. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {stats.map(s => {
           const isUnlimitedPool = s.label === 'Subscription Pool' && unlimited
           const value = loading ? '…' : s.value
           const isString = typeof value === 'string'
           return (
             <Link key={s.label} href={s.href}
+              title={s.title}
               className="bg-white rounded-xl p-5 shadow-sm border border-stone-200 hover:shadow-md transition-shadow overflow-hidden relative"
               style={{ borderLeftWidth: 3, borderLeftColor: accent }}>
               <p className={`font-bold text-stone-800 ${isUnlimitedPool && isString ? 'text-2xl' : 'text-3xl'}`}>{value}</p>
               <p className="text-stone-500 text-xs mt-1">{s.label}</p>
               {s.hint && (
-                <p className="text-stone-400 text-xs mt-0.5">{s.hint}</p>
+                <p className="text-stone-400 text-xs mt-0.5 line-clamp-2">{s.hint}</p>
               )}
             </Link>
           )
