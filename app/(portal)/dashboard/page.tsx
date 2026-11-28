@@ -108,26 +108,31 @@ export default function DashboardPage() {
       : balance
   const poolHint: string | null = unlimited && enterpriseToDate
     ? `Closes ${new Date(enterpriseToDate).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })}`
-    : null
-  const alertHint = summary ? (() => {
-    const b = summary.alerts.by_type
-    const parts: string[] = []
-    if (b.pending_start_dates) parts.push(`${b.pending_start_dates} start-date pending`)
-    if (b.overdue_inputs)      parts.push(`${b.overdue_inputs} input due now`)
-    if (b.missed_inputs)       parts.push(`${b.missed_inputs} input missed`)
-    if (b.overdue_expert_queries) parts.push(`${b.overdue_expert_queries} query overdue`)
-    if (b.no_active_subscription) parts.push(`${b.no_active_subscription} to re-engage`)
-    return parts.join(' · ') || null
-  })() : null
+    : (unlimited ? null : 'Capacity left on your licence')
+  // 2026-11-28 — Two-row grid: top row is state-of-the-business
+  // (counts that describe your client right now), bottom row is
+  // what-needs-attention (alert counts, each click-through to the
+  // Farmer Support drill-down). Deliberately not adding every alert
+  // type — Missed Inputs accumulates over time and No-Active-
+  // Subscription is proactive outreach, both less "today" signal
+  // than the three picked here. Keeps dashboard-vs-Reports distinct.
   const stats: Array<{ label: string; value: React.ReactNode; href: string; hint?: string | null; title?: string }> = [
-    { label: 'Total Packages',    value: summary ? summary.packages.total : '…',           href: '/advisory' },
-    { label: 'Active Packages',   value: summary ? summary.packages.active : '…',          href: '/advisory' },
-    { label: 'Active Farmers',    value: summary ? summary.active_farmers : '…',           href: '/farmer-support',
+    { label: 'Total Packages',         value: summary ? summary.packages.total : '…',           href: '/advisory' },
+    { label: 'Active Packages',        value: summary ? summary.packages.active : '…',          href: '/advisory' },
+    { label: 'Active Farmers',         value: summary ? summary.active_farmers : '…',           href: '/farmer-support',
       hint: 'Farmers with a current crop',
       title: 'Distinct farmers with at least one ACTIVE subscription that has a crop_start_date set.' },
-    { label: 'Subscription Pool', value: poolValue,                                         href: '/subscription', hint: poolHint },
-    { label: 'Open Alerts',       value: summary ? summary.alerts.total : '…',             href: '/farmer-support', hint: alertHint,
-      title: 'Click to open Farmer Support for the drill-down.' },
+    { label: 'Subscriptions Available', value: poolValue,                                       href: '/subscription', hint: poolHint,
+      title: 'Capacity left on your licence — how many more farmers you can take on without buying more subscription units.' },
+    { label: 'Awaiting Start Date',    value: summary ? summary.alerts.by_type.pending_start_dates : '…', href: '/farmer-support?alert=AWAITING_START_DATE',
+      hint: 'Subscribed, crop not started yet',
+      title: 'Farmers who have an ACTIVE subscription but no crop_start_date on file. Usually need a nudge from the promoter.' },
+    { label: 'Overdue Inputs',         value: summary ? summary.alerts.by_type.overdue_inputs : '…',       href: '/farmer-support?alert=OVERDUE_INPUT',
+      hint: 'Due today, no order placed',
+      title: 'Farmers who have an INPUT practice due today for which no order has been placed yet.' },
+    { label: 'Open Expert Queries',    value: summary ? summary.alerts.by_type.overdue_expert_queries : '…', href: '/farmer-support?alert=OVERDUE_EXPERT_QUERY',
+      hint: 'Past the client SLA',
+      title: 'Farmer questions that have passed your client-configured response SLA without a reply.' },
   ]
 
   return (
@@ -151,18 +156,26 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Stats — 5 tiles. Grid collapses to 2 cols on mobile, 3 on
-          tablet, 5 on desktop so each tile stays legible. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        {stats.map(s => {
-          const isUnlimitedPool = s.label === 'Subscription Pool' && unlimited
+      {/* Stats — 7 tiles. Top 4 describe state-of-the-business,
+          bottom 3 are actionable alert counts. Grid collapses:
+          2 cols on mobile → 4 on sm → 4 on lg (natural row break
+          after tile 4). Tiles 5-7 get a muted left-border colour
+          so the "what needs attention" row reads distinct from the
+          "where you are" row above it. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {stats.map((s, idx) => {
+          const isUnlimitedPool = s.label === 'Subscriptions Available' && unlimited
           const value = loading ? '…' : s.value
           const isString = typeof value === 'string'
+          // Tiles 5-7 (the alert row) use an amber accent to signal
+          // "attention needed" vs the top row's neutral accent.
+          const isAttention = idx >= 4
+          const borderLeftColor = isAttention ? '#D97706' : accent
           return (
             <Link key={s.label} href={s.href}
               title={s.title}
               className="bg-white rounded-xl p-5 shadow-sm border border-stone-200 hover:shadow-md transition-shadow overflow-hidden relative"
-              style={{ borderLeftWidth: 3, borderLeftColor: accent }}>
+              style={{ borderLeftWidth: 3, borderLeftColor }}>
               <p className={`font-bold text-stone-800 ${isUnlimitedPool && isString ? 'text-2xl' : 'text-3xl'}`}>{value}</p>
               <p className="text-stone-500 text-xs mt-1">{s.label}</p>
               {s.hint && (
