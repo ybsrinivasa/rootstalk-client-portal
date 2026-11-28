@@ -116,23 +116,84 @@ export default function DashboardPage() {
   // type — Missed Inputs accumulates over time and No-Active-
   // Subscription is proactive outreach, both less "today" signal
   // than the three picked here. Keeps dashboard-vs-Reports distinct.
-  const stats: Array<{ label: string; value: React.ReactNode; href: string; hint?: string | null; title?: string }> = [
-    { label: 'Total Packages',         value: summary ? summary.packages.total : '…',           href: '/advisory' },
-    { label: 'Active Packages',        value: summary ? summary.packages.active : '…',          href: '/advisory' },
-    { label: 'Active Farmers',         value: summary ? summary.active_farmers : '…',           href: '/farmer-support',
+  //
+  // Icons are inline SVG (heroicons-style, stroke=1.5) — matches
+  // the hand-written SVG convention used elsewhere in the CP. No
+  // icon-library dependency. Each icon is a 20×20 element positioned
+  // absolutely in the tile's top-right corner.
+  const stats: Array<{ label: string; value: React.ReactNode; href: string; hint?: string | null; title?: string; icon: React.ReactNode }> = [
+    {
+      label: 'Total Packages', href: '/advisory',
+      value: summary ? summary.packages.total : '…',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-9-5.25-9 5.25 9 5.25 9-5.25z M2.25 7.5v9l9 5.25 9-5.25v-9 M11.25 12.75v9" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Active Packages', href: '/advisory',
+      value: summary ? summary.packages.active : '…',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75 M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Active Farmers', href: '/farmer-support',
+      value: summary ? summary.active_farmers : '…',
       hint: 'Farmers with a current crop',
-      title: 'Distinct farmers with at least one ACTIVE subscription that has a crop_start_date set.' },
-    { label: 'Subscriptions Available', value: poolValue,                                       href: '/subscription', hint: poolHint,
-      title: 'Capacity left on your licence — how many more farmers you can take on without buying more subscription units.' },
-    { label: 'Awaiting Start Date',    value: summary ? summary.alerts.by_type.pending_start_dates : '…', href: '/farmer-support?alert=AWAITING_START_DATE',
+      title: 'Distinct farmers with at least one ACTIVE subscription that has a crop_start_date set.',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Subscriptions Available', href: '/subscription',
+      value: poolValue, hint: poolHint,
+      title: 'Capacity left on your licence — how many more farmers you can take on without buying more subscription units.',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Awaiting Start Date', href: '/farmer-support?alert=AWAITING_START_DATE',
+      value: summary ? summary.alerts.by_type.pending_start_dates : '…',
       hint: 'Subscribed, crop not started yet',
-      title: 'Farmers who have an ACTIVE subscription but no crop_start_date on file. Usually need a nudge from the promoter.' },
-    { label: 'Overdue Inputs',         value: summary ? summary.alerts.by_type.overdue_inputs : '…',       href: '/farmer-support?alert=OVERDUE_INPUT',
+      title: 'Farmers who have an ACTIVE subscription but no crop_start_date on file. Usually need a nudge from the promoter.',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Overdue Inputs', href: '/farmer-support?alert=OVERDUE_INPUT',
+      value: summary ? summary.alerts.by_type.overdue_inputs : '…',
       hint: 'Due today, no order placed',
-      title: 'Farmers who have an INPUT practice due today for which no order has been placed yet.' },
-    { label: 'Open Expert Queries',    value: summary ? summary.alerts.by_type.overdue_expert_queries : '…', href: '/farmer-support?alert=OVERDUE_EXPERT_QUERY',
+      title: 'Farmers who have an INPUT practice due today for which no order has been placed yet.',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Open Expert Queries', href: '/farmer-support?alert=OVERDUE_EXPERT_QUERY',
+      value: summary ? summary.alerts.by_type.overdue_expert_queries : '…',
       hint: 'Past the client SLA',
-      title: 'Farmer questions that have passed your client-configured response SLA without a reply.' },
+      title: 'Farmer questions that have passed your client-configured response SLA without a reply.',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.068.157 2.148.279 3.238.364.466.037.893.281 1.153.671L12 21l2.652-3.978c.26-.39.687-.634 1.153-.67 1.09-.086 2.17-.208 3.238-.365 1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+        </svg>
+      ),
+    },
   ]
 
   return (
@@ -171,11 +232,19 @@ export default function DashboardPage() {
           // "attention needed" vs the top row's neutral accent.
           const isAttention = idx >= 4
           const borderLeftColor = isAttention ? '#D97706' : accent
+          // Top-right icon tint matches the left-border accent so the
+          // tile reads as a single visual unit. Muted on purpose so the
+          // big number stays the focal point — icon is a sidekick, not
+          // a competitor.
+          const iconClass = isAttention ? 'text-amber-300' : 'text-stone-300'
           return (
             <Link key={s.label} href={s.href}
               title={s.title}
               className="bg-white rounded-xl p-5 shadow-sm border border-stone-200 hover:shadow-md transition-shadow overflow-hidden relative"
               style={{ borderLeftWidth: 3, borderLeftColor }}>
+              <div className={`absolute top-4 right-4 w-5 h-5 ${iconClass}`} aria-hidden="true">
+                {s.icon}
+              </div>
               <p className={`font-bold text-stone-800 ${isUnlimitedPool && isString ? 'text-2xl' : 'text-3xl'}`}>{value}</p>
               <p className="text-stone-500 text-xs mt-1">{s.label}</p>
               {s.hint && (
