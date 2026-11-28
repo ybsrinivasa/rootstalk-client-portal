@@ -162,6 +162,13 @@ export default function FarmerSupportPage() {
 
   // Data
   const [farmers, setFarmers] = useState<FarmersPage>({ total: 0, page: 1, page_size: 25, rows: [] })
+  // 2026-11-28 — Capture the specific "role not allowed" 403 so the
+  // empty-state message tells the user WHY they can't see the list
+  // instead of the misleading "No farmers match these filters". The
+  // list endpoint is deliberately gated to SA/CA/CLIENT_RM/CM-EDIT
+  // (see _assert_ca_or_rm in clients/router.py); the alert tiles on
+  // this page use a looser gate and will still load.
+  const [restricted, setRestricted] = useState(false)
   const [loading, setLoading] = useState(true)
 
   // Bundle B — per-farmer expansion state + lazy-fetched sub list.
@@ -264,8 +271,16 @@ export default function FarmerSupportPage() {
         `/client/${clientId}/farmer-support/farmers?${params}`,
       )
       setFarmers(data)
-    } catch {
+      setRestricted(false)
+    } catch (err: unknown) {
       setFarmers({ total: 0, page: 1, page_size: pageSize, rows: [] })
+      // Detect the deliberate role-restriction 403 so the UI can
+      // show a helpful message instead of "No farmers match".
+      const e = err as { response?: { status?: number; data?: { detail?: { code?: string } } } }
+      const code = e?.response?.data?.detail?.code
+      setRestricted(
+        e?.response?.status === 403 && code === 'farmer_support_role_required',
+      )
     } finally { setLoading(false) }
   }, [
     clientId, search, stateFilter, districtFilter, cropFilter,
@@ -591,6 +606,16 @@ export default function FarmerSupportPage() {
       {/* List */}
       {loading ? (
         <p className="text-center py-12 text-slate-400">Loading…</p>
+      ) : restricted ? (
+        <div className="text-center py-16 px-6">
+          <p className="text-sm font-medium text-slate-700">
+            Farmer Support is restricted to Customer Admin and Relationship Manager roles.
+          </p>
+          <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto">
+            Ask your CA to assign the Relationship Manager role to your account at this client.
+            Alert counts above are visible to all portal users.
+          </p>
+        </div>
       ) : visibleRows.length === 0 ? (
         <p className="text-center py-16 text-sm text-slate-400">
           No farmers match these filters.
